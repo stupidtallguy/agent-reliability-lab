@@ -1,10 +1,11 @@
 # Architecture
 
-Status after Checkpoint 1: scenario contracts, synthetic PostgreSQL infrastructure,
-fixtures, lifecycle management and internal Python services are implemented. The
-diagram below describes the eventual system; FastAPI, MCP handlers, model adapters,
-graphs, evaluator and dashboard are still planned. See [database.md](database.md)
-and [ADR 0002](decisions/0002-postgresql-sandbox.md) for the implemented subsystem.
+Status after Checkpoint 2: scenario contracts, PostgreSQL infrastructure, fixtures,
+internal services and three stdio MCP servers are implemented, together with a
+trusted SDK client. The diagram below describes the eventual system; FastAPI,
+model adapters, graphs, evaluator and dashboard remain planned. See
+[database.md](database.md), [MCP integration](mcp-integration.md) and
+[ADR 0003](decisions/0003-bound-stdio-mcp.md) for implemented boundaries.
 
 ## Components and data flow
 
@@ -28,7 +29,7 @@ flowchart LR
 ```
 
 FastAPI will manage run requests, configuration and status, not bypass tool
-authorization. MCP servers will expose the eight narrow operations in
+authorization. MCP servers now expose the eight narrow operations in
 [tool-contracts.md](tool-contracts.md). PostgreSQL will contain synthetic domain
 records, task mutation audit records, and run metadata in separate schemas. Each
 run gets a fresh database namespace and immutable fixture snapshot. Start with
@@ -39,8 +40,8 @@ Docker/Compose now packages PostgreSQL 18.6 with a release/digest pin, loopback
 port and persistent volume. The development bridge uses `internal: false` for
 Windows host connectivity and permits container egress; stronger evaluation
 isolation requires a separate tested configuration. Python services use SQLAlchemy Core/Psycopg, Alembic
-per-schema migrations and registered per-run schemas. MCP servers and tool
-containers remain deferred under the revised checkpoint scope. No production
+per-schema migrations and registered per-run schemas. MCP servers run as local
+stdio processes, not network-facing tool containers. No production
 connectors are allowed.
 
 ## LangGraph workflow (planned)
@@ -95,9 +96,9 @@ Sensitive data is synthetic, but still minimize raw payload retention.
 
 Supported Python: CPython 3.11 and 3.12; primary development version 3.11. Python
 3.13+ is deliberately outside this checkpoint's support range. Minimal installation
-requires Pydantic 2, SQLAlchemy 2.0 Core, Alembic and Psycopg 3; optional `stack`
-dependencies lock FastAPI, LangGraph 1, official MCP SDK 2 and Streamlit. This
-verifies future stack compatibility without claiming those runtimes exist. Core
+requires Pydantic 2, SQLAlchemy 2.0 Core, Alembic, Psycopg 3, AnyIO and pinned
+official MCP SDK 2.3.0. Optional `stack` dependencies lock FastAPI, LangGraph 1 and
+Streamlit without claiming those future runtimes exist. Core
 provides safe queries without an ORM model/session layer. No vector database,
 multi-agent coordinator or extra orchestration framework is introduced.
 
@@ -106,7 +107,8 @@ Dependency decisions were reviewed on 2026-11-08 against official sources:
 - [LangGraph Graph API quickstart](https://docs.langchain.com/oss/python/langgraph/quickstart)
   supports explicit graph nodes and tools; only `langgraph` is added directly.
 - [MCP installation](https://py.sdk.modelcontextprotocol.io/get-started/installation/)
-  identifies v2 as stable. Use `MCPServer` and `Client` when implemented; consult
+  identifies v2 as stable. Checkpoint 2 uses public `Server` callbacks and `Client`
+  for explicit schema/error validation (ADR 0003); consult
   the [v2 migration guide](https://py.sdk.modelcontextprotocol.io/migration/),
   not v1 `FastMCP` examples or mandatory legacy session handshakes.
 - [Pydantic models](https://docs.pydantic.dev/latest/concepts/models/),
@@ -118,3 +120,19 @@ Dependency decisions were reviewed on 2026-11-08 against official sources:
 `uv.lock` records exact resolved artifacts and hashes; bounded declarations in
 `pyproject.toml` communicate supported major lines. CI uses uv 0.13.7 and
 `uv sync --locked --extra stack` so stale locks fail instead of silently changing.
+
+## Implemented MCP boundary
+
+Document/business/task factories share strict Pydantic adapters and stable result
+envelopes; all operations call existing services. Each process is bound to one
+trusted actor/tenant/run and a captured sandbox incarnation. A lifecycle lock spans
+incarnation verification and service execution. Services still enforce effective
+permissions. Write IDs are host allocated, signed in MCP metadata and mapped to
+existing receipt keys; no model-controlled identity or retry-key argument exists.
+Client caching is disabled and retries are explicit. Stdout is protocol only for
+servers; diagnostic stderr is developer-side and never a model observation.
+
+The local host is trusted; there is no production authentication, HTTP endpoint,
+complete attempt trace, durable agent execution ledger or live-reset protocol.
+Close server instances and retire operation IDs before reset. No Checkpoint 3
+agent graph or model API is implemented.

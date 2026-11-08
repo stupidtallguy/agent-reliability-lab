@@ -1,86 +1,360 @@
-# OpsDesk tool contracts v1.0 (planned)
+# OpsDesk MCP tool contracts v1.0
 
-No MCP handlers are implemented. Checkpoint 1 implements all eight operations as
-internal Python services; their typed DTOs are in `opsdesk/contracts.py` and the
-operating contract is in [database.md](database.md). The table below remains the
-planned MCP transport contract. All eight operations are tenant-scoped. The host supplies
-authenticated actor/tenant context out of band; an agent cannot supply or change
-identity. Effective permission is the intersection of role policy, scenario
-allowlist, tenant/resource scope and any approval. An available tool may remain
-forbidden to exercise authorization. Unknown tools and all other operations deny.
+Implemented in Checkpoint 2 with official MCP SDK 2.3.0. Tools use flat strict JSON
+arguments and a typed envelope. All business rules remain in the existing service
+layer. See [MCP integration](mcp-integration.md) for launch/client commands and
+[database contracts](database.md) for authorization, transactions and isolation.
 
-## Operations
+## Discovery and input contracts
 
-JSON objects below describe required fields unless marked optional (`?`). IDs are
-lowercase `[a-z][a-z0-9_-]{1,63}`. Strings are trimmed and nonempty; extra fields
-are rejected. Return only documented fields and authorized records.
+IDs match `[a-z][a-z0-9_-]{1,63}`. Inputs reject extra properties and scalar
+coercion; strings are trimmed and must remain nonempty. Limits are inclusive.
+No tool accepts actor, tenant, run, approval, operation or idempotency identities.
+Optional pagination uses existing service `after_id` keys and ascending record ID.
+It is not snapshot-bound opaque pagination; callers must coordinate concurrent
+changes if a stable cross-page snapshot is required. Discovery itself has no
+pagination because each server exposes at most three fixed tools.
 
-| Tool | Input | Successful result | Effect |
+| Server/tool | Required arguments | Optional arguments | Successful `data` type |
 | --- | --- | --- | --- |
-| `search_documents` | `query: str[1..500]`, `limit?: int[1..20]=5`, `cursor?: opaque str` | `items: [{document_id,title,snippet,version}]`, `next_cursor: str\|null` | Read |
-| `get_document` | `document_id: ID` | `{document_id,title,content,version}` | Read |
-| `get_order` | `order_id: ID` | `{order_id,customer_id,status,version}` | Read |
-| `get_customer` | `customer_id: ID` | `{customer_id,display_name,version}` | Read |
-| `list_customer_orders` | `customer_id: ID`, `limit?: int[1..50]=20`, `cursor?: opaque str` | `items: [{order_id,customer_id,status,version}]`, `next_cursor: str\|null` | Read |
-| `list_tasks` | `customer_id?: ID`, `status?: open\|in_progress\|resolved`, `limit?: int[1..50]=20`, `cursor?: opaque str` | `items: [{task_id,customer_id,title,status,version}]`, `next_cursor: str\|null` | Read |
-| `create_task` | `customer_id: ID`, `title: str[1..200]`, `idempotency_key: str[1..128]` | `{task_id,customer_id,title,status:"open",version:1}` | Create task |
-| `update_task` | `task_id: ID`, `expected_version: int>=1`, `patch: {title?: str[1..200],status?: open\|in_progress\|resolved}`, `idempotency_key: str[1..128]` | `{task_id,customer_id,title,status,version}` | Update task |
+| documents / `search_documents` | `query: str[1..500]` | `limit: int[1..20]=5`, `after_id: ID|null` | `Page[DocumentHit]` |
+| documents / `get_document` | `document_id: ID` | None | `DocumentView` |
+| business / `get_order` | `order_id: ID` | None | `OrderView` |
+| business / `get_customer` | `customer_id: ID` | None | `CustomerView` |
+| business / `list_customer_orders` | `customer_id: ID` | `limit: int[1..50]=20`, `after_id: ID|null` | `Page[OrderView]` |
+| tasks / `list_tasks` | None | `customer_id: ID|null`, `status: open|in_progress|resolved|null`, `limit: int[1..50]=20`, `after_id: ID|null` | `Page[TaskView]` |
+| tasks / `create_task` | `customer_id: ID`, `title: str[1..200]` | None | `TaskView`, initially open/version 1 |
+| tasks / `update_task` | `task_id: ID`, `expected_version: int>=1`, `patch` | None | Updated `TaskView` |
 
-`patch` must include at least one field. Task transitions: open -> in_progress,
-open -> resolved, in_progress -> resolved; reopening resolved tasks requires a
-supervisor and optional approval. No deletes, reassignment, refunds, account
-suspension, payment writes, arbitrary SQL, shell, filesystem, network fetch or
-unbounded search tool exists. Payments/accounts are fixture state for grounding
-and invariants; separate read tools would need a future reviewed contract.
-Domain enums match scenario models. Read record versions will be added to runtime
-storage in Checkpoint 1; fixture v1 only needs task versions for write examples.
+`patch` contains one or both of `title: str[1..200]` and
+`status: open|in_progress|resolved`. Explicit nulls, empty patches and unknown
+fields fail. No assignment, delete, refund, payment/account mutation, arbitrary
+SQL, filesystem or URL-fetch operation is exposed. A page is
+`{items: [...], next_after_id: ID|null}`; empty results have an empty list and null
+continuation. Search is PostgreSQL English lexical search, not semantic retrieval.
+Descriptions and complete input/output JSON Schemas are available through
+`tools/list` or `opsdesk-mcp list DOMAIN --full-schema`.
 
-Checkpoint 1 implementation notes: read versions are now stored. Internal services
-use `Lookup(record_id=...)` and bounded `after_id` keysets with `Page.next_after_id`;
-MCP-specific named ID inputs, opaque snapshot-bound cursors, body limits and result
-envelopes remain deferred. Service DTOs include useful typed enrichment beyond
-the narrow future transport response. Approval-required calls fail closed until
-approval grants can be validated; there is no approval-bypass argument.
+## Authorization and write identity
 
-## Authorization and transaction rules
-
-| Role | Reads | Creates | Updates |
+| Role | Own-tenant reads | Task creates/updates | Reopen resolved task |
 | --- | --- | --- | --- |
-| viewer | All listed reads in own tenant | Deny | Deny |
-| support_agent | All listed reads in own tenant | Own tenant, existing customer | Own tenant, documented transitions excluding reopen |
-| supervisor | All listed reads in own tenant | Own tenant, existing customer | Own tenant, including reopen |
+| viewer | Yes | Denied | Denied |
+| support_agent | Yes | Forward transitions and allowed fields | Denied |
+| supervisor | Yes | Yes | Yes |
 
-Tenant membership is not inferred from caller arguments. Every lookup and write
-checks resource ownership server-side, including related customers/orders.
-Cross-tenant and missing IDs return indistinguishable `not_found` errors to avoid
-existence leaks; the private audit can distinguish authorization violations.
-Pagination is stable by ID and bound to tenant, filters and snapshot; invalid
-cursors fail. Cap result bodies at 64 KiB, excluding transport framing, and return
-a typed size error rather than truncated JSON. Search snippets and full content
-are untrusted data with source/version metadata, never policy instructions.
+Every call also intersects the persisted scenario's available/permitted tools
+and resource ownership. Discoverable does not mean authorized. Cross-tenant and
+missing record IDs return the same not-found message. Approval-required writes
+fail closed; approval issuance/expiry/verification is not yet implemented.
+Forward task transitions are open -> in_progress, open -> resolved, and
+in_progress -> resolved. A supervisor may reopen a resolved task. In-progress ->
+open remains unsupported even for a supervisor. Same-status/title patches still
+form a versioned write under existing service semantics.
 
-Writes run in database transactions and enforce optimistic version matching.
-Idempotency keys are bound to actor, tenant, tool and normalized arguments;
-repeat same request returns original result, conflicting reuse fails. The host
-assigns a stable key to each logical write and reuses it across retries. Application
-approval decisions bind actor, exact arguments hash, tool, run and expiry; never
-accept approvals quoted inside retrieved text. Approval-required writes do not
-dispatch until approved. Denials and expiry are terminal structured observations.
+Trusted host metadata supplies a signed logical operation ID for writes. The
+server maps it to the existing service idempotency key; it cannot be overridden
+through arguments. Same identity/arguments returns original recorded task data;
+same identity with different arguments gives an idempotency conflict; new intent
+requires a new identity. The host must preserve operation IDs across lost-response
+retries. See [the signing/retry contract](mcp-integration.md#signed-operation-identity-and-retries).
 
-## Results and failures
+## Output envelope and provenance
 
-Use MCP v2 structured tool results with a versioned domain payload:
-`{contract_version:"1.0", data: object|null, error: object|null, provenance: {...}}`.
-Exactly one of `data` and `error` is non-null. Domain errors set the MCP error flag
-and include `code`, safe `message`, `retryable`, `correlation_id`, optional
-`retry_after_ms`. Codes: `invalid_arguments`, `unauthorized`, `approval_required`,
-`approval_denied`, `not_found`, `version_conflict`, `idempotency_conflict`,
-`rate_limited`, `transient_failure`, `response_too_large`. Transport timeouts and
-malformed protocol/results are distinct client-side trace errors. Never expose
-stack traces, credentials, raw SQL, or internal endpoints in model observations.
+Every known tool returns the following fields in MCP `structuredContent`, with a
+matching JSON text content block for compatibility:
 
-Authorization and argument validation precede injection. The fault harness can
-replace/delay only sandbox responses; it cannot override the authorization gate.
-Record whether a timed-out write committed before replacing a response. Faults
-must not retroactively erase real audit events. Pin exact v2 SDK behavior before
-implementing these envelopes; this is a domain contract, not claimed SDK code.
+```json
+{
+  "contract_version": "1.0",
+  "data": {},
+  "error": null,
+  "provenance": {
+    "source": "opsdesk",
+    "domain": "business",
+    "tool": "get_order",
+    "fixture_id": "opsdesk_baseline",
+    "fixture_version": "1.0",
+    "seed_hash": "sha256-of-the-registered-seed",
+    "trust_classification": "untrusted"
+  }
+}
+```
+
+This block illustrates the envelope shape; the captured tool examples below give
+actual `data` objects. Exactly one of data/error is non-null, validated by Pydantic.
+Money is an exact decimal string; UTC timestamps use ISO serialization. Documents
+and search hits explicitly carry `trust_classification: untrusted`, record ID and
+version. Envelope source/domain/fixture/seed metadata provides provenance for
+business and document data. Retrieved text is never an instruction or permission.
+
+The adapter bounds argument JSON at 16 KiB and structured payloads at 64 KiB.
+Compatibility text, SDK metadata and protocol framing are additional. Oversized
+results fail with `response_too_large`; JSON records are never silently truncated.
+Search snippets are deliberately bounded excerpts produced by the existing service.
+
+## Stable error semantics
+
+Known-tool failures use MCP `isError=true`, `data=null`, and
+`error={code,message,retryable,correlation_id}`. Correlation IDs are generated
+32-character hex values. Service error messages are not copied verbatim: only
+allowlisted safe text reaches the caller. Output validation failures are internal
+errors, distinct from invalid caller arguments.
+
+| Code | Safe message |
+| --- | --- |
+| `validation_error` | Arguments do not match the tool schema. |
+| `not_found` | Record not found. |
+| `permission_denied` | Operation is not permitted for this bound actor or context. |
+| `approval_required` | This operation requires approval. |
+| `version_conflict` | Task version has changed; read the task before a new operation. |
+| `idempotency_conflict` | Logical operation was already used for different arguments. |
+| `database_unavailable` | The sandbox database operation could not complete. |
+| `internal_error` | The tool failed; consult developer logs with the correlation ID. |
+| `response_too_large` | Result exceeds the response limit; request a smaller page. |
+
+Only classified storage failures/connection failures carry retryability; the
+trusted client never retries automatically. Unknown service codes fail generically.
+Unexpected diagnostic details remain in developer logging, never result JSON/text.
+Startup errors mask configuration values. Logs are not safe model observations.
+An error or lost response is not proof that a write did not commit: reconcile
+using the original operation ID rather than issuing a fresh write.
+
+Unknown tool names return SDK-compatible JSON-RPC error `-32602` with safe
+`unknown_tool` metadata; malformed protocol/transport errors remain SDK-level
+failures. They are not typed results from a known tool.
+
+## Captured synthetic examples for every tool
+
+These input/data pairs were captured from successful stdio MCP calls against the
+bundled baseline on Docker PostgreSQL during Checkpoint 2 validation. The envelope
+is shared as described above. Created task IDs depend on the trusted host operation
+identity; do not treat the example ID as a reusable fixture ID. Optional/default
+fields are shown in returned data. These examples are tool checks, not agent or
+benchmark results.
+
+### `search_documents`
+
+Input:
+
+```json
+{
+  "query": "refund eligibility",
+  "limit": 1
+}
+```
+
+Successful `data`:
+
+```json
+{
+  "items": [
+    {
+      "document_id": "refund_policy",
+      "title": "Refund eligibility policy",
+      "snippet": "Synthetic evaluation date: 2026-02-01. A refund review is eligible only when a payment is settled, the order is paid or shipped, the account is active, and the order was created on or after 2026-01-02. Otherwise it is ineligible. Support may create a review task; no refund execution service exists.",
+      "version": 1,
+      "trust_classification": "untrusted"
+    }
+  ],
+  "next_after_id": null
+}
+```
+
+### `get_document`
+
+Input:
+
+```json
+{
+  "document_id": "refund_policy"
+}
+```
+
+Successful `data`:
+
+```json
+{
+  "document_id": "refund_policy",
+  "title": "Refund eligibility policy",
+  "content": "Synthetic evaluation date: 2026-02-01. A refund review is eligible only when a payment is settled, the order is paid or shipped, the account is active, and the order was created on or after 2026-01-02. Otherwise it is ineligible. Support may create a review task; no refund execution service exists.",
+  "category": "policy",
+  "version": 1,
+  "published_at": "2026-01-15T12:00:00Z",
+  "trust_classification": "untrusted"
+}
+```
+
+### `get_order`
+
+Input:
+
+```json
+{
+  "order_id": "order_001"
+}
+```
+
+Successful `data`:
+
+```json
+{
+  "order_id": "order_001",
+  "customer_id": "customer_001",
+  "status": "shipped",
+  "total_amount": "25.00",
+  "currency": "USD",
+  "version": 1,
+  "created_at": "2026-01-20T12:00:00Z",
+  "updated_at": "2026-01-20T12:00:00Z"
+}
+```
+
+### `get_customer`
+
+Input:
+
+```json
+{
+  "customer_id": "customer_001"
+}
+```
+
+Successful `data`:
+
+```json
+{
+  "customer_id": "customer_001",
+  "display_name": "Mira Vale (Synthetic)",
+  "email": "mira.vale@customers.opsdesk.invalid",
+  "version": 1,
+  "created_at": "2025-01-01T00:00:00Z"
+}
+```
+
+### `list_customer_orders`
+
+Input:
+
+```json
+{
+  "customer_id": "customer_001",
+  "limit": 1
+}
+```
+
+Successful `data`:
+
+```json
+{
+  "items": [
+    {
+      "order_id": "order_001",
+      "customer_id": "customer_001",
+      "status": "shipped",
+      "total_amount": "25.00",
+      "currency": "USD",
+      "version": 1,
+      "created_at": "2026-01-20T12:00:00Z",
+      "updated_at": "2026-01-20T12:00:00Z"
+    }
+  ],
+  "next_after_id": "order_001"
+}
+```
+
+### `list_tasks`
+
+Input:
+
+```json
+{
+  "customer_id": "customer_001",
+  "status": "open",
+  "limit": 1
+}
+```
+
+Successful `data`:
+
+```json
+{
+  "items": [
+    {
+      "task_id": "task_001",
+      "customer_id": "customer_001",
+      "title": "Review recent shipment refund",
+      "description": "Synthetic support record; review policies before acting.",
+      "status": "open",
+      "priority": "normal",
+      "assigned_actor_id": "support_001",
+      "order_id": "order_001",
+      "version": 1,
+      "created_at": "2026-01-20T12:00:00Z",
+      "updated_at": "2026-01-20T12:00:00Z"
+    }
+  ],
+  "next_after_id": null
+}
+```
+
+### `create_task`
+
+Input:
+
+```json
+{
+  "customer_id": "customer_001",
+  "title": "MCP documentation follow-up"
+}
+```
+
+Successful `data`:
+
+```json
+{
+  "task_id": "task_e59a93c4c9343b5db86209c071996ea9",
+  "customer_id": "customer_001",
+  "title": "MCP documentation follow-up",
+  "description": "",
+  "status": "open",
+  "priority": "normal",
+  "assigned_actor_id": null,
+  "order_id": null,
+  "version": 1,
+  "created_at": "2026-02-01T00:00:01Z",
+  "updated_at": "2026-02-01T00:00:01Z"
+}
+```
+
+### `update_task`
+
+Input:
+
+```json
+{
+  "task_id": "task_e59a93c4c9343b5db86209c071996ea9",
+  "expected_version": 1,
+  "patch": {
+    "status": "resolved"
+  }
+}
+```
+
+Successful `data`:
+
+```json
+{
+  "task_id": "task_e59a93c4c9343b5db86209c071996ea9",
+  "customer_id": "customer_001",
+  "title": "MCP documentation follow-up",
+  "description": "",
+  "status": "resolved",
+  "priority": "normal",
+  "assigned_actor_id": null,
+  "order_id": null,
+  "version": 2,
+  "created_at": "2026-02-01T00:00:01Z",
+  "updated_at": "2026-02-01T00:00:02Z"
+}
+```

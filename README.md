@@ -3,10 +3,10 @@
 A reproducible lab for evaluating AI agent reliability, MCP tool use, failure
 recovery, and prompt-injection resilience in a synthetic enterprise environment.
 
-**Current status: Checkpoint 1 — PostgreSQL Sandbox, Synthetic Data and
-Deterministic State Management.** The repository provides isolated PostgreSQL
-sandboxes and internal Python services. It does not yet run an agent, serve MCP
-tools, compute evaluation results, or provide a dashboard.
+**Current status: Checkpoint 2 — MCP Tool Integration (version 0.3.0).** Three
+working stdio MCP servers expose eight typed tools over the isolated PostgreSQL
+sandbox. A trusted demonstration client runs without an LLM. The project does
+not yet run an AI agent, compute evaluation results or provide a dashboard.
 There are no benchmark results or performance/security claims.
 
 ## Motivation and research questions
@@ -61,6 +61,10 @@ defenses. This is a single-agent design with interchangeable provider adapters.
 - Eight typed internal services with tenant/role/scenario authorization, full-text
   document search, transactional audit, idempotency and optimistic task versions.
 - PostgreSQL Compose configuration and real-database integration tests/CI.
+- Three domain MCP servers with strict discovery schemas, structured output/error
+  envelopes, untrusted provenance and immutable host-side actor/run binding.
+- A reusable trusted SDK client with signed logical write identities and safe
+  idempotent retries, plus real in-memory and stdio protocol tests.
 
 The planned benchmark has approximately 100 scenarios: 20 normal, 20 multi-step,
 20 recovery, 20 injection, 10 authorization and 10 ambiguous/impossible. Targets
@@ -86,8 +90,8 @@ uv build
 ```
 
 `uv sync --locked` installs the scenario/database package and development tools.
-The `stack` extra installs the future FastAPI, LangGraph 1, official MCP SDK 2 and
-Streamlit dependencies for compatibility checks. CI validates that full extra on
+The core package includes official MCP SDK **2.3.0**. The `stack` extra installs
+future FastAPI, LangGraph 1 and Streamlit dependencies. CI validates that full extra on
 Python 3.11/3.12. Provider SDKs are deferred until adapters exist.
 `uv.lock` is committed; do not replace locked installation with an unconstrained
 `pip install`. Update dependencies intentionally with `uv lock --upgrade`, review
@@ -125,6 +129,37 @@ Integration tests require real PostgreSQL and fail if configuration/connectivity
 is absent; they never substitute SQLite or silently skip a failed database.
 `uv run --locked pytest` runs the complete suite with PostgreSQL configured.
 
+## MCP tools and demonstration
+
+The document server exposes `search_documents` and `get_document`; the read-only
+business server exposes `get_order`, `get_customer` and `list_customer_orders`;
+the task server exposes `list_tasks`, `create_task` and `update_task`.
+
+With the database environment configured above:
+
+```console
+uv run --locked opsdesk-mcp demo
+uv run --locked pytest tests/mcp -m 'not integration'
+uv run --locked pytest tests/mcp -m integration
+```
+
+The demo provisions a unique run, starts real stdio children, discovers schemas,
+reads an order, performs permitted task writes, repeats a write with the same
+logical identity, demonstrates viewer denial, verifies reset and cleans up its
+own sandbox. It refuses existing run names and preserves `docker_probe_01`.
+No LLM or external AI service is involved.
+
+Trusted launch configuration fixes actor, tenant and run; none are model tool
+arguments. Write identity is supplied by the trusted client in signed metadata.
+Services continue to enforce role/resource/scenario permissions. All returned
+content is data with explicit untrusted provenance. No unauthenticated HTTP
+endpoint or arbitrary SQL/filesystem tool is exposed. See [MCP workflow and
+limitations](docs/mcp-integration.md) and [all eight tool contracts/examples](docs/tool-contracts.md).
+
+The development Docker bridge uses `internal: false` to preserve verified Windows
+host access at `127.0.0.1:55432`; outbound container networking is allowed. Stricter
+evaluation isolation is a separate future configuration.
+
 ## Evaluation design
 
 The protocol defines Task Success Rate, Tool-Call Accuracy, Recovery Rate,
@@ -152,9 +187,12 @@ docs/
   roadmap.md
   checkpoint-0-validation.md
   checkpoint-1-validation.md
+  checkpoint-2-validation.md
   database.md
+  mcp-integration.md
   decisions/0001-initial-architecture.md
   decisions/0002-postgresql-sandbox.md
+  decisions/0003-bound-stdio-mcp.md
 src/agent_reliability_lab/
   __init__.py
   benchmarks/__init__.py
@@ -164,9 +202,13 @@ src/agent_reliability_lab/
     data/baseline.json
     migrations/env.py
     migrations/versions/0001_opsdesk.py
+  mcp/
+    cli.py, client.py, context.py, contracts.py, errors.py
+    servers/documents.py, business.py, tasks.py, shared.py
 tests/test_scenarios.py
 tests/test_opsdesk_unit.py
 tests/integration/              real PostgreSQL lifecycle/service tests
+tests/mcp/                      in-memory protocol and real PostgreSQL/stdio tests
 compose.yaml
 .env.example
 .gitattributes
@@ -181,16 +223,17 @@ Read [architecture](docs/architecture.md), [research design](docs/research-desig
 [evaluation protocol](docs/evaluation-protocol.md), [tool contracts](docs/tool-contracts.md),
 [threat model](docs/threat-model.md), [ADR 0001](docs/decisions/0001-initial-architecture.md)
 and the [database guide](docs/database.md), [ADR 0002](docs/decisions/0002-postgresql-sandbox.md)
-and [Checkpoint 1 validation](docs/checkpoint-1-validation.md) for assumptions and limits.
+and [Checkpoint 2 validation](docs/checkpoint-2-validation.md) for assumptions and limits.
 
 ## Roadmap
 
-Checkpoint 1 implements the sandbox and internal services only. Later checkpoints
-add MCP transport adapters, the LangGraph agent, evaluators and injection harness,
-a reviewed benchmark, and live experiments/Streamlit reporting. Each has a separate
-acceptance gate in [the roadmap](docs/roadmap.md). No Checkpoint 2 functionality is
-implemented. Schema isolation assumes trusted Python callers; approval-required
-writes fail closed until an approval subsystem exists.
+Checkpoint 2 implements MCP transport and the trusted client only. Later checkpoints
+add the LangGraph agent, deterministic evaluators, the Checkpoint 5 fault/injection
+harness, a reviewed benchmark, and live experiments/Streamlit reporting. Each has a
+separate acceptance gate in [the roadmap](docs/roadmap.md). Checkpoint 3 is not
+implemented. Local launch configuration assumes a trusted host/OS account;
+approval-required writes fail closed. Durable retry orchestration, live-reset
+coordination and authenticated HTTP remain planned.
 
 Keep fixtures, payloads and traces synthetic. Do not connect production systems,
 commit secrets or treat attack payload text as project instructions. This repository

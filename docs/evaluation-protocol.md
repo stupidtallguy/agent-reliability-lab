@@ -1,8 +1,8 @@
 # Evaluation protocol v1.0
 
-This is a specification for future evaluators. Checkpoint 1 adds scenario-aware
-PostgreSQL fixtures and canonical snapshots, but does not execute predicates, run
-agents, apply injections or compute metrics. The legacy benchmark projection
+This is a specification for future evaluators. Checkpoint 2 exposes scenario-aware
+PostgreSQL services through MCP, but does not execute predicates, run agents,
+apply injections or compute metrics. The legacy benchmark projection
 preserves the six existing scenario contracts; see [database.md](database.md).
 
 ## Run lifecycle and eligibility

@@ -2,7 +2,8 @@
 
 Implemented in Checkpoint 1: PostgreSQL infrastructure, migrations, deterministic
 fixtures, isolated state lifecycle and eight internal Python services. There is
-no MCP server, AI agent, evaluator, experiment runner or dashboard.
+no AI agent, evaluator, experiment runner or dashboard. Checkpoint 2 adds
+[stdio MCP adapters](mcp-integration.md) around these unchanged services.
 
 ## Prerequisites and configuration
 
@@ -20,7 +21,7 @@ PowerShell, from the repository root:
 
 ```powershell
 uv sync --locked --extra stack
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 # Edit .env: set POSTGRES_PASSWORD to a disposable local password.
 docker compose config --quiet
 docker compose up -d --wait postgres

@@ -1,9 +1,10 @@
 # Threat model
 
-Status after Checkpoint 1: tenant/role/scenario checks, fail-closed approval gates,
-write transactions/idempotency/audit and isolated synthetic state lifecycle are
-implemented in internal services. Model/transport defenses and proposal tracing
-are planned. See [database.md](database.md) for tested boundaries and limitations.
+Status after Checkpoint 2: service authorization/state controls and three bound
+stdio MCP servers are implemented. Strict protocol schemas, typed safe errors,
+signed host write identity and untrusted provenance are tested. Model defenses,
+production HTTP authentication, full proposal tracing and the Checkpoint 5 attack
+harness remain planned. See [MCP integration](mcp-integration.md) for exact limits.
 
 Assets include synthetic domain integrity, actor isolation, policy/approval
 integrity, execution budgets, trace completeness and benchmark validity. The
@@ -24,6 +25,9 @@ scope and remain limitations. There are no real customers or integrations.
 | Sandbox -> host/network | Attack tries shell/SQL execution or exfiltration | No such tools; isolated service network, fixed endpoints, no arbitrary URLs, no production egress |
 | Trace -> evaluator/report | Injected text forges events or misleads an LLM judge | Structured append-only events; server audit reconciliation; deterministic state predicates |
 | Development -> held-out benchmark | Tuning memorizes evaluation requests/attacks | Separate access, template-level split, frozen hashes and preregistration |
+| Host launch -> MCP server | Model impersonates another actor/tenant or selects a run | Immutable host config, startup DB actor validation, no identity tool arguments, incarnation/seed pin across lifecycle lock |
+| Host logical write -> MCP metadata | Caller invents retry keys or changes signed arguments | Host-allocated operation ID, HMAC over scoped identity and arguments, constant-time verification, service receipt conflict handling |
+| Developer logs -> model observation | Diagnostics expose SQL, DSN, stack or paths | Generic tool errors with correlation IDs; stderr is developer-only and must not become model context |
 
 System/developer policy is authored by the application. User requests establish
 task intent within that policy. Retrieved content and tool output are evidence,
@@ -63,6 +67,13 @@ dependency changes. A future network policy must be tested rather than inferred
 from a Compose diagram. A private repository is not a secrets store.
 
 Output framing and model instructions alone cannot guarantee injection resistance.
+Local stdio binding/HMAC assumes a trusted OS account and host; it is not OAuth
+or production authentication. Database owners can bypass service policy. Reset
+clears receipts, so hosts must close clients and retire operation IDs before reset.
+No HTTP transport is exposed; a future HTTP resource server must authenticate
+principal/audience/tenant/run access before creating trusted context. Application
+payload limits do not replace transport-level resource controls. Inert fixture
+text is returned as data and does not prove general prompt-injection resilience.
 Authorization can prevent effects while the model still attempts violations.
 Incomplete logs create unknown safety outcomes. A curated benchmark cannot cover
 all adversarial content; report that limitation with every evaluation.

@@ -49,10 +49,12 @@ jobs:
         run: |
           uv run --locked ruff check .
           uv run --locked ruff format --check .
-      - name: Unit tests (no PostgreSQL required)
+      - name: Unit and in-memory MCP protocol tests (no PostgreSQL required)
         run: uv run --locked pytest -m 'not integration'
-      - name: Real PostgreSQL integration tests
+      - name: PostgreSQL integration and MCP stdio tests
         run: uv run --locked pytest -m integration
+      - name: Isolated trusted MCP demonstration
+        run: uv run --locked opsdesk-mcp demo --run mcp_demo_ci
       - name: Validate Compose configuration without rendering credentials
         env:
           POSTGRES_PASSWORD: unused-config-validation-only
