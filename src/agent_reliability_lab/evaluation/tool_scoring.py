@@ -51,7 +51,10 @@ def assess_calls(scenario, oracle: OracleSpec, evidence: Evidence, reconciliatio
             status, reason = "unscorable", "missing_tool_contract_evidence"
             unauthorized = None
         elif not valid:
-            status, reason = "invalid", "unknown_tool_or_invalid_arguments"
+            status, reason = (
+                "invalid",
+                "unknown_tool_selection" if tool not in catalog else "invalid_tool_arguments",
+            )
         elif unauthorized:
             status, reason = "invalid", "operation_not_authorized"
         elif oracle.tool_rules is not None:

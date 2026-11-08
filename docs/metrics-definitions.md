@@ -1,4 +1,4 @@
-# Metric definitions — evaluator 1.0.0
+# Metric definitions — evaluator 1.0.1
 
 Only the latest selected scoring revision per trial contributes. Scripted and live
 trials cannot be pooled. All zero denominators produce null/N/A with a reason.

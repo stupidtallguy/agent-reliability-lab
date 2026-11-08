@@ -272,3 +272,17 @@ def test_trace_interval_does_not_attribute_unknown_commit_to_every_retry():
 def test_invalid_sidecars_fail_clearly(rule):
     with pytest.raises(ValidationError):
         OracleSpec.model_validate(rule)
+
+
+def test_unknown_tool_selection_is_distinct_from_invalid_arguments(normal_data):
+    from agent_reliability_lab.evaluation.tool_scoring import assess_calls
+
+    scenario, oracle, evidence, _ = normal_data
+    operation = evidence.operations[0]
+    operation["tool"] = "arbitrary_sql"
+    calls, _ = assess_calls(scenario, oracle, evidence, {"committed": {}})
+    assert calls[0].reason == "unknown_tool_selection"
+    operation["tool"] = "get_order"
+    operation["arguments"] = {"order_id": None}
+    calls, _ = assess_calls(scenario, oracle, evidence, {"committed": {}})
+    assert calls[0].reason == "invalid_tool_arguments"

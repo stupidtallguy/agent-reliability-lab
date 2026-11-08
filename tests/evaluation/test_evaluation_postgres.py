@@ -450,9 +450,9 @@ async def test_evaluator_version_and_source_provenance_recorded_on_rescore(eval_
     runner, run = eval_env
     eid = await run()
     trial, original = latest(runner, eid)[0]
-    monkeypatch.setattr(scoring, "EVALUATOR_VERSION", "1.0.1")
+    monkeypatch.setattr(scoring, "EVALUATOR_VERSION", "1.0.2")
     updated = runner.rescore(trial["trial_id"])
-    assert original.evaluator_version == "1.0.0" and updated.evaluator_version == "1.0.1"
+    assert original.evaluator_version == "1.0.1" and updated.evaluator_version == "1.0.2"
     assert len(updated.scoring_provenance["evaluator_source_hash"]) == 64
     with pytest.raises(ValueError, match="association"):
         runner.store.save_score(updated.model_copy(update={"execution_id": "0" * 32}))

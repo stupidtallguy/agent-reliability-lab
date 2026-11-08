@@ -1,6 +1,6 @@
 # Checkpoint 4 validation record
 
-Date: 2026-11-08. Target version: 0.5.0; evaluator: 1.0.0. These results validate
+Date: 2026-11-08. Target version: 0.5.0; evaluator: 1.0.1. These results validate
 infrastructure and objective predicates, not real LLM benchmark performance.
 Checkpoint 5 was not started.
 
@@ -28,9 +28,9 @@ only on `127.0.0.1:55432`, with the existing persistent volume. No volume deleti
 | Check | Command/procedure | Actual result |
 | --- | --- | --- |
 | Pre-change suite | `uv run --locked pytest --tb=short -q` | 264 passed, 80.24 seconds |
-| Full final suite | `uv run --locked pytest --tb=short -q` | 362 passed, zero failed/skipped |
-| New evaluation coverage | `tests/evaluation` | 98 tests: 73 pure unit and 25 real PostgreSQL cases |
-| Database-independent selection | `uv run --locked pytest -m 'not integration' --tb=short -q` | 214 passed; integration cases deliberately deselected |
+| Full final suite | `uv run --locked pytest --tb=short -q` | 363 passed, zero failed/skipped |
+| New evaluation coverage | `tests/evaluation` | 99 tests: 74 pure unit and 25 real PostgreSQL cases |
+| Database-independent selection | `uv run --locked pytest -m 'not integration' --tb=short -q` | 215 passed; integration cases deliberately deselected |
 | PostgreSQL coverage | Full suite includes all 148 integration cases | Passed; actual SDK/agent paths, no SQLite substitution or connection skips |
 | Dependencies | `uv lock --check`; `uv sync --locked --extra stack`; `uv pip check` | Resolved/compatible; no new runtime library required |
 | Lint/format | `uv run --locked ruff check .`; `uv run --locked ruff format --check .`; `git diff --check` | Passed |
@@ -54,6 +54,8 @@ the existing agent redactor. A test-helper keyword collision was corrected. The
 first combined collection also exposed a duplicate pytest module basename; the
 new PostgreSQL test file was renamed, preserving existing tests. All final gates
 above pass. Partial interrupted timings are excluded from complete task latency.
+Final taxonomy review split unknown-tool selection from invalid arguments; this
+is evaluator patch 1.0.1, with a regression control and preserved scoring lineage.
 
 ## Actual scripted demonstration
 
@@ -64,6 +66,9 @@ uv run --locked opsdesk-eval run --development --config benchmarks/evaluation/de
 ```
 
 Observed local experiment: `0ccd3ef287824b5c9d5caabc9c12be6c`.
+Its eight eligible frozen trials were also re-scored under evaluator 1.0.1 without
+agent execution or evidence mutation; the measured outcomes/rates below remained
+unchanged. Original scoring revisions and exports were preserved.
 
 | Category/scenario | Trials | Eligible | Objective successes |
 | --- | ---: | ---: | ---: |
