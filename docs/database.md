@@ -59,14 +59,23 @@ dedicated database and role. Approved database names are exactly `opsdesk_lab`,
 names are refused. Never aim these commands at a production database, even if
 renamed. Database naming/opt-in checks are accident prevention, not authentication.
 
-Compose publishes only `127.0.0.1:55432` by default, uses an internal network and a
-health check, and stores PostgreSQL 18 data in a Docker-managed named volume
+Compose publishes only `127.0.0.1:55432` by default, uses a development bridge
+network with `internal: false` and a health check, and stores PostgreSQL 18 data in a Docker-managed named volume
 mounted at `/var/lib/postgresql`. `docker compose down` preserves that volume.
 Do not delete the volume as part of per-run reset. `.env`, `.local/`, `pgdata/`,
 environments and build artifacts are ignored. The Compose database owner is a
 local administrative credential, never an agent credential. CI uses trust auth
 only for its disposable runner-local PostgreSQL service; local Compose requires
 a password and SCRAM host authentication.
+
+On the verified Windows Docker Engine configuration, `internal: true` prevented
+the database port from being published to the host. Local development therefore
+preserves `internal: false`: the container can make outbound network connections,
+while inbound PostgreSQL access remains bound to loopback. This is not an egress
+isolation boundary. Later security-evaluation environments may use stricter
+network isolation with an explicitly tested host-access path. Never remove the
+data volume to diagnose networking, and preserve existing developer sandboxes
+such as `docker_probe_01`.
 
 ## Tables and relationships
 

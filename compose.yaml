@@ -22,6 +22,6 @@ services:
     mem_limit: 512m
 networks:
   sandbox:
-    internal: true
+    internal: false
 volumes:
   opsdesk_postgres:

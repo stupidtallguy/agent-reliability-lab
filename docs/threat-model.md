@@ -50,7 +50,9 @@ host-side and are never inserted into agent messages or tool environments.
 
 ## Operational safeguards and residual risk
 
-Compose binds PostgreSQL to loopback and an internal network; Python uses registered
+Compose binds PostgreSQL to loopback on a development bridge with `internal: false`;
+container outbound networking is allowed. Stricter evaluation network isolation is
+planned separately and must preserve a tested access path. Python uses registered
 per-run schemas, ownership checks, restrictive cleanup and verified reset. The
 database has statement/lock timeouts and Compose has a memory limit. There are no
 production integrations. Schema isolation assumes cooperating trusted Python

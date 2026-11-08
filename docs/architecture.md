@@ -36,7 +36,9 @@ stdlib JSON artifacts for traces; add storage only when required. Streamlit will
 read completed experiment artifacts, not hold provider credentials or mutate runs.
 
 Docker/Compose now packages PostgreSQL 18.6 with a release/digest pin, loopback
-port and persistent volume. Python services use SQLAlchemy Core/Psycopg, Alembic
+port and persistent volume. The development bridge uses `internal: false` for
+Windows host connectivity and permits container egress; stronger evaluation
+isolation requires a separate tested configuration. Python services use SQLAlchemy Core/Psycopg, Alembic
 per-schema migrations and registered per-run schemas. MCP servers and tool
 containers remain deferred under the revised checkpoint scope. No production
 connectors are allowed.
