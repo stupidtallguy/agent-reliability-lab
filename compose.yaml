@@ -1,0 +1,27 @@
+name: opsdesk-lab
+services:
+  postgres:
+    image: postgres:18.6-bookworm@sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-opsdesk_lab}
+      POSTGRES_USER: ${POSTGRES_USER:-opsdesk_lab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a disposable local password in .env}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - opsdesk_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks: [sandbox]
+    shm_size: 128mb
+    mem_limit: 512m
+networks:
+  sandbox:
+    internal: true
+volumes:
+  opsdesk_postgres:

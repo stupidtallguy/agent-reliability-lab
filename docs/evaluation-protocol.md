@@ -1,7 +1,9 @@
 # Evaluation protocol v1.0
 
-This is a specification for future evaluators. Checkpoint 0 validates scenario
-contracts only; it does not execute predicates, run scenarios, or compute metrics.
+This is a specification for future evaluators. Checkpoint 1 adds scenario-aware
+PostgreSQL fixtures and canonical snapshots, but does not execute predicates, run
+agents, apply injections or compute metrics. The legacy benchmark projection
+preserves the six existing scenario contracts; see [database.md](database.md).
 
 ## Run lifecycle and eligibility
 

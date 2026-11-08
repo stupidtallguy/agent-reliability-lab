@@ -4,19 +4,26 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-reliability-lab"
-version = "0.1.0"
+version = "0.2.0"
 description = "A reproducible lab for evaluating AI agent reliability, MCP tool use, failure recovery, and prompt-injection resilience."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
-dependencies = ["pydantic>=2.14.3,<3"]
+dependencies = [
+  "pydantic>=2.14.3,<3",
+  "sqlalchemy>=2.0.57,<2.1",
+  "alembic>=1.20.1,<2",
+  "psycopg[binary]>=3.3.8,<4",
+]
+
+[project.scripts]
+opsdesk = "agent_reliability_lab.opsdesk.cli:main"
 
 [project.optional-dependencies]
-# Locked now to validate the future stack; no runtime services in Checkpoint 0.
+# Future agent/API/dashboard dependencies; database services are core dependencies.
 stack = [
   "fastapi>=0.162.2,<0.163",
   "langgraph>=1.2.20,<2",
   "mcp>=2.3.0,<3",
-  "psycopg[binary]>=3.3.8,<4",
   "streamlit>=1.67.0,<2",
 ]
 
@@ -29,6 +36,7 @@ packages = ["src/agent_reliability_lab"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config"
+markers = ["integration: requires a real PostgreSQL database and explicit sandbox opt-in"]
 
 [tool.ruff]
 target-version = "py311"

@@ -1,6 +1,9 @@
 # Threat model
 
-Status: planned controls, not a claim of implemented runtime security.
+Status after Checkpoint 1: tenant/role/scenario checks, fail-closed approval gates,
+write transactions/idempotency/audit and isolated synthetic state lifecycle are
+implemented in internal services. Model/transport defenses and proposal tracing
+are planned. See [database.md](database.md) for tested boundaries and limitations.
 
 Assets include synthetic domain integrity, actor isolation, policy/approval
 integrity, execution budgets, trace completeness and benchmark validity. The
@@ -47,9 +50,12 @@ host-side and are never inserted into agent messages or tool environments.
 
 ## Operational safeguards and residual risk
 
-Checkpoint 1 must bind local services to loopback, isolate per-run databases,
-disable production integrations, set resource/time limits and verify reset
-behavior. Only the model adapter may use explicitly configured provider egress;
+Compose binds PostgreSQL to loopback and an internal network; Python uses registered
+per-run schemas, ownership checks, restrictive cleanup and verified reset. The
+database has statement/lock timeouts and Compose has a memory limit. There are no
+production integrations. Schema isolation assumes cooperating trusted Python
+callers; database owners can bypass it. Services are not an authentication layer.
+Only the future model adapter may use explicitly configured provider egress;
 synthetic tool containers should have no Internet route. Pin images and review
 dependency changes. A future network policy must be tested rather than inferred
 from a Compose diagram. A private repository is not a secrets store.

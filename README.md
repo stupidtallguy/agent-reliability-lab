@@ -3,9 +3,10 @@
 A reproducible lab for evaluating AI agent reliability, MCP tool use, failure
 recovery, and prompt-injection resilience in a synthetic enterprise environment.
 
-**Current status: Checkpoint 0 — Research Design, Architecture, and Repository
-Foundation.** This repository validates benchmark specifications. It does not yet
-run an agent, serve MCP tools, compute evaluation results, or provide a dashboard.
+**Current status: Checkpoint 1 — PostgreSQL Sandbox, Synthetic Data and
+Deterministic State Management.** The repository provides isolated PostgreSQL
+sandboxes and internal Python services. It does not yet run an agent, serve MCP
+tools, compute evaluation results, or provide a dashboard.
 There are no benchmark results or performance/security claims.
 
 ## Motivation and research questions
@@ -45,7 +46,7 @@ agent tool is planned. Baseline and guarded agents share essential permissions,
 write safeguards and budgets; guarded behavior adds bounded recovery and data
 defenses. This is a single-agent design with interchangeable provider adapters.
 
-## Implemented in Checkpoint 0
+## Implemented foundation
 
 - A typed, installable `src/` Python package and strict Pydantic scenario models.
 - Deterministic inline fixture contracts, actor roles, tool allowlists and approvals.
@@ -54,6 +55,12 @@ defenses. This is a single-agent design with interchangeable provider adapters.
 - Six synthetic development scenario specifications, one per planned category.
 - Schema unit tests, Ruff configuration, uv dependency locking and GitHub Actions CI.
 - Architecture, tool contracts, threat model, research protocol and decision record.
+- PostgreSQL schema and Alembic migrations using SQLAlchemy 2.0 Core/Psycopg 3.
+- A deterministic baseline dataset and exact loaders for all six existing scenarios.
+- Registered per-run schemas with guarded cleanup, reset and canonical snapshots.
+- Eight typed internal services with tenant/role/scenario authorization, full-text
+  document search, transactional audit, idempotency and optimistic task versions.
+- PostgreSQL Compose configuration and real-database integration tests/CI.
 
 The planned benchmark has approximately 100 scenarios: 20 normal, 20 multi-step,
 20 recovery, 20 injection, 10 authorization and 10 ambiguous/impossible. Targets
@@ -64,24 +71,24 @@ not evaluation-ready tasks until runtime oracles are implemented and reviewed.
 ## Setup and validation
 
 Supported: **CPython 3.11 and 3.12**; primary version **3.11**. Python 3.13+ is not
-supported in this checkpoint. Use **uv 0.13.7**. No Docker daemon, database or model
-credentials are required for Checkpoint 0. Run from the repository root:
+supported in this checkpoint. Use **uv 0.13.7**. Unit tests need no database, Docker
+or model credentials. Run from the repository root:
 
 ```console
 python -m pip install uv==0.13.7
 uv sync --locked --extra stack
 uv lock --check
 uv run --locked python -c "import agent_reliability_lab; print(agent_reliability_lab.__version__)"
-uv run --locked pytest
+uv run --locked pytest -m 'not integration'
 uv run --locked ruff check .
 uv run --locked ruff format --check .
 uv build
 ```
 
-`uv sync --locked` alone installs the minimal schema package and development tools.
-The `stack` extra installs and locks the future FastAPI, LangGraph 1, official MCP
-SDK 2, Psycopg 3 and Streamlit dependencies for compatibility checks. CI validates
-that full extra on Python 3.11/3.12. Provider SDKs are deferred until adapters exist.
+`uv sync --locked` installs the scenario/database package and development tools.
+The `stack` extra installs the future FastAPI, LangGraph 1, official MCP SDK 2 and
+Streamlit dependencies for compatibility checks. CI validates that full extra on
+Python 3.11/3.12. Provider SDKs are deferred until adapters exist.
 `uv.lock` is committed; do not replace locked installation with an unconstrained
 `pip install`. Update dependencies intentionally with `uv lock --upgrade`, review
 the diff, and rerun checks before committing.
@@ -99,8 +106,24 @@ print(scenario.scenario_id)
 # Optional: Scenario.model_json_schema() exports the machine-readable JSON Schema.
 ```
 
-`.env.example` reserves future sandbox settings and contains no credentials.
-Copying it is optional for this checkpoint; no implemented code reads it.
+For database work, copy `.env.example` to `.env`, set a disposable local password,
+and start `docker compose up -d --wait postgres`. Compose reads `.env`; the Python
+CLI reads `OPSDESK_DATABASE_URL` and `OPSDESK_ALLOW_SANDBOX=1` from the shell.
+See the [Windows/Linux database guide](docs/database.md) for exact configuration,
+migration, seed, inspect, reset, cleanup and shutdown commands. With that URL set:
+
+```console
+uv run --locked opsdesk provision --run demo_01 --baseline
+uv run --locked opsdesk verify --run demo_01
+uv run --locked opsdesk inspect --run demo_01
+uv run --locked opsdesk reset --run demo_01
+uv run --locked opsdesk cleanup --run demo_01
+uv run --locked pytest -m integration
+```
+
+Integration tests require real PostgreSQL and fail if configuration/connectivity
+is absent; they never substitute SQLite or silently skip a failed database.
+`uv run --locked pytest` runs the complete suite with PostgreSQL configured.
 
 ## Evaluation design
 
@@ -128,12 +151,23 @@ docs/
   threat-model.md
   roadmap.md
   checkpoint-0-validation.md
+  checkpoint-1-validation.md
+  database.md
   decisions/0001-initial-architecture.md
+  decisions/0002-postgresql-sandbox.md
 src/agent_reliability_lab/
   __init__.py
   benchmarks/__init__.py
   benchmarks/scenario.py
+  opsdesk/
+    cli.py, contracts.py, database.py, fixtures.py, services.py, tables.py
+    data/baseline.json
+    migrations/env.py
+    migrations/versions/0001_opsdesk.py
 tests/test_scenarios.py
+tests/test_opsdesk_unit.py
+tests/integration/              real PostgreSQL lifecycle/service tests
+compose.yaml
 .env.example
 .gitattributes
 .gitignore
@@ -146,15 +180,17 @@ README.md
 Read [architecture](docs/architecture.md), [research design](docs/research-design.md),
 [evaluation protocol](docs/evaluation-protocol.md), [tool contracts](docs/tool-contracts.md),
 [threat model](docs/threat-model.md), [ADR 0001](docs/decisions/0001-initial-architecture.md)
-and [validation record](docs/checkpoint-0-validation.md) for assumptions and limits.
+and the [database guide](docs/database.md), [ADR 0002](docs/decisions/0002-postgresql-sandbox.md)
+and [Checkpoint 1 validation](docs/checkpoint-1-validation.md) for assumptions and limits.
 
 ## Roadmap
 
-Checkpoint 1 will implement isolated OpsDesk fixtures and authenticated MCP tools
-with Docker/Compose. Later checkpoints add the LangGraph agent, evaluators and
-injection harness, a reviewed benchmark, and live experiments/Streamlit reporting.
-Each has a separate acceptance gate in [the roadmap](docs/roadmap.md). No later
-checkpoint is included in this foundation.
+Checkpoint 1 implements the sandbox and internal services only. Later checkpoints
+add MCP transport adapters, the LangGraph agent, evaluators and injection harness,
+a reviewed benchmark, and live experiments/Streamlit reporting. Each has a separate
+acceptance gate in [the roadmap](docs/roadmap.md). No Checkpoint 2 functionality is
+implemented. Schema isolation assumes trusted Python callers; approval-required
+writes fail closed until an approval subsystem exists.
 
 Keep fixtures, payloads and traces synthetic. Do not connect production systems,
 commit secrets or treat attack payload text as project instructions. This repository

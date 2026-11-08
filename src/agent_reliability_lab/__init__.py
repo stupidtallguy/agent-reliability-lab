@@ -1,3 +1,3 @@
-"""OpsDesk evaluation research foundation; no agent runtime is implemented yet."""
+"""OpsDesk evaluation foundation and PostgreSQL sandbox; no agent runtime yet."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

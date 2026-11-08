@@ -1,4 +1,4 @@
-name: Checkpoint foundation
+name: OpsDesk validation
 
 on:
   push:
@@ -11,10 +11,27 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         python-version: ['3.11', '3.12']
+    services:
+      postgres:
+        image: postgres:18.6-bookworm@sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5
+        env:
+          POSTGRES_DB: opsdesk_lab_ci
+          POSTGRES_USER: opsdesk_ci
+          # Ephemeral CI database only; no stored password or production data.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U opsdesk_ci -d opsdesk_lab_ci"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      OPSDESK_DATABASE_URL: postgresql+psycopg://opsdesk_ci@127.0.0.1:5432/opsdesk_lab_ci
+      OPSDESK_ALLOW_SANDBOX: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,8 +49,14 @@ jobs:
         run: |
           uv run --locked ruff check .
           uv run --locked ruff format --check .
-      - name: Tests
-        run: uv run --locked pytest
+      - name: Unit tests (no PostgreSQL required)
+        run: uv run --locked pytest -m 'not integration'
+      - name: Real PostgreSQL integration tests
+        run: uv run --locked pytest -m integration
+      - name: Validate Compose configuration without rendering credentials
+        env:
+          POSTGRES_PASSWORD: unused-config-validation-only
+        run: docker compose --env-file .env.example config --quiet
       - name: Package and stack import smoke check
         run: |
           uv run --locked python -c "import agent_reliability_lab, fastapi, langgraph, mcp, psycopg, streamlit"

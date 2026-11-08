@@ -1,7 +1,10 @@
 # Architecture
 
-Status: design contract, except the Pydantic scenario models, example specifications,
-and tests. No services, tool handlers, model adapters, or graphs run in Checkpoint 0.
+Status after Checkpoint 1: scenario contracts, synthetic PostgreSQL infrastructure,
+fixtures, lifecycle management and internal Python services are implemented. The
+diagram below describes the eventual system; FastAPI, MCP handlers, model adapters,
+graphs, evaluator and dashboard are still planned. See [database.md](database.md)
+and [ADR 0002](decisions/0002-postgresql-sandbox.md) for the implemented subsystem.
 
 ## Components and data flow
 
@@ -32,9 +35,11 @@ run gets a fresh database namespace and immutable fixture snapshot. Start with
 stdlib JSON artifacts for traces; add storage only when required. Streamlit will
 read completed experiment artifacts, not hold provider credentials or mutate runs.
 
-Docker/Compose will package the database and synthetic tools in Checkpoint 1;
-no placeholder Dockerfile or nonfunctional Compose service is included here.
-Pin image digests when that runtime exists. No production connectors are allowed.
+Docker/Compose now packages PostgreSQL 18.6 with a release/digest pin, loopback
+port and persistent volume. Python services use SQLAlchemy Core/Psycopg, Alembic
+per-schema migrations and registered per-run schemas. MCP servers and tool
+containers remain deferred under the revised checkpoint scope. No production
+connectors are allowed.
 
 ## LangGraph workflow (planned)
 
@@ -88,10 +93,11 @@ Sensitive data is synthetic, but still minimize raw payload retention.
 
 Supported Python: CPython 3.11 and 3.12; primary development version 3.11. Python
 3.13+ is deliberately outside this checkpoint's support range. Minimal installation
-requires Pydantic 2; optional `stack` dependencies lock FastAPI, LangGraph 1,
-official MCP SDK 2, Psycopg 3 and Streamlit. This verifies dependency compatibility
-without pretending these systems are implemented. No ORM, vector database,
-multi-agent coordinator, or extra orchestration framework is needed yet.
+requires Pydantic 2, SQLAlchemy 2.0 Core, Alembic and Psycopg 3; optional `stack`
+dependencies lock FastAPI, LangGraph 1, official MCP SDK 2 and Streamlit. This
+verifies future stack compatibility without claiming those runtimes exist. Core
+provides safe queries without an ORM model/session layer. No vector database,
+multi-agent coordinator or extra orchestration framework is introduced.
 
 Dependency decisions were reviewed on 2026-11-08 against official sources:
 

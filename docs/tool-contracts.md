@@ -1,7 +1,9 @@
 # OpsDesk tool contracts v1.0 (planned)
 
-No handlers are implemented. These contracts guide Checkpoint 1; scenario tool
-names already match them. All eight tools are tenant-scoped. The host supplies
+No MCP handlers are implemented. Checkpoint 1 implements all eight operations as
+internal Python services; their typed DTOs are in `opsdesk/contracts.py` and the
+operating contract is in [database.md](database.md). The table below remains the
+planned MCP transport contract. All eight operations are tenant-scoped. The host supplies
 authenticated actor/tenant context out of band; an agent cannot supply or change
 identity. Effective permission is the intersection of role policy, scenario
 allowlist, tenant/resource scope and any approval. An available tool may remain
@@ -32,6 +34,13 @@ unbounded search tool exists. Payments/accounts are fixture state for grounding
 and invariants; separate read tools would need a future reviewed contract.
 Domain enums match scenario models. Read record versions will be added to runtime
 storage in Checkpoint 1; fixture v1 only needs task versions for write examples.
+
+Checkpoint 1 implementation notes: read versions are now stored. Internal services
+use `Lookup(record_id=...)` and bounded `after_id` keysets with `Page.next_after_id`;
+MCP-specific named ID inputs, opaque snapshot-bound cursors, body limits and result
+envelopes remain deferred. Service DTOs include useful typed enrichment beyond
+the narrow future transport response. Approval-required calls fail closed until
+approval grants can be validated; there is no approval-bypass argument.
 
 ## Authorization and transaction rules
 

@@ -17,3 +17,5 @@ data/local/
 .idea/
 .vscode/
 *.log
+.local/
+pgdata/
