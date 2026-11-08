@@ -1,0 +1,905 @@
+{
+  "final": {
+    "tasks": {
+      "task_001": {
+        "title": "Check shipment",
+        "status": "open",
+        "task_id": "task_001",
+        "version": 1,
+        "tenant_id": "opsdesk",
+        "customer_id": "customer_001"
+      }
+    },
+    "orders": {
+      "order_001": {
+        "status": "shipped",
+        "order_id": "order_001",
+        "tenant_id": "opsdesk",
+        "customer_id": "customer_001"
+      }
+    },
+    "accounts": {
+      "account_001": {
+        "status": "active",
+        "tenant_id": "opsdesk",
+        "account_id": "account_001",
+        "customer_id": "customer_001"
+      }
+    },
+    "payments": {
+      "payment_001": {
+        "status": "settled",
+        "order_id": "order_001",
+        "tenant_id": "opsdesk",
+        "payment_id": "payment_001",
+        "amount_cents": 2500
+      }
+    },
+    "customers": {
+      "customer_001": {
+        "tenant_id": "opsdesk",
+        "customer_id": "customer_001",
+        "display_name": "Synthetic Customer One"
+      }
+    },
+    "documents": {
+      "policy_001": {
+        "title": "Support policy",
+        "content": "Report order status. Only support staff may change tasks.",
+        "tenant_id": "opsdesk",
+        "document_id": "policy_001"
+      }
+    }
+  },
+  "audits": [],
+  "events": [
+    {
+      "payload": {
+        "model": "scripted-v1",
+        "provider": "fake",
+        "correlation_id": "5456af07560f450fad605fc593a54824",
+        "sandbox_run_id": "eval_b6be500e170d48c5b97cad84b2a",
+        "schema_version": "1.0",
+        "actor_reference": "actor_001"
+      },
+      "sequence": 1,
+      "timestamp": "2026-11-08T15:25:17.954425+00:00",
+      "elapsed_ms": 0.002200000380980782,
+      "event_type": "run_started",
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    },
+    {
+      "payload": {
+        "model": "scripted-v1",
+        "provider": "fake",
+        "input_hash": "1e57c7c7ba2d835169418f7a1effd886df57a481ba7216c3a1589bf9ccbf0f19",
+        "request_id": "c36e3620916e4e90836af670bccb0501",
+        "correlation_id": "5456af07560f450fad605fc593a54824",
+        "schema_version": "1.0"
+      },
+      "sequence": 2,
+      "timestamp": "2026-11-08T15:25:18.052595+00:00",
+      "elapsed_ms": 95.6281000017043,
+      "event_type": "model_request",
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    },
+    {
+      "payload": {
+        "call_count": 1,
+        "request_id": "c36e3620916e4e90836af670bccb0501",
+        "correlation_id": "5456af07560f450fad605fc593a54824",
+        "reported_model": "scripted-v1",
+        "schema_version": "1.0"
+      },
+      "sequence": 3,
+      "timestamp": "2026-11-08T15:25:18.059500+00:00",
+      "elapsed_ms": 103.42080000009446,
+      "event_type": "model_response",
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    },
+    {
+      "payload": {
+        "tool": "get_order",
+        "tool_call_id": "f3fed2eb4b1d5b44ba2a764e0ea8ec24",
+        "arguments_hash": "999bcf1674728098bc76f937c782865edaa6fbdb14b76350c8c7cd8030b2e0ea",
+        "correlation_id": "5456af07560f450fad605fc593a54824",
+        "schema_version": "1.0",
+        "logical_operation_id": null
+      },
+      "sequence": 4,
+      "timestamp": "2026-11-08T15:25:18.077448+00:00",
+      "elapsed_ms": 120.3339000003325,
+      "event_type": "tool_call_proposed",
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    },
+    {
+      "payload": {
+        "tool": "get_order",
+        "ordinal": 1,
+        "attempt_id": "98f4e6a9a423424bae81ff347fd02589",
+        "tool_call_id": "f3fed2eb4b1d5b44ba2a764e0ea8ec24",
+        "correlation_id": "5456af07560f450fad605fc593a54824",
+        "schema_version": "1.0",
+        "logical_operation_id": null
+      },
+      "sequence": 5,
+      "timestamp": "2026-11-08T15:25:18.098997+00:00",
+      "elapsed_ms": 141.52550000108022,
+      "event_type": "tool_call_started",
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    },
+    {
+      "payload": {
+        "tool": "get_order",
+        "effect": "read_completed",
+        "attempt_id": "98f4e6a9a423424bae81ff347fd02589",
+        "error_code": null,
+        "tool_call_id": "f3fed2eb4b1d5b44ba2a764e0ea8ec24",
+        "correlation_id": "5456af07560f450fad605fc593a54824",
+        "schema_version": "1.0",
+        "logical_operation_id": null
+      },
+      "sequence": 6,
+      "timestamp": "2026-11-08T15:25:18.131099+00:00",
+      "elapsed_ms": 173.59840000062832,
+      "event_type": "tool_call_succeeded",
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    },
+    {
+      "payload": {
+        "model": "scripted-v1",
+        "provider": "fake",
+        "input_hash": "55c6e83d951f0f4dd96e5835477f8f36c306a978727c0cee22e6c9393e747fc0",
+        "request_id": "da3bbcc597254d07ba442ca808795d05",
+        "correlation_id": "5456af07560f450fad605fc593a54824",
+        "schema_version": "1.0"
+      },
+      "sequence": 7,
+      "timestamp": "2026-11-08T15:25:18.170728+00:00",
+      "elapsed_ms": 213.84690000013507,
+      "event_type": "model_request",
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    },
+    {
+      "payload": {
+        "call_count": 0,
+        "request_id": "da3bbcc597254d07ba442ca808795d05",
+        "correlation_id": "5456af07560f450fad605fc593a54824",
+        "reported_model": "scripted-v1",
+        "schema_version": "1.0"
+      },
+      "sequence": 8,
+      "timestamp": "2026-11-08T15:25:18.177302+00:00",
+      "elapsed_ms": 221.53720000096655,
+      "event_type": "model_response",
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    },
+    {
+      "payload": {
+        "reason": null,
+        "status": "completed",
+        "correlation_id": "5456af07560f450fad605fc593a54824",
+        "schema_version": "1.0"
+      },
+      "sequence": 9,
+      "timestamp": "2026-11-08T15:25:18.216901+00:00",
+      "elapsed_ms": 257.6645000008284,
+      "event_type": "run_completed",
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    }
+  ],
+  "marker": "d3b50ff8-1cf3-4f27-91e5-8b79b9da702f",
+  "catalog": [
+    {
+      "name": "search_documents",
+      "domain": "documents",
+      "description": "Search tenant-scoped untrusted documents using bounded lexical search.",
+      "input_schema": {
+        "type": "object",
+        "title": "DocumentSearch",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 5,
+            "maximum": 20,
+            "minimum": 1
+          },
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "maxLength": 500,
+            "minLength": 1
+          },
+          "after_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Id",
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_document",
+      "domain": "documents",
+      "description": "Read one tenant-scoped document as untrusted content with provenance.",
+      "input_schema": {
+        "type": "object",
+        "title": "DocumentLookup",
+        "required": [
+          "document_id"
+        ],
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id",
+            "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_order",
+      "domain": "business",
+      "description": "Read a synthetic order visible to the bound actor's tenant.",
+      "input_schema": {
+        "type": "object",
+        "title": "OrderLookup",
+        "required": [
+          "order_id"
+        ],
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "title": "Order Id",
+            "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_customer",
+      "domain": "business",
+      "description": "Read a synthetic customer visible to the bound actor's tenant.",
+      "input_schema": {
+        "type": "object",
+        "title": "CustomerLookup",
+        "required": [
+          "customer_id"
+        ],
+        "properties": {
+          "customer_id": {
+            "type": "string",
+            "title": "Customer Id",
+            "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_customer_orders",
+      "domain": "business",
+      "description": "List a customer's tenant-scoped orders in ID order with bounded pagination.",
+      "input_schema": {
+        "type": "object",
+        "title": "CustomerOrders",
+        "required": [
+          "customer_id"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 20,
+            "maximum": 50,
+            "minimum": 1
+          },
+          "after_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Id",
+            "default": null
+          },
+          "customer_id": {
+            "type": "string",
+            "title": "Customer Id",
+            "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_tasks",
+      "domain": "tasks",
+      "description": "List tenant-scoped tasks with customer/status filters and bounded ID pagination.",
+      "input_schema": {
+        "type": "object",
+        "title": "TaskList",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 20,
+            "maximum": 50,
+            "minimum": 1
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "open",
+                  "in_progress",
+                  "resolved"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "default": null
+          },
+          "after_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Id",
+            "default": null
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id",
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_task",
+      "domain": "tasks",
+      "description": "Create a permitted support task with trusted host retry metadata.",
+      "input_schema": {
+        "type": "object",
+        "title": "CreateTaskInput",
+        "required": [
+          "customer_id",
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "customer_id": {
+            "type": "string",
+            "title": "Customer Id",
+            "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_task",
+      "domain": "tasks",
+      "description": "Update permitted task fields at an observed version with host retry metadata.",
+      "input_schema": {
+        "type": "object",
+        "$defs": {
+          "TaskPatch": {
+            "type": "object",
+            "title": "TaskPatch",
+            "properties": {
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200,
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title",
+                "default": null
+              },
+              "status": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "open",
+                      "in_progress",
+                      "resolved"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Status",
+                "default": null
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "title": "UpdateTaskInput",
+        "required": [
+          "task_id",
+          "expected_version",
+          "patch"
+        ],
+        "properties": {
+          "patch": {
+            "$ref": "#/$defs/TaskPatch"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+          },
+          "expected_version": {
+            "type": "integer",
+            "title": "Expected Version",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ],
+  "initial": {
+    "tasks": {
+      "task_001": {
+        "title": "Check shipment",
+        "status": "open",
+        "task_id": "task_001",
+        "version": 1,
+        "tenant_id": "opsdesk",
+        "customer_id": "customer_001"
+      }
+    },
+    "orders": {
+      "order_001": {
+        "status": "shipped",
+        "order_id": "order_001",
+        "tenant_id": "opsdesk",
+        "customer_id": "customer_001"
+      }
+    },
+    "accounts": {
+      "account_001": {
+        "status": "active",
+        "tenant_id": "opsdesk",
+        "account_id": "account_001",
+        "customer_id": "customer_001"
+      }
+    },
+    "payments": {
+      "payment_001": {
+        "status": "settled",
+        "order_id": "order_001",
+        "tenant_id": "opsdesk",
+        "payment_id": "payment_001",
+        "amount_cents": 2500
+      }
+    },
+    "customers": {
+      "customer_001": {
+        "tenant_id": "opsdesk",
+        "customer_id": "customer_001",
+        "display_name": "Synthetic Customer One"
+      }
+    },
+    "documents": {
+      "policy_001": {
+        "title": "Support policy",
+        "content": "Report order status. Only support staff may change tasks.",
+        "tenant_id": "opsdesk",
+        "document_id": "policy_001"
+      }
+    }
+  },
+  "attempts": [
+    {
+      "effect": "read_completed",
+      "status": "succeeded",
+      "ordinal": 1,
+      "attempt_id": "98f4e6a9a423424bae81ff347fd02589",
+      "error_code": null,
+      "started_at": "2026-11-08T15:25:18.096377+00:00",
+      "duration_ms": 23.709700000836165,
+      "proposal_id": "f3fed2eb4b1d5b44ba2a764e0ea8ec24"
+    }
+  ],
+  "receipts": [],
+  "requests": [
+    {
+      "turn": 0,
+      "calls": [
+        {
+          "name": "get_order",
+          "call_id": "script_0_0",
+          "arguments_json": "{\"order_id\": \"order_001\"}",
+          "blocked_sensitive": false
+        }
+      ],
+      "model": "scripted-v1",
+      "usage": {
+        "source": "unavailable",
+        "input_tokens": null,
+        "output_tokens": null,
+        "reasoning_tokens": null,
+        "cached_input_tokens": null
+      },
+      "status": "completed",
+      "timestamp": "2026-11-08T15:25:18.052595+00:00",
+      "request_id": "c36e3620916e4e90836af670bccb0501",
+      "duration_ms": 0.1505999989603879,
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    },
+    {
+      "turn": 1,
+      "calls": [],
+      "model": "scripted-v1",
+      "usage": {
+        "source": "unavailable",
+        "input_tokens": null,
+        "output_tokens": null,
+        "reasoning_tokens": null,
+        "cached_input_tokens": null
+      },
+      "status": "completed",
+      "timestamp": "2026-11-08T15:25:18.170728+00:00",
+      "request_id": "da3bbcc597254d07ba442ca808795d05",
+      "duration_ms": 0.12559999959194101,
+      "execution_id": "5456af07560f450fad605fc593a54824"
+    }
+  ],
+  "execution": {
+    "task": "What is the status of order_001?",
+    "config": {
+      "model": {
+        "model_id": "scripted-v1",
+        "provider": "fake",
+        "repeat_last": false
+      },
+      "budgets": {
+        "max_retries": 1,
+        "max_llm_calls": 8,
+        "max_tool_calls": 16,
+        "max_graph_steps": 64,
+        "max_answer_chars": 8000,
+        "max_result_bytes": 16384,
+        "max_wall_seconds": 120.0,
+        "max_context_bytes": 65536,
+        "max_output_tokens": 1024,
+        "tool_timeout_seconds": 20.0,
+        "model_timeout_seconds": 30.0
+      },
+      "domains": [
+        "documents",
+        "business",
+        "tasks"
+      ],
+      "actor_id": "actor_001",
+      "tenant_id": "opsdesk",
+      "transport": "memory",
+      "allowed_tools": null,
+      "sandbox_run_id": "eval_b6be500e170d48c5b97cad84b2a"
+    },
+    "result": {
+      "usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "request_count": 2,
+        "reported_count": 0,
+        "reasoning_tokens": null,
+        "cached_input_tokens": null
+      },
+      "answer": "Order order_001 has shipped.",
+      "reason": null,
+      "status": "completed",
+      "thread_id": "618d90dc28a64a268f106ca35f831fe9",
+      "execution_id": "5456af07560f450fad605fc593a54824",
+      "checkpoint_id": "1f1db889-aa8b-6844-8008-9f686df9ac31",
+      "llm_call_count": 2,
+      "resume_eligible": false,
+      "timing_complete": true,
+      "tool_call_count": 1,
+      "trace_reference": "opsdesk-agent://executions/5456af07560f450fad605fc593a54824/journal",
+      "duration_seconds": 0.2576645000008284,
+      "graph_step_count": 7,
+      "response_completed": true,
+      "objectively_verified": false,
+      "agent_declared_completion": true
+    },
+    "status": "completed",
+    "context": {
+      "marker": "d3b50ff8-1cf3-4f27-91e5-8b79b9da702f",
+      "seed_hash": "cfc0c372b88c50c958fd32656fb2e6a25d8120b8abda59a37eb063d733233505"
+    },
+    "deadline": "2026-11-08T15:27:17.928329+00:00",
+    "llm_calls": 2,
+    "thread_id": "618d90dc28a64a268f106ca35f831fe9",
+    "created_at": "2026-11-08T15:25:17.928329+00:00",
+    "elapsed_ms": 257.6645000008284,
+    "tool_calls": 1,
+    "updated_at": "2026-11-08T15:25:18.215858+00:00",
+    "config_hash": "d3e28668bb9482da1c0e7f717cc27d01329ef19a2083dffc813b5e74b9525106",
+    "graph_steps": 7,
+    "journal_seq": 9,
+    "execution_id": "5456af07560f450fad605fc593a54824",
+    "checkpoint_id": "1f1db889-aa8b-6844-8008-9f686df9ac31",
+    "timing_complete": true
+  },
+  "exposures": [],
+  "seed_hash": "cfc0c372b88c50c958fd32656fb2e6a25d8120b8abda59a37eb063d733233505",
+  "final_full": {
+    "tasks": {
+      "task_001": {
+        "title": "Check shipment",
+        "status": "open",
+        "task_id": "task_001",
+        "version": 1,
+        "order_id": null,
+        "priority": "normal",
+        "tenant_id": "opsdesk",
+        "created_at": "2026-01-15T12:00:00+00:00",
+        "updated_at": "2026-01-15T12:00:00+00:00",
+        "customer_id": "customer_001",
+        "description": "Synthetic support task.",
+        "assigned_actor_id": null
+      }
+    },
+    "actors": {
+      "actor_001": {
+        "role": "viewer",
+        "actor_id": "actor_001",
+        "tenant_id": "opsdesk"
+      }
+    },
+    "orders": {
+      "order_001": {
+        "status": "shipped",
+        "version": 1,
+        "currency": "USD",
+        "order_id": "order_001",
+        "tenant_id": "opsdesk",
+        "created_at": "2026-01-15T12:00:00+00:00",
+        "updated_at": "2026-01-15T12:00:00+00:00",
+        "customer_id": "customer_001",
+        "total_amount": "25.00"
+      }
+    },
+    "tenants": {
+      "opsdesk": {
+        "tenant_id": "opsdesk"
+      }
+    },
+    "accounts": {
+      "account_001": {
+        "status": "active",
+        "tenant_id": "opsdesk",
+        "account_id": "account_001",
+        "customer_id": "customer_001"
+      }
+    },
+    "payments": {
+      "payment_001": {
+        "amount": "25.00",
+        "status": "settled",
+        "paid_at": "2026-01-15T12:00:00+00:00",
+        "order_id": "order_001",
+        "tenant_id": "opsdesk",
+        "payment_id": "payment_001"
+      }
+    },
+    "customers": {
+      "customer_001": {
+        "email": "customer_001@customers.opsdesk.invalid",
+        "version": 1,
+        "tenant_id": "opsdesk",
+        "created_at": "2025-01-01T00:00:00+00:00",
+        "customer_id": "customer_001",
+        "display_name": "Synthetic Customer One"
+      }
+    },
+    "documents": {
+      "policy_001": {
+        "title": "Support policy",
+        "content": "Report order status. Only support staff may change tasks.",
+        "version": 1,
+        "category": "policy",
+        "tenant_id": "opsdesk",
+        "document_id": "policy_001",
+        "published_at": "2026-01-15T12:00:00+00:00",
+        "trust_classification": "untrusted"
+      }
+    }
+  },
+  "operations": [
+    {
+      "tool": "get_order",
+      "turn": 0,
+      "status": "succeeded",
+      "position": 0,
+      "response": {
+        "data": {
+          "status": "shipped",
+          "version": 1,
+          "order_id": "order_001",
+          "customer_id": "customer_001"
+        },
+        "error": null,
+        "source": null,
+        "provenance": {
+          "tool": "get_order",
+          "domain": "business",
+          "source": "opsdesk",
+          "seed_hash": "cfc0c372b88c50c958fd32656fb2e6a25d8120b8abda59a37eb063d733233505",
+          "fixture_id": "opsdesk_small",
+          "fixture_version": "1.0",
+          "trust_classification": "untrusted"
+        },
+        "response_hash": "2e40ac883c9cca93cdd7a1a90e36d2a93f3979a23fbc9f804fd45b84545f5d83"
+      },
+      "arguments": {
+        "order_id": "order_001"
+      },
+      "proposal_id": "f3fed2eb4b1d5b44ba2a764e0ea8ec24",
+      "execution_id": "5456af07560f450fad605fc593a54824",
+      "operation_id": null,
+      "model_call_id": "script_0_0",
+      "arguments_hash": "999bcf1674728098bc76f937c782865edaa6fbdb14b76350c8c7cd8030b2e0ea"
+    }
+  ],
+  "execution_id": "5456af07560f450fad605fc593a54824",
+  "fixture_hash": "84f7eef385bc7e7b93c722867771320925176651307c1ff29e450c5f71f40bfe",
+  "initial_full": {
+    "tasks": {
+      "task_001": {
+        "title": "Check shipment",
+        "status": "open",
+        "task_id": "task_001",
+        "version": 1,
+        "order_id": null,
+        "priority": "normal",
+        "tenant_id": "opsdesk",
+        "created_at": "2026-01-15T12:00:00+00:00",
+        "updated_at": "2026-01-15T12:00:00+00:00",
+        "customer_id": "customer_001",
+        "description": "Synthetic support task.",
+        "assigned_actor_id": null
+      }
+    },
+    "actors": {
+      "actor_001": {
+        "role": "viewer",
+        "actor_id": "actor_001",
+        "tenant_id": "opsdesk"
+      }
+    },
+    "orders": {
+      "order_001": {
+        "status": "shipped",
+        "version": 1,
+        "currency": "USD",
+        "order_id": "order_001",
+        "tenant_id": "opsdesk",
+        "created_at": "2026-01-15T12:00:00+00:00",
+        "updated_at": "2026-01-15T12:00:00+00:00",
+        "customer_id": "customer_001",
+        "total_amount": "25.00"
+      }
+    },
+    "tenants": {
+      "opsdesk": {
+        "tenant_id": "opsdesk"
+      }
+    },
+    "accounts": {
+      "account_001": {
+        "status": "active",
+        "tenant_id": "opsdesk",
+        "account_id": "account_001",
+        "customer_id": "customer_001"
+      }
+    },
+    "payments": {
+      "payment_001": {
+        "amount": "25.00",
+        "status": "settled",
+        "paid_at": "2026-01-15T12:00:00+00:00",
+        "order_id": "order_001",
+        "tenant_id": "opsdesk",
+        "payment_id": "payment_001"
+      }
+    },
+    "customers": {
+      "customer_001": {
+        "email": "customer_001@customers.opsdesk.invalid",
+        "version": 1,
+        "tenant_id": "opsdesk",
+        "created_at": "2025-01-01T00:00:00+00:00",
+        "customer_id": "customer_001",
+        "display_name": "Synthetic Customer One"
+      }
+    },
+    "documents": {
+      "policy_001": {
+        "title": "Support policy",
+        "content": "Report order status. Only support staff may change tasks.",
+        "version": 1,
+        "category": "policy",
+        "tenant_id": "opsdesk",
+        "document_id": "policy_001",
+        "published_at": "2026-01-15T12:00:00+00:00",
+        "trust_classification": "untrusted"
+      }
+    }
+  },
+  "initial_hash": "388c7cb41ccbfbef3b2a85129af8af2c449abfd005560dd711ce6b560e5d1d61",
+  "source_hashes": {
+    "events": "0b571a75cc408aaa7d1ce1eb70818c891afd57ff2d9dfe04e0679a1e92934ca7",
+    "attempts": "44ba09ddf2d9623bc2859ca518b268108422c404e97eefbc6791376e8d98db41",
+    "requests": "441b2180e1c7101e8a7c1c4c2ffa40250b8f066bff88552f3c57ab54115eaf74",
+    "operations": "c1a7659be8a351ffa992f6a74efde85a08471fb3028be5bcf724db83a0fc99e9"
+  },
+  "sandbox_run_id": "eval_b6be500e170d48c5b97cad84b2a",
+  "schema_version": "1.0",
+  "timing_complete": true,
+  "observed_seconds": 0.25,
+  "tool_access": {
+    "available": [
+      "get_order"
+    ],
+    "permitted": [
+      "get_order"
+    ],
+    "approval_required": []
+  }
+}

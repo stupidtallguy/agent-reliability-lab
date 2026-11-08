@@ -128,9 +128,11 @@ class SandboxManager:
     def open(self, run_id: str) -> "Sandbox":
         return Sandbox(self.engine, run_id)
 
-    def cleanup(self, run_id: str) -> None:
+    def cleanup(self, run_id: str, *, expected_marker: str | None = None) -> None:
         sandbox = self.open(run_id)
-        with sandbox.transaction(exclusive=True) as (connection, _):
+        with sandbox.transaction(exclusive=True) as (connection, registry):
+            if expected_marker is not None and registry["marker"] != expected_marker:
+                raise ValueError("sandbox incarnation differs from cleanup ownership")
             # RESTRICT throughout: external dependencies or unknown objects abort atomically.
             t.metadata.drop_all(connection, checkfirst=False)
             version = sa.Table("alembic_version", sa.MetaData(), schema=sandbox.schema)

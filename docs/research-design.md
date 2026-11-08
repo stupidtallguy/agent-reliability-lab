@@ -14,7 +14,9 @@ directional hypotheses before held-out runs:
 2. Guarded data handling reduces attack success; it may over-refuse benign tasks.
 3. Task success and unsafe execution differ across providers and workflow lengths.
 
-No performance measurements or comparative claims exist in Checkpoint 0.
+Checkpoint 4 produces scripted infrastructure-validation outputs, not live model
+performance measurements or comparative claims. Four development cases execute;
+fault/injection cases await actual Checkpoint 5 exposure infrastructure.
 
 ## Experimental unit and controls
 
@@ -56,6 +58,14 @@ replicate, is the resampling unit. Report denominator sizes, confidence level
 comparisons as exploratory, or preregister a multiple-comparison correction.
 Report no confidence interval for an empty denominator. Small pilot estimates
 are descriptive and cannot establish general safety or enterprise readiness.
+
+Checkpoint 4 implements descriptive 95% Wilson summaries, per-scenario breakdowns
+and repeat-pairing metadata. Wilson intervals are not a replacement for the planned
+scenario-cluster analysis above. Reports warn about repeated-scenario dependence
+and small tail-latency samples. No significance/model-comparison framework is
+implemented. [Metric definitions](metrics-definitions.md) specify actual formulas,
+coverage and eligibility; [evaluation engine](evaluation-engine.md) documents the
+currently executable controls and limitations.
 
 Failures are multi-label: planning, tool selection, invalid arguments, grounding,
 tool availability, recovery exhaustion, authorization denial, policy violation,

@@ -3,8 +3,8 @@
 Implemented in Checkpoint 1: PostgreSQL infrastructure, migrations, deterministic
 fixtures, isolated state lifecycle and eight internal Python services. Checkpoint 2
 adds [stdio MCP adapters](mcp-integration.md); Checkpoint 3 adds the
-[durable agent](agent-execution.md) around unchanged service contracts. No
-evaluator, experiment runner or dashboard is implemented.
+[durable agent](agent-execution.md) around unchanged service contracts. Checkpoint 4
+adds [objective evaluation](evaluation-engine.md); no dashboard is implemented.
 
 ## Prerequisites and configuration
 
@@ -279,6 +279,12 @@ issuance, transport-level body-size controls and fault injection remain deferred
 Checkpoint 3 adds bounded observations and request/denial traces. This is local
 synthetic infrastructure, not a hardened hosted
 multi-tenant product. See the actual [Checkpoint 1 validation record](checkpoint-1-validation.md).
+
+Checkpoint 4 adds `opsdesk_evaluation` under a new additive migration, leaving
+historical revisions unchanged. Evaluator cleanup passes an optional expected
+marker, checked atomically inside the existing exclusive cleanup transaction.
+Existing callers retain their behavior. A shared process lock also serializes
+agent/evaluation Alembic contexts. See [ADR 0005](decisions/0005-objective-evaluation.md).
 
 Checkpoint 3 adds separate `opsdesk_agent` metadata and `opsdesk_agent_checkpoints`
 schemas without changing business tables. Reset atomically rotates the existing

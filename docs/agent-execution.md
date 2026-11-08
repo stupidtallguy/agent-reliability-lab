@@ -2,7 +2,8 @@
 
 Implemented: real MCP discovery/calls, one custom graph, optional OpenAI and
 scripted providers, durable state, bounded recovery and structured results.
-There is no evaluation engine or verified task-success claim.
+The agent itself makes no verified task-success claim. Checkpoint 4 adds an
+[independent evaluator](evaluation-engine.md) without changing this graph boundary.
 
 ## Setup and trusted CLI
 

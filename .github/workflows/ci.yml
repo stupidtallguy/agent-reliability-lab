@@ -30,6 +30,7 @@ jobs:
           --health-cmd "pg_isready -U opsdesk_ci -d opsdesk_lab_ci"
           --health-interval 3s --health-timeout 3s --health-retries 20
     env:
+      UV_PYTHON: ${{ matrix.python-version }}
       OPSDESK_DATABASE_URL: postgresql+psycopg://opsdesk_ci@127.0.0.1:5432/opsdesk_lab_ci
       OPSDESK_ALLOW_SANDBOX: '1'
     steps:
@@ -45,18 +46,21 @@ jobs:
         run: |
           uv lock --check
           uv sync --locked --extra stack
+          uv run --locked python -c "import sys; assert sys.version_info[:2] == tuple(map(int, '${{ matrix.python-version }}'.split('.'))); print(sys.version)"
       - name: Lint and formatting
         run: |
           uv run --locked ruff check .
           uv run --locked ruff format --check .
       - name: Unit and in-memory MCP protocol tests (no PostgreSQL required)
         run: uv run --locked pytest -m 'not integration'
-      - name: PostgreSQL, MCP stdio and durable agent restart tests
+      - name: PostgreSQL, MCP, agent restart and objective evaluation tests
         run: uv run --locked pytest -m integration
       - name: Isolated trusted MCP demonstration
         run: uv run --locked opsdesk-mcp demo --run mcp_demo_ci
       - name: Fake-model agent demonstration through actual stdio MCP
         run: uv run --locked opsdesk-agent demo --case multi_step
+      - name: Objective scripted development evaluation (no paid API)
+        run: uv run --locked opsdesk-eval run --development --config benchmarks/evaluation/development.json
       - name: Validate Compose configuration without rendering credentials
         env:
           POSTGRES_PASSWORD: unused-config-validation-only

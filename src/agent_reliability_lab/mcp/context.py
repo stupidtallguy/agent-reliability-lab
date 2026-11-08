@@ -107,6 +107,11 @@ def sign_operation(
     return {OPERATION_META: {"operation_id": operation.operation_id, "signature": signature}}
 
 
+def receipt_key(identity: dict) -> str:
+    """Public pure mapping shared by proof verification and evidence reconciliation."""
+    return "mcp_" + hashlib.sha256(canonical(identity)).hexdigest()
+
+
 def service_key(config: LaunchConfig, tool: str, arguments: dict, meta: dict | None) -> str:
     try:
         proof = OperationProof.model_validate((meta or {}).get(OPERATION_META))
@@ -116,12 +121,7 @@ def service_key(config: LaunchConfig, tool: str, arguments: dict, meta: dict | N
             raise ValueError("invalid proof")
     except (ValueError, TypeError):
         raise ServiceError("unauthorized", "A trusted logical operation is required.") from None
-    return (
-        "mcp_"
-        + hashlib.sha256(
-            canonical(operation_identity(config, tool, proof.operation_id))
-        ).hexdigest()
-    )
+    return receipt_key(operation_identity(config, tool, proof.operation_id))
 
 
 @dataclass(frozen=True)

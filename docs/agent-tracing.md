@@ -27,7 +27,8 @@ effect. `denied` indicates rejection, `read_completed` confirms a read, and
 `receipt_confirmed` confirms the logical write result, including an older receipt.
 It does not claim this attempt changed data. `unknown` remains for interrupted/
 lost outcomes. Objective success requires business audits, receipts and final
-state; automated reconciliation/scoring belongs to Checkpoint 4.
+state; [Checkpoint 4 reconciliation/scoring](evaluation-engine.md) now supplies this
+independent analysis.
 
 Illustrative shape, not an experiment result:
 
@@ -63,7 +64,8 @@ UTC records chronology/deadlines. `perf_counter` measures active process segment
 accumulating persisted elapsed milliseconds on resume. Downtime consumes wall
 budget but is not active latency. Hard-crash gaps set `timing_complete=false`;
 duration can underestimate that unknown interval. Fixture business time is fixed
-and independent. No p95 or objective success metric is computed here.
+and independent. The agent journal computes no p95 or objective success metric;
+the [evaluation metrics layer](metrics-definitions.md) uses separate observed timing.
 
 Replies record nullable input/output/cached-input/reasoning counts and source
 (`provider`, `scripted`, `unavailable`). Missing fields remain null. Aggregates

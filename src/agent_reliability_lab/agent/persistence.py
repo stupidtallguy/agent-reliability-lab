@@ -24,7 +24,7 @@ from agent_reliability_lab.agent.config import AgentConfig, ModelConfig
 from agent_reliability_lab.agent.errors import BudgetExceeded, ExecutionBusy
 from agent_reliability_lab.agent.journal import EVENTS, Redactor
 from agent_reliability_lab.agent.state import AgentResult, Decision, ModelCall
-from agent_reliability_lab.opsdesk.database import SandboxManager
+from agent_reliability_lab.opsdesk.database import _MIGRATION_LOCK, SandboxManager
 from agent_reliability_lab.opsdesk.fixtures import digest
 
 
@@ -117,7 +117,8 @@ class ExecutionStore:
                         "script_location", str(Path(__file__).with_name("migrations"))
                     )
                     config.attributes["connection"] = connection
-                    command.upgrade(config, "head")
+                    with _MIGRATION_LOCK:
+                        command.upgrade(config, "head")
                 with Connection.connect(
                     self._conninfo(), autocommit=True, prepare_threshold=0, row_factory=dict_row
                 ) as connection:

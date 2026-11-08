@@ -8,7 +8,7 @@ Do not implement a later checkpoint until its scope is explicitly authorized.
 | 1 — Synthetic OpsDesk | PostgreSQL/Alembic, deterministic fixtures, eight internal services, role/resource authorization, fail-closed approval checks, idempotency/audit, Docker/Compose | Real PostgreSQL tests; tenant/role denial; reset equivalence; atomic rollback; duplicate-write prevention; concurrent run isolation; guarded cleanup |
 | 2 — MCP tool integration | Three stdio servers/eight tools, strict schemas, trusted actor/run binding, signed host write identity, reusable client/demo | Actual SDK discovery/calls; real PostgreSQL; safe errors; concurrent retries; stdio lifecycle; unchanged legacy scenarios |
 | 3 — Agent (implemented) | Custom LangGraph graph, fake/OpenAI adapters, budgets, PostgreSQL checkpoints/intents/journal, CLI | Bounded termination; durable retry/restart; actor binding; actual MCP/PG tests |
-| 4 — Evaluation engine | State/trace/response predicates, metrics, replay, versioned manifests | Known-pass/fail controls; edge cases; oracle review; no LLM-only success decisions |
+| 4 — Evaluation engine (implemented) | Independent state/trace/response oracles, receipt/audit reconciliation, repeated trials, metrics, re-scoring and versioned reports | Real PG/MCP controls; explicit exclusions/unknowns; no LLM-only success decisions; full interaction replay remains future work |
 | 5 — Fault and prompt-injection harness | Controlled sandbox faults/attacks and recovery/defense evaluation hooks | Isolation; trigger/exposure evidence; denial versus execution checks; no production targets |
 | 6 — Benchmark | Approximately 100 reviewed scenarios and frozen 60/40 split, second provider, preregistration | Template-disjoint held-out store; pilot precision analysis; scenario release gates |
 | 7 — Experiments and reporting | Live/replay experiments, Streamlit reports, uncertainty/cost/coverage analysis | Reproducible manifests; paired analysis; missingness and negative findings reported |
@@ -29,14 +29,16 @@ Do not implement a later checkpoint until its scope is explicitly authorized.
 See [checkpoint-0-validation.md](checkpoint-0-validation.md) for observed results
 and limitations, not benchmark findings.
 
-## Checkpoint 3 status and preparation for Checkpoint 4
+## Checkpoint 4 status and preparation for Checkpoint 5
 
-Implemented: existing sandbox/MCP plus one durable agent. Original scenarios and
-195 Checkpoint 0–2 tests remain intact. See [ADR 0004](decisions/0004-durable-agent.md),
-[execution](agent-execution.md) and [validation](checkpoint-3-validation.md).
+Implemented: the existing agent plus independent evaluation, immutable evidence,
+append-only scoring, descriptive metrics and exports. All original 264 tests and
+six scenario files remain intact. See [ADR 0005](decisions/0005-objective-evaluation.md),
+[engine guide](evaluation-engine.md) and [validation](checkpoint-4-validation.md).
 
-Before Checkpoint 4, review journal/receipt/state reconciliation, metric denominators
-and missingness, known-pass/fail controls and multiple valid solution paths. Freeze
-evaluator versions and distinguish model completion from objective success. Review
-hosted Linux/Python 3.12 CI results. No evaluator, full attack/fault harness,
-authenticated HTTP or approval issuance is implemented in Checkpoint 3.
+Before Checkpoint 5, review versioned fault/attack triggers, exposure provenance,
+timeout ambiguity, recovery equivalence rules, fixture isolation and known-pass/fail
+attacker objectives. Preserve metrics eligibility and receipt/audit reconciliation.
+The two injection-dependent scenarios remain explicitly unexecuted. No full
+fault/injection harness, model comparison, dashboard, authenticated HTTP or approval
+issuance was added. Review hosted Python 3.11/3.12 CI before expanding scope.

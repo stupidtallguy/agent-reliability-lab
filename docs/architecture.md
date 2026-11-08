@@ -1,10 +1,11 @@
 # Architecture
 
-Checkpoint 3 (0.4.0) implements one custom LangGraph `StateGraph`, optional real
+Checkpoint 4 (0.5.0) retains one custom LangGraph `StateGraph`, optional real
 OpenAI and deterministic scripted providers, PostgreSQL checkpoints and an
 execution journal. Existing database services and eight MCP tools remain the
-business boundary. FastAPI, objective scoring, experiment orchestration,
-fault/attack injection and Streamlit remain planned.
+business boundary. Independent scenario trials, evidence reconciliation, objective
+scoring and versioned reports are implemented. FastAPI, full fault/attack injection,
+model-comparison experiments and Streamlit remain planned.
 
 ```mermaid
 flowchart LR
@@ -18,6 +19,9 @@ flowchart LR
   S --> B[(Per-run business schema)]
   G --> P[(Agent metadata and journal)]
   G --> K[(Official PostgreSQL checkpointer)]
+  B --> E[Independent evidence collector and oracles]
+  P --> E
+  E --> R[(Versioned evaluation results and reports)]
 ```
 
 ## Explicit graph
@@ -84,7 +88,8 @@ Redaction and bounds apply before graph/journal persistence.
 Both future baseline and guarded variants share these authorization boundaries.
 Checkpoint 3 implements one minimal recovery policy, not comparative guard
 configurations. No production authentication, HTTP endpoint, universal
-exactly-once guarantee or objective task-success evaluator is implemented.
+exactly-once guarantee is implemented. Objective predicates live in the separate
+evaluation package; model-declared completion remains unchanged in agent results.
 
 ## Infrastructure and reviewed APIs
 
@@ -105,3 +110,20 @@ optional planned runtimes. Official sources reviewed:
 - [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling),
   [official Python Chat Completions API](https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create).
 - [MCP v2 documentation](https://py.sdk.modelcontextprotocol.io/).
+
+## Independent evaluator
+
+The runner provisions a new registered sandbox per trial and sends only the
+scenario user request to the existing agent. Hidden oracles/annotations remain
+in `opsdesk_evaluation`, outside MCP and model input. Consistent initial/full final
+snapshots, compact ledger projections, receipts and audits form immutable evidence.
+Receipt-backed logical effects are distinct from physical attempts. New scoring
+revisions store complete oracle specs and evaluator source/version, without
+re-executing. Reports select one revision per trial and expose exclusions/coverage.
+See [evaluation engine](evaluation-engine.md), [metrics](metrics-definitions.md)
+and [ADR 0005](decisions/0005-objective-evaluation.md).
+
+All historical revisions remain frozen. A new evaluation migration is additive.
+Shared migration locking protects Alembic's global context, and cleanup optionally
+pins an expected marker atomically. Existing callers/tools retain their contracts.
+Fault/attack specifications are not executed; their exposure metrics remain N/A.

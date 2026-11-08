@@ -3,12 +3,13 @@
 A reproducible lab for evaluating AI agent reliability, MCP tool use, failure
 recovery, and prompt-injection resilience in a synthetic enterprise environment.
 
-**Current status: Checkpoint 3 — Durable LangGraph Agent (version 0.4.0).** One
-tool-using agent discovers eight MCP tools, executes bounded workflows and persists
-checkpoints, write identities and a journal in PostgreSQL. A deterministic fake
-needs no keys; the official OpenAI adapter requires explicit live opt-in. No
-evaluation engine or dashboard is implemented, and no benchmark results or
-performance/security claims are made.
+**Current status: Checkpoint 4 — Objective Evaluation (version 0.5.0).** An
+independent runner scores the existing MCP/LangGraph agent using state, traces,
+receipts, audits and response predicates. Repeated isolated trials, versioned
+results, re-scoring and JSON/CSV/Markdown reports work without API keys.
+Four development scenarios execute; two await the Checkpoint 5 injection harness.
+Scripted outputs validate infrastructure, not real LLM reliability. No live model
+benchmark, dashboard or performance/security claim is presented.
 
 ## Motivation and research questions
 
@@ -39,13 +40,15 @@ Trusted CLI / Python host -> LangGraph single-agent loop <-> model adapter
                                            |
                             durable checkpoints + execution journal
                                            |
-                     planned state/trace evaluation and Streamlit reports
+                         independent state/trace/response evaluation
+                                           |
+                          versioned JSON / CSV / Markdown reports
 ```
 
 All operations are narrow and tenant-scoped. No arbitrary SQL or destructive
-agent tool is planned. Baseline and guarded agents share essential permissions,
-write safeguards and budgets; guarded behavior adds bounded recovery and data
-defenses. This is a single-agent design with interchangeable provider adapters.
+agent tool exists. Planned baseline and guarded configurations will share essential
+permissions, write safeguards and budgets. This remains a single-agent design
+with interchangeable provider adapters.
 
 ## Implemented foundation
 
@@ -70,12 +73,17 @@ defenses. This is a single-agent design with interchangeable provider adapters.
   bounded retries, PostgreSQL checkpoints, durable intents and an ordered journal.
 - Actual MCP/PostgreSQL restart tests, including a process exit after a committed
   write; fake-model CLI demos and trace inspection.
+- An independent scenario runner, consistent evidence snapshots, receipt/audit
+  reconciliation, deterministic oracles and annotated tool-use scoring.
+- Versioned PostgreSQL manifests/results, repeated trials, re-scoring, descriptive
+  statistics and machine-readable reports with explicit missing-data coverage.
 
 The planned benchmark has approximately 100 scenarios: 20 normal, 20 multi-step,
 20 recovery, 20 injection, 10 authorization and 10 ambiguous/impossible. Targets
 include a 60/40 development/held-out split. Held-out content is deferred and will
-be stored separately to reduce leakage. The checked-in examples are specifications,
-not evaluation-ready tasks until runtime oracles are implemented and reviewed.
+be stored separately to reduce leakage. Four checked-in examples now have executable
+infrastructure controls and optional scoring annotations. They still require broader
+oracle/scenario review before use as a research benchmark.
 
 ## Setup and validation
 
@@ -196,10 +204,12 @@ docs/
   database.md
   mcp-integration.md
   agent-execution.md, agent-tracing.md, checkpoint-3-validation.md
+  evaluation-engine.md, metrics-definitions.md, checkpoint-4-validation.md
   decisions/0001-initial-architecture.md
   decisions/0002-postgresql-sandbox.md
   decisions/0003-bound-stdio-mcp.md
   decisions/0004-durable-agent.md
+  decisions/0005-objective-evaluation.md
 src/agent_reliability_lab/
   __init__.py
   benchmarks/__init__.py
@@ -217,11 +227,18 @@ src/agent_reliability_lab/
     tool_adapter.py, persistence.py, tables.py, journal.py, errors.py, demo.py
     models/base.py, models/fake.py, models/openai.py
     migrations/env.py, migrations/versions/0001_agent.py
+  evaluation/
+    cli.py, contracts.py, runner.py, evidence.py, reconciliation.py
+    oracles.py, tool_scoring.py, scoring.py, metrics.py, statistics.py
+    persistence.py, tables.py, reporting.py, demo.py
+    migrations/env.py, migrations/versions/0001_evaluation.py
 tests/test_scenarios.py
 tests/test_opsdesk_unit.py
 tests/integration/              real PostgreSQL lifecycle/service tests
 tests/mcp/                      in-memory protocol and real PostgreSQL/stdio tests
 tests/agent/                    provider/unit, real MCP/persistence/restart tests
+tests/evaluation/               oracle/metric controls and actual agent/MCP/PG trials
+benchmarks/evaluation/development.json    optional versioned scoring configuration
 compose.yaml
 .env.example
 .gitattributes
@@ -259,14 +276,36 @@ ran during local validation. [Agent execution](docs/agent-execution.md) document
 seven cases, trusted `ask`, resume, budgets and limits. [Tracing](docs/agent-tracing.md)
 explains attempts versus receipts and response completion versus objective success.
 
+## Objective evaluation
+
+With the PostgreSQL environment configured, run the six development specifications
+twice using the independent scripted controls:
+
+```powershell
+uv run --locked opsdesk-eval run --development --config benchmarks/evaluation/development.json --repeat 2
+uv run --locked opsdesk-eval list --experiment EXPERIMENT_ID
+uv run --locked opsdesk-eval inspect TRIAL_ID --evidence
+uv run --locked opsdesk-eval score TRIAL_ID
+uv run --locked opsdesk-eval report EXPERIMENT_ID
+```
+
+Use printed IDs. Each trial starts from a fresh fixture; exports go to ignored
+`artifacts/evaluations/`. Missing evidence, usage/prices and unexecuted attacks are
+explicit, never zero-filled. An authorized task refusal can succeed while a denied
+unauthorized proposal is still counted. Re-scoring appends a result without another
+agent call. Legacy cumulative token/cost ceilings are post-hoc checks, not runtime
+spending caps. Live calls require an exact model ID and `--live`; none were run in
+local validation. See [evaluation workflow](docs/evaluation-engine.md),
+[exact metrics](docs/metrics-definitions.md) and [validation](docs/checkpoint-4-validation.md).
+
 ## Roadmap
 
-Checkpoint 3 implements the agent with one minimal recovery policy. Checkpoint 4
-will add deterministic evaluators; later work adds the Checkpoint 5 fault/injection
-harness, reviewed benchmark and live reporting. Each has a separate gate in
-[the roadmap](docs/roadmap.md). Local launch trusts the host; approval-required
+Checkpoint 4 implements independent scoring and reproducible reports. Checkpoint 5
+will add actual fault/injection exposure infrastructure; it has not been started.
+A reviewed larger benchmark, model comparisons and Streamlit remain later work.
+See [the roadmap](docs/roadmap.md). Local launch trusts the host; approval-required
 writes fail closed. Production authentication/HTTP, approval issuance and comparative
-baseline/guarded configurations remain planned. See [Checkpoint 3 validation](docs/checkpoint-3-validation.md).
+baseline/guarded configurations remain planned.
 
 Keep fixtures, payloads and traces synthetic. Do not connect production systems,
 commit secrets or treat attack payload text as project instructions. This repository

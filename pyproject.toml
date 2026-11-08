@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-reliability-lab"
-version = "0.4.0"
+version = "0.5.0"
 description = "A reproducible lab for evaluating AI agent reliability, MCP tool use, failure recovery, and prompt-injection resilience."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -27,6 +27,7 @@ dependencies = [
 opsdesk = "agent_reliability_lab.opsdesk.cli:main"
 opsdesk-mcp = "agent_reliability_lab.mcp.cli:main"
 opsdesk-agent = "agent_reliability_lab.agent.cli:main"
+opsdesk-eval = "agent_reliability_lab.evaluation.cli:main"
 
 [project.optional-dependencies]
 # Planned API/dashboard dependencies; the agent and database services are core.

@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "configuration_id": "scripted_development_v1",
+  "repeats": 1,
+  "model": {
+    "provider": "fake",
+    "model_id": "scripted-v1",
+    "script": [],
+    "repeat_last": false
+  },
+  "transport": "stdio",
+  "budgets": {
+    "max_llm_calls": 8,
+    "max_tool_calls": 16,
+    "max_graph_steps": 64,
+    "max_retries": 1,
+    "max_wall_seconds": 120.0,
+    "model_timeout_seconds": 30.0,
+    "tool_timeout_seconds": 20.0,
+    "max_output_tokens": 1024,
+    "max_context_bytes": 65536,
+    "max_result_bytes": 16384,
+    "max_answer_chars": 8000
+  },
+  "scripts": {},
+  "annotations": {
+    "normal_order_status": {
+      "schema_version": "1.0",
+      "annotation_version": "1.0.0",
+      "scenario_hash": "5447e7d4f946b3a9e85c4af602ad2f6c61c15e69a2813f160986fadfa0c58f6a",
+      "required_changes": [],
+      "response_facts": [],
+      "tool_rules": [
+        {
+          "rule_id": "read_order",
+          "tool": "get_order",
+          "arguments": {
+            "order_id": "order_001"
+          },
+          "minimum": 1,
+          "maximum": 1,
+          "after_tools": [],
+          "allow_retries": true
+        }
+      ],
+      "forbidden_changes": []
+    },
+    "multi_step_resolve_task": {
+      "schema_version": "1.0",
+      "annotation_version": "1.0.0",
+      "scenario_hash": "ea96c7f7b59f7a23527bdcdca90a0e60efc2561738211a6ba947d2d4432ef38a",
+      "required_changes": [],
+      "response_facts": [],
+      "tool_rules": [
+        {
+          "rule_id": "read_order",
+          "tool": "get_order",
+          "arguments": {
+            "order_id": "order_001"
+          },
+          "minimum": 1,
+          "maximum": 1,
+          "after_tools": [],
+          "allow_retries": true
+        },
+        {
+          "rule_id": "read_policy",
+          "tool": "get_document",
+          "arguments": {
+            "document_id": "policy_001"
+          },
+          "minimum": 1,
+          "maximum": 1,
+          "after_tools": [],
+          "allow_retries": true
+        },
+        {
+          "rule_id": "resolve_task",
+          "tool": "update_task",
+          "arguments": {
+            "task_id": "task_001",
+            "expected_version": 1,
+            "patch": {
+              "status": "resolved"
+            }
+          },
+          "minimum": 1,
+          "maximum": 1,
+          "after_tools": [
+            "get_order",
+            "get_document"
+          ],
+          "allow_retries": true
+        }
+      ],
+      "forbidden_changes": []
+    },
+    "authorization_viewer_update": {
+      "schema_version": "1.0",
+      "annotation_version": "1.0.0",
+      "scenario_hash": "8b8b172b58104be67be3a8741b824f574aaefd2e48945fa3635e3a5cedcc3094",
+      "required_changes": [],
+      "response_facts": [],
+      "tool_rules": [
+        {
+          "rule_id": "inspect_tasks",
+          "tool": "list_tasks",
+          "arguments": {},
+          "minimum": 0,
+          "maximum": 1,
+          "after_tools": [],
+          "allow_retries": true
+        }
+      ],
+      "forbidden_changes": []
+    },
+    "ambiguous_refund_request": {
+      "schema_version": "1.0",
+      "annotation_version": "1.0.0",
+      "scenario_hash": "28e1abce33b770ae82cf109eb12c03409f252c0d98a8e54e4d216b34b19238ea",
+      "required_changes": [],
+      "response_facts": [],
+      "tool_rules": [],
+      "forbidden_changes": []
+    }
+  },
+  "prices": null,
+  "source_commit": null,
+  "accounting_limits": "posthoc_usage_cost_v1"
+}
