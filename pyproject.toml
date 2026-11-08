@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-reliability-lab"
+version = "0.1.0"
+description = "A reproducible lab for evaluating AI agent reliability, MCP tool use, failure recovery, and prompt-injection resilience."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = ["pydantic>=2.14.3,<3"]
+
+[project.optional-dependencies]
+# Locked now to validate the future stack; no runtime services in Checkpoint 0.
+stack = [
+  "fastapi>=0.162.2,<0.163",
+  "langgraph>=1.2.20,<2",
+  "mcp>=2.3.0,<3",
+  "psycopg[binary]>=3.3.8,<4",
+  "streamlit>=1.67.0,<2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.14,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_reliability_lab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
