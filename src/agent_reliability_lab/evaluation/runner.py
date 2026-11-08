@@ -12,6 +12,8 @@ from pathlib import Path
 from pydantic import ValidationError
 from sqlalchemy.engine import Engine
 
+from agent_reliability_lab.adversarial import ADVERSARIAL_EVALUATOR_VERSION, HARNESS_VERSION
+from agent_reliability_lab.adversarial.contracts import Defense
 from agent_reliability_lab.agent.config import AgentConfig
 from agent_reliability_lab.agent.execution import AgentExecution
 from agent_reliability_lab.agent.state import TERMINAL
@@ -55,7 +57,10 @@ def provenance(config: ExperimentConfig) -> dict:
         "python": platform.python_version(),
         "platform": platform.system(),
         "sdk_versions": {name: version(name) for name in ("langgraph", "mcp", "openai", "psycopg")},
-        "evaluator_version": EVALUATOR_VERSION,
+        "evaluator_version": ADVERSARIAL_EVALUATOR_VERSION
+        if config.harnesses
+        else EVALUATOR_VERSION,
+        "harness_version": HARNESS_VERSION if config.harnesses else None,
         "parallelism": 1,
         "model_parameters": {
             "max_output_tokens": config.budgets.max_output_tokens,
@@ -146,8 +151,22 @@ class ScenarioRunner:
                     reason = "held_out_access_not_enabled"
                 if oracle.scenario_hash is not None and oracle.scenario_hash != fingerprint:
                     reason = "oracle_scenario_hash_mismatch"
-                if scenario and scenario.injections:
-                    reason = "checkpoint_5_injection_runtime_not_implemented"
+                if scenario and scenario.injections and reason is None:
+                    reason = "injection_sidecar_not_enabled"
+                harness = config.harnesses.get(scenario.scenario_id) if scenario else None
+                if harness:
+                    if harness.scenario_hash != fingerprint or any(
+                        item.scenario_id != scenario.scenario_id
+                        or item.tool not in scenario.tools.available
+                        for item in [*harness.faults, *harness.attacks]
+                    ):
+                        reason = "harness_scenario_binding_mismatch"
+                    elif reason == "injection_sidecar_not_enabled":
+                        # Explicit sidecar activates legacy declarations; defaults remain frozen.
+                        if all(harness.covers_legacy(item) for item in scenario.injections):
+                            reason = None
+                        else:
+                            reason = "harness_scenario_binding_mismatch"
                 script = None
                 if scenario and config.model.provider == "fake":
                     script = config.scripts.get(
@@ -159,7 +178,9 @@ class ScenarioRunner:
                 if reason:
                     status = (
                         "invalid_scenario"
-                        if problem or reason == "oracle_scenario_hash_mismatch"
+                        if problem
+                        or reason
+                        in {"oracle_scenario_hash_mismatch", "harness_scenario_binding_mismatch"}
                         else "not_executed"
                     )
                     self.store.save_score(excluded(meta, oracle, status, reason))
@@ -217,6 +238,15 @@ class ScenarioRunner:
                 model=model_config,
                 budgets=budgets,
                 transport=config.transport,
+                runtime_plan=config.harnesses[scenario.scenario_id].runtime()
+                if scenario.scenario_id in config.harnesses
+                else None,
+                defense=Defense(
+                    configuration=config.defense,
+                    write_scopes=config.write_scopes.get(scenario.scenario_id, []),
+                )
+                if scenario.scenario_id in config.harnesses or config.defense == "guarded"
+                else None,
             )
             host = AgentExecution(self.engine)
             async with ToolSession(self.engine, host.launch(agent_config), agent_config) as session:
@@ -235,6 +265,18 @@ class ScenarioRunner:
             )
             duration = time.perf_counter() - started
             evidence = collect(self.engine, sandbox, execution_id, initial, catalog, duration)
+            if scenario.scenario_id in config.harnesses:
+                harness = config.harnesses[scenario.scenario_id]
+                evidence.experimental = {
+                    "version": "1.0",
+                    "model_visibility_capture": True,
+                    "harness": harness.model_dump(mode="json"),
+                    "harness_hash": digest(harness.model_dump(mode="json")),
+                    "runtime_hash": digest(harness.runtime().model_dump(mode="json")),
+                    "defense": agent_config.defense.model_dump(mode="json"),
+                    "pairing_id": config.pairing_id,
+                    "pair_key": f"{scenario.scenario_id}:{meta['trial_index']}",
+                }
             self.store.save_evidence(trial_id, evidence)
             if result.status == "failed" and result.reason == "execution_error":
                 scored = excluded(

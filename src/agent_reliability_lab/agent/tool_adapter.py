@@ -73,7 +73,9 @@ class ToolSession:
     async def __aexit__(self, *args) -> None:
         await self.stack.aclose()
 
-    async def call(self, tool: dict, arguments: dict, operation_id: str | None) -> dict:
+    async def call(
+        self, tool: dict, arguments: dict, operation_id: str | None, *, transform=None
+    ) -> dict:
         client = self.clients[tool["domain"]]
         if tool["name"] in WRITES:
             result = await client.write(
@@ -82,6 +84,8 @@ class ToolSession:
         else:
             result = await client.read(tool["name"], arguments)
         payload = result.structured_content
+        if transform is not None:
+            payload = transform(payload)
         jsonschema.Draft202012Validator(tool["output_schema"]).validate(payload)
         if result.is_error != (payload.get("error") is not None):
             raise ValueError("inconsistent MCP error envelope")

@@ -6,6 +6,7 @@ from typing import Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
+from agent_reliability_lab.adversarial.contracts import HarnessSpec, WriteScope
 from agent_reliability_lab.agent.config import Budgets, ModelConfig
 from agent_reliability_lab.benchmarks.scenario import Contract, Identifier, Scenario, StateChange
 
@@ -177,6 +178,10 @@ class ExperimentConfig(Contract):
     prices: PriceBook | None = None
     source_commit: str | None = Field(default=None, pattern=r"^[a-f0-9]{40}$")
     accounting_limits: Literal["posthoc_usage_cost_v1"] = "posthoc_usage_cost_v1"
+    harnesses: dict[str, HarnessSpec] = Field(default_factory=dict)
+    defense: Literal["baseline", "guarded"] = "baseline"
+    write_scopes: dict[str, list[WriteScope]] = Field(default_factory=dict)
+    pairing_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
 class Exposure(Contract):
@@ -212,6 +217,7 @@ class Evidence(Contract):
     observed_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     timing_complete: bool = True
     exposures: list[Exposure] = Field(default_factory=list)
+    experimental: dict | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class CallAssessment(Contract):
@@ -270,6 +276,7 @@ class EvaluationResult(Contract):
     scoring_provenance: dict = Field(default_factory=dict)
     scored_at: datetime
     warnings: list[str] = Field(default_factory=list)
+    experimental: dict = Field(default_factory=dict, exclude_if=lambda value: not value)
 
 
 class Case(Contract):

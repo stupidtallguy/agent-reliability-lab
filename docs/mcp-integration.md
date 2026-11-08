@@ -1,9 +1,16 @@
 # OpsDesk MCP integration
 
+> Checkpoint 5 update: the existing contracts below remain the foundation. The
+> opt-in [fault/attack harness](fault-injection.md) now interposes around actual
+> MCP calls and adds verified exposure, guarded scopes and versioned scoring.
+> Historical checkpoint-specific limitations below describe their original gate;
+> see [current validation](checkpoint-5-validation.md) for present coverage.
+
 Introduced in Checkpoint 2; retained in 0.4.0. Three local stdio servers expose eight
 business-service operations using official **MCP Python SDK 2.3.0**. A reusable
 trusted client and an isolated demonstration require no LLM or paid API key.
-No agent, evaluation engine, attack harness or HTTP listener is implemented.
+This guide describes the unchanged MCP boundary. The agent, evaluator and opt-in
+attack harness now wrap it; no HTTP listener is exposed.
 
 ## Architecture and SDK choice
 

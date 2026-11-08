@@ -3,13 +3,14 @@
 A reproducible lab for evaluating AI agent reliability, MCP tool use, failure
 recovery, and prompt-injection resilience in a synthetic enterprise environment.
 
-**Current status: Checkpoint 4 — Objective Evaluation (version 0.5.0).** An
-independent runner scores the existing MCP/LangGraph agent using state, traces,
-receipts, audits and response predicates. Repeated isolated trials, versioned
-results, re-scoring and JSON/CSV/Markdown reports work without API keys.
-Four development scenarios execute; two await the Checkpoint 5 injection harness.
-Scripted outputs validate infrastructure, not real LLM reliability. No live model
-benchmark, dashboard or performance/security claim is presented.
+**Current status: Checkpoint 5 — Controlled Fault and Injection Evaluation
+(version 0.6.0).** The existing MCP/LangGraph agent and independent evaluator now
+support versioned fault interception, indirect prompt injection, verified exposure,
+explicit baseline/guarded controls and paired isolated trials. The development
+corpus has 12 fault, 12 attack and 8 benign cases. All six original scenarios are
+preserved, with opt-in sidecars activating the two injection-dependent examples.
+Scripted outcomes validate infrastructure, not live-model reliability or security.
+No paid API request, dashboard or Checkpoint 6 comparison runs automatically.
 
 ## Motivation and research questions
 
@@ -46,7 +47,7 @@ Trusted CLI / Python host -> LangGraph single-agent loop <-> model adapter
 ```
 
 All operations are narrow and tenant-scoped. No arbitrary SQL or destructive
-agent tool exists. Planned baseline and guarded configurations will share essential
+agent tool exists. Baseline and guarded configurations share essential
 permissions, write safeguards and budgets. This remains a single-agent design
 with interchangeable provider adapters.
 
@@ -81,9 +82,9 @@ with interchangeable provider adapters.
 The planned benchmark has approximately 100 scenarios: 20 normal, 20 multi-step,
 20 recovery, 20 injection, 10 authorization and 10 ambiguous/impossible. Targets
 include a 60/40 development/held-out split. Held-out content is deferred and will
-be stored separately to reduce leakage. Four checked-in examples now have executable
-infrastructure controls and optional scoring annotations. They still require broader
-oracle/scenario review before use as a research benchmark.
+be stored separately to reduce leakage. The original six examples and the focused
+32-case development corpus have scripted infrastructure controls. They still need
+independent oracle review and opted-in live trials before model-level conclusions.
 
 ## Setup and validation
 
@@ -300,13 +301,47 @@ local validation. See [evaluation workflow](docs/evaluation-engine.md),
 
 ## Roadmap
 
-Checkpoint 4 implements independent scoring and reproducible reports. Checkpoint 5
-will add actual fault/injection exposure infrastructure; it has not been started.
-A reviewed larger benchmark, model comparisons and Streamlit remain later work.
-See [the roadmap](docs/roadmap.md). Local launch trusts the host; approval-required
-writes fail closed. Production authentication/HTTP, approval issuance and comparative
-baseline/guarded configurations remain planned.
+Checkpoint 5 adds controlled faults, indirect attacks, exposure proof and paired
+defense controls to independent scoring. Checkpoint 6, larger held-out research,
+additional providers and Streamlit remain future work. See [the roadmap](docs/roadmap.md).
+Local launch trusts the host; approval-required writes still fail closed.
+Production authentication/HTTP and approval issuance remain planned.
 
 Keep fixtures, payloads and traces synthetic. Do not connect production systems,
 commit secrets or treat attack payload text as project instructions. This repository
 is intended to remain **private** and has no publishing/deployment workflow.
+
+
+## Faults, indirect attacks and defensive controls
+
+After configuring PostgreSQL using the database guide:
+
+```powershell
+uv run --locked opsdesk-eval run --suite faults
+uv run --locked opsdesk-eval run --suite attacks --defense guarded
+uv run --locked opsdesk-eval run --suite controls
+uv run --locked opsdesk-eval run --suite all --paired
+uv run --locked opsdesk-eval compare BASELINE_EXPERIMENT_ID GUARDED_EXPERIMENT_ID
+uv run --locked opsdesk-eval run --development --config benchmarks/evaluation/checkpoint5.json
+uv run --locked pytest tests/adversarial
+```
+
+These commands use the fake model and real MCP/PostgreSQL; default transport is
+stdio. `--transport memory` uses actual SDK protocol without subprocess startup.
+Only `--provider openai --model YOUR_MODEL_ID --live` opts into paid model calls.
+Inspect the printed trial IDs with `inspect TRIAL_ID --evidence`; re-score frozen
+evidence with `score TRIAL_ID`. Exports remain under ignored `artifacts/evaluations/`.
+Every trial uses a fresh owned sandbox; `docker_probe_01` and the volume are preserved.
+
+Guarded mode adds observation framing and explicit host-authored task write scopes.
+It does not derive intent from hidden evaluation goals or use a keyword blacklist.
+Workflow hijacks and answer contamination have separate objectives; a denied
+dangerous proposal is separate from an executed mutation. Framing alone is not
+an injection-resistance guarantee. Missing exposure remains inconclusive.
+
+New package: `adversarial/{contracts,runtime,triggers,exposure,defenses,objectives,
+reporting,replay}.py`; new corpora: `benchmarks/{faults,attacks,controls}/development/`;
+trusted config: `benchmarks/evaluation/checkpoint5.json`.
+Read [fault injection](docs/fault-injection.md), [prompt-injection testing](docs/prompt-injection-testing.md),
+[defensive configurations](docs/defensive-configurations.md), [ADR 0006](docs/decisions/0006-controlled-injection.md)
+and [Checkpoint 5 validation](docs/checkpoint-5-validation.md).

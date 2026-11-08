@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-reliability-lab"
-version = "0.5.0"
+version = "0.6.0"
 description = "A reproducible lab for evaluating AI agent reliability, MCP tool use, failure recovery, and prompt-injection resilience."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"

@@ -418,4 +418,8 @@ def score(
             else None,
         },
     }
+    if evidence.experimental is not None:
+        from agent_reliability_lab.adversarial.objectives import apply
+
+        return apply(result, scenario, evidence)
     return result

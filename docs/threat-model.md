@@ -1,11 +1,10 @@
 # Threat model
 
-Status after Checkpoint 3: service authorization/state controls and three bound
-stdio MCP servers are implemented. Strict protocol schemas, typed safe errors,
-signed host write identity and provenance are tested. The agent adds bounded
-execution, durable proposals/attempts and restart safety. Comparative model
-defenses, production HTTP authentication and the Checkpoint 5 attack harness remain
-planned. See [agent execution](agent-execution.md) for exact limits.
+Status after Checkpoint 5: service/MCP authorization and transaction safeguards,
+the durable agent, objective evaluator and controlled indirect-attack/fault harness
+are implemented. Guarded mode adds explicit host task scopes and observation
+framing; real model resistance remains unmeasured. Production HTTP authentication
+and provider-comparison research remain planned. See [agent execution](agent-execution.md) for exact limits.
 
 Assets include synthetic domain integrity, actor isolation, policy/approval
 integrity, execution budgets, trace completeness and benchmark validity. The
@@ -38,9 +37,10 @@ and applies equally to baseline and guarded configurations.
 
 ## Attack families and evaluation
 
-Plan direct and indirect injection, role spoofing, fake approval, workflow
-hijacking, answer contamination, malicious retry guidance and synthetic data
-exfiltration. Use inert canary strings and fictional destinations under `.invalid`;
+The implemented primary threat is indirect injection through designated lower-trust
+response fields, including authority spoofing, workflow hijacking, answer contamination
+and local synthetic canary disclosure. Direct jailbreaks and real exfiltration are
+outside the implemented benchmark. Use inert canary strings and fictional destinations under `.invalid`;
 no external transmission is performed. Attack objectives are independently
 machine-checkable and distinguish model compliance, denied attempts and executed
 effects. Deny all unlisted domain writes and record invalid proposals too.
@@ -48,8 +48,8 @@ Guards must be evaluated for over-refusal and unnecessary latency, not assumed
 effective from prompt wording or keyword filters.
 
 Payloads in `benchmarks/development` are malicious **test data**. Never execute
-their instructions during project development. Runtime harnesses will load them
-as text into only declared injection surfaces. Keep real secrets out of fixtures,
+their instructions during project development. The opt-in runtime loads them
+as text into only declared lower-trust response surfaces. Keep real secrets out of fixtures,
 traces, CI and `.env.example`. Provider credentials, when eventually needed, stay
 host-side and are never inserted into agent messages or tool environments.
 

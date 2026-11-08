@@ -8,6 +8,8 @@ from collections.abc import Callable
 import jsonschema
 from langgraph.graph import END, START, StateGraph
 
+from agent_reliability_lab.adversarial.defenses import blocks, frame
+from agent_reliability_lab.adversarial.runtime import Interceptor
 from agent_reliability_lab.agent.config import AgentConfig
 from agent_reliability_lab.agent.errors import BudgetExceeded, ModelFailure
 from agent_reliability_lab.agent.models.base import ModelAdapter
@@ -76,6 +78,11 @@ class GraphRuntime:
         self.clock = clock
         self.after_dispatch = after_dispatch
         self.catalog = []
+        self.interceptor = (
+            Interceptor(store, self.execution_id, config.runtime_plan, clock)
+            if config.runtime_plan
+            else None
+        )
 
     def remaining(self) -> float:
         utc_remaining = (self.row["deadline"] - utcnow()).total_seconds()
@@ -122,6 +129,10 @@ class GraphRuntime:
                     self.config.budgets.max_llm_calls,
                     digest([state["messages"], tools]),
                 )
+                if self.interceptor:
+                    self.interceptor.model_exposure(
+                        state["messages"], request_id, digest([state["messages"], tools])
+                    )
                 started = time.perf_counter()
                 try:
                     async with asyncio.timeout(
@@ -220,6 +231,10 @@ class GraphRuntime:
                         jsonschema.Draft202012Validator(known[call.name]["input_schema"]).validate(
                             arguments
                         )
+                        if self.config.defense and blocks(
+                            self.config.defense, call.name, arguments
+                        ):
+                            rejection = observation_error("task_scope_denied")
                 except (ValueError, jsonschema.ValidationError, TypeError):
                     rejection = observation_error("validation_error")
                     arguments = {}  # Do not persist rejected credential-bearing values.
@@ -233,6 +248,15 @@ class GraphRuntime:
                     self.clock(),
                 )
                 pending.append(proposal)
+                if rejection and rejection["error"]["code"] == "task_scope_denied":
+                    self.store.event(
+                        self.execution_id,
+                        "defense_block",
+                        self.clock(),
+                        tool_call_id=proposal,
+                        tool=call.name,
+                        reason="outside_trusted_task_write_scope",
+                    )
             return {"pending": pending, "cursor": 0, "messages": messages, "retry": False}
         except BudgetExceeded as error:
             return self.exhausted(error)
@@ -263,8 +287,12 @@ class GraphRuntime:
                 async with asyncio.timeout(
                     min(self.remaining(), self.config.budgets.tool_timeout_seconds)
                 ):
-                    response = await self.session.call(
-                        tool, operation["arguments"], operation["operation_id"]
+                    response = (
+                        await self.interceptor.call(self.session, tool, operation, attempt_id)
+                        if self.interceptor
+                        else await self.session.call(
+                            tool, operation["arguments"], operation["operation_id"]
+                        )
                     )
             except TimeoutError:
                 response = observation_error("tool_timeout", retryable=True)
@@ -278,6 +306,8 @@ class GraphRuntime:
             response = self.store.redactor.clean(response)
             if len(json.dumps(response).encode()) > self.config.budgets.max_result_bytes:
                 response = observation_error("response_too_large")
+            if self.interceptor:
+                self.interceptor.observed(operation, attempt_id, response)
             error = response.get("error")
             retry = bool(
                 error
@@ -318,7 +348,10 @@ class GraphRuntime:
                 {
                     "role": "tool",
                     "tool_call_id": operation["model_call_id"],
-                    "content": json.dumps(response, ensure_ascii=False),
+                    "content": json.dumps(
+                        frame(response, self.config.defense) if self.config.defense else response,
+                        ensure_ascii=False,
+                    ),
                 },
             ]
             code = (response.get("error") or {}).get("code")

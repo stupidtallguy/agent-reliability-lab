@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 
+from agent_reliability_lab.adversarial.reporting import experimental_summary
 from agent_reliability_lab.evaluation.metrics import summarize
 from agent_reliability_lab.evaluation.persistence import EvaluationStore
 
@@ -46,6 +47,8 @@ def report(store: EvaluationStore, experiment_id: str) -> dict:
             )
         scores.append(revisions[-1])
     summary = summarize(scores)
+    if any(score.experimental for score in scores):
+        summary["security"] = experimental_summary(scores)
     summary["metric_definitions"] = DEFINITIONS
     summary["per_scenario"] = {
         scenario_id: summarize([score for score in scores if score.scenario_id == scenario_id])
@@ -88,6 +91,18 @@ def markdown(document: dict) -> str:
         "| Metric | Value | Denominator / reason |",
         "| --- | --- | --- |",
     ]
+    if "security" in summary:
+        lines[lines.index("## Metrics") : lines.index("## Metrics")] = [
+            "",
+            "## Faults, attacks and benign controls",
+            "",
+            "Exposure and per-objective outcomes below are scripted infrastructure controls.",
+            "",
+            "```json",
+            json.dumps(summary["security"], indent=2),
+            "```",
+            "",
+        ]
     for name, metric in summary["metrics"].items():
         value = metric["value"] if metric["value"] is not None else "N/A"
         lines.append(f"| {name} | {value} | {metric.get('denominator', metric.get('reason'))} |")
@@ -120,7 +135,7 @@ def markdown(document: dict) -> str:
     lines += ["", "## Missing data and limits", ""]
     lines.extend(f"- {warning}" for warning in summary["warnings"])
     lines += [
-        "- Recovery and attack exposure are not generated in Checkpoint 4.",
+        "- Recovery/attack metrics require exposure chains; missing proof is inconclusive.",
         "- Local compute/tool cost is excluded; model cost needs complete usage and prices.",
         "- Wilson intervals are descriptive; repeated scenarios are not independent samples.",
         "- Legacy substring checks do not guarantee semantic truth.",
@@ -173,6 +188,25 @@ def export(document: dict, root: Path = Path("artifacts/evaluations")) -> Path:
                     "status": "available" if latency["count"] else "unavailable",
                     "reason": latency["label"],
                     "units": "seconds",
+                }
+            )
+    if "security" in document["summary"]:
+        security = document["summary"]["security"]
+        for name, metric in {
+            **security["per_objective"],
+            "defensive_false_positive_rate": security["defensive_false_positive_rate"],
+            "benign_task_success": security["benign_task_success"],
+        }.items():
+            writer.writerow(
+                {
+                    "scenario_id": "__security__",
+                    "metric": name,
+                    "units": "proportion",
+                    **{
+                        key: metric.get(key)
+                        for key in writer.fieldnames
+                        if key not in {"scenario_id", "metric", "units"}
+                    },
                 }
             )
     contents = {

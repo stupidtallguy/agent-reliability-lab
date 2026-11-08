@@ -1,5 +1,11 @@
 # OpsDesk MCP tool contracts v1.0
 
+> Checkpoint 5 update: the existing contracts below remain the foundation. The
+> opt-in [fault/attack harness](fault-injection.md) now interposes around actual
+> MCP calls and adds verified exposure, guarded scopes and versioned scoring.
+> Historical checkpoint-specific limitations below describe their original gate;
+> see [current validation](checkpoint-5-validation.md) for present coverage.
+
 Checkpoint 3 uses these unchanged discovery contracts through existing clients.
 Provider schemas derive from discovery, never manual duplicates. Local validation
 and bounded capture supplement server enforcement. Identity and write IDs stay

@@ -9,7 +9,7 @@ Do not implement a later checkpoint until its scope is explicitly authorized.
 | 2 — MCP tool integration | Three stdio servers/eight tools, strict schemas, trusted actor/run binding, signed host write identity, reusable client/demo | Actual SDK discovery/calls; real PostgreSQL; safe errors; concurrent retries; stdio lifecycle; unchanged legacy scenarios |
 | 3 — Agent (implemented) | Custom LangGraph graph, fake/OpenAI adapters, budgets, PostgreSQL checkpoints/intents/journal, CLI | Bounded termination; durable retry/restart; actor binding; actual MCP/PG tests |
 | 4 — Evaluation engine (implemented) | Independent state/trace/response oracles, receipt/audit reconciliation, repeated trials, metrics, re-scoring and versioned reports | Real PG/MCP controls; explicit exclusions/unknowns; no LLM-only success decisions; full interaction replay remains future work |
-| 5 — Fault and prompt-injection harness | Controlled sandbox faults/attacks and recovery/defense evaluation hooks | Isolation; trigger/exposure evidence; denial versus execution checks; no production targets |
+| 5 — Fault and prompt-injection harness (implemented) | Controlled sandbox faults/attacks and recovery/defense evaluation hooks | Isolation; trigger/exposure evidence; denial versus execution checks; no production targets |
 | 6 — Benchmark | Approximately 100 reviewed scenarios and frozen 60/40 split, second provider, preregistration | Template-disjoint held-out store; pilot precision analysis; scenario release gates |
 | 7 — Experiments and reporting | Live/replay experiments, Streamlit reports, uncertainty/cost/coverage analysis | Reproducible manifests; paired analysis; missingness and negative findings reported |
 
@@ -29,7 +29,7 @@ Do not implement a later checkpoint until its scope is explicitly authorized.
 See [checkpoint-0-validation.md](checkpoint-0-validation.md) for observed results
 and limitations, not benchmark findings.
 
-## Checkpoint 4 status and preparation for Checkpoint 5
+## Historical Checkpoint 4 gate
 
 Implemented: the existing agent plus independent evaluation, immutable evidence,
 append-only scoring, descriptive metrics and exports. All original 264 tests and
@@ -42,3 +42,19 @@ attacker objectives. Preserve metrics eligibility and receipt/audit reconciliati
 The two injection-dependent scenarios remain explicitly unexecuted. No full
 fault/injection harness, model comparison, dashboard, authenticated HTTP or approval
 issuance was added. Review hosted Python 3.11/3.12 CI before expanding scope.
+
+
+## Checkpoint 5 current gate
+
+Implemented: bounded deterministic fault interception, typed indirect-injection
+overlays, verified transport/model exposure, independent attacker/recovery scoring,
+explicit host task scopes, benign controls, paired manifests, canonical scripted
+re-execution and reports. Original 363 tests, six source scenarios and historical
+migrations are preserved. See [ADR 0006](decisions/0006-controlled-injection.md).
+
+Before Checkpoint 6, independently review legitimate tasks, attacker predicates,
+scope authoring and template-disjoint splits; freeze corpus/configuration hashes.
+Opted-in live pilot measurements must remain separate from scripted validation.
+Review false positives, contamination failures, missing exposure and statistical
+limits. No second provider, 100-case expansion, dashboard or production auth was
+implemented. Checkpoint 6 has not started.

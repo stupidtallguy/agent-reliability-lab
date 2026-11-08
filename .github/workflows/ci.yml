@@ -53,7 +53,7 @@ jobs:
           uv run --locked ruff format --check .
       - name: Unit and in-memory MCP protocol tests (no PostgreSQL required)
         run: uv run --locked pytest -m 'not integration'
-      - name: PostgreSQL, MCP, agent restart and objective evaluation tests
+      - name: PostgreSQL, MCP, agent restart, evaluation and adversarial tests
         run: uv run --locked pytest -m integration
       - name: Isolated trusted MCP demonstration
         run: uv run --locked opsdesk-mcp demo --run mcp_demo_ci
@@ -61,6 +61,8 @@ jobs:
         run: uv run --locked opsdesk-agent demo --case multi_step
       - name: Objective scripted development evaluation (no paid API)
         run: uv run --locked opsdesk-eval run --development --config benchmarks/evaluation/development.json
+      - name: Paired fault, attack and benign control smoke (no paid API)
+        run: uv run --locked opsdesk-eval run --suite all --paired --transport memory
       - name: Validate Compose configuration without rendering credentials
         env:
           POSTGRES_PASSWORD: unused-config-validation-only

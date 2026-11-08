@@ -1,5 +1,11 @@
 # OpsDesk PostgreSQL sandbox
 
+> Checkpoint 5 update: the existing contracts below remain the foundation. The
+> opt-in [fault/attack harness](fault-injection.md) now interposes around actual
+> MCP calls and adds verified exposure, guarded scopes and versioned scoring.
+> Historical checkpoint-specific limitations below describe their original gate;
+> see [current validation](checkpoint-5-validation.md) for present coverage.
+
 Implemented in Checkpoint 1: PostgreSQL infrastructure, migrations, deterministic
 fixtures, isolated state lifecycle and eight internal Python services. Checkpoint 2
 adds [stdio MCP adapters](mcp-integration.md); Checkpoint 3 adds the
@@ -135,8 +141,9 @@ than edits to that revision. See [ADR 0002](decisions/0002-postgresql-sandbox.md
 The six Checkpoint 0 JSON files and `EnvironmentFixture` contract are unchanged.
 `from_scenario` wraps the exact inline fixture and actor in `SeedSpec`. Scenario
 available/permitted/approval lists are persisted with the run and enforced by
-services. Injections are parsed as part of scenarios but are **not applied**;
-the attack/fault harness belongs to a later checkpoint.
+services. Fixture loaders parse injection declarations without applying them. The opt-in
+Checkpoint 5 runner applies response overlays/faults around MCP, preserving the
+original database fixture.
 
 `SeedSpec` v1 wraps `environment`, `actors` and optional typed maps of customer,
 order, task and document details keyed by existing IDs. The richer bundled

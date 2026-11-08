@@ -1,5 +1,11 @@
 # Objective evaluation engine (Checkpoint 4, version 0.5.0)
 
+> Checkpoint 5 update: the existing contracts below remain the foundation. The
+> opt-in [fault/attack harness](fault-injection.md) now interposes around actual
+> MCP calls and adds verified exposure, guarded scopes and versioned scoring.
+> Historical checkpoint-specific limitations below describe their original gate;
+> see [current validation](checkpoint-5-validation.md) for present coverage.
+
 The evaluator is independent of the agent's prompt, model declaration and terminal
 status. It uses frozen scenario requirements, consistent pre/post snapshots,
 durable proposals/attempts, MCP outcomes, receipts, mutation audits and the final

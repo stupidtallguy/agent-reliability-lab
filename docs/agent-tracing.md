@@ -1,5 +1,11 @@
 # Durable execution journal
 
+> Checkpoint 5 update: the existing contracts below remain the foundation. The
+> opt-in [fault/attack harness](fault-injection.md) now interposes around actual
+> MCP calls and adds verified exposure, guarded scopes and versioned scoring.
+> Historical checkpoint-specific limitations below describe their original gate;
+> see [current validation](checkpoint-5-validation.md) for present coverage.
+
 `opsdesk_agent.events` is append-oriented through `ExecutionStore`. A transactional
 per-execution counter assigns contiguous sequence numbers. Run/correlation ID is
 the execution UUID. `JournalEvent` exports a strict outer schema. Payloads carry

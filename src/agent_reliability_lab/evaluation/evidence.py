@@ -68,6 +68,18 @@ EVENT_KEYS = {
     "model",
     "reported_model",
     "input_hash",
+    "injection_id",
+    "configuration_hash",
+    "matched",
+    "dispatch_ordinal",
+    "boundary",
+    "underlying_executed",
+    "underlying_success",
+    "original_response_hash",
+    "transformed_response_hash",
+    "observed_response_hash",
+    "payload_delivered",
+    "response_hash",
 }
 DATA_KEYS = {
     "task_id",

@@ -27,6 +27,12 @@ EVENTS = frozenset(
         "budget_exhausted",
         "run_completed",
         "run_failed",
+        "injection_trigger",
+        "injection_activated",
+        "injection_not_applied",
+        "injection_observed",
+        "injection_model_exposure",
+        "defense_block",
     }
 )
 

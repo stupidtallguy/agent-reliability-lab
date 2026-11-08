@@ -1,11 +1,11 @@
 # Architecture
 
-Checkpoint 4 (0.5.0) retains one custom LangGraph `StateGraph`, optional real
-OpenAI and deterministic scripted providers, PostgreSQL checkpoints and an
-execution journal. Existing database services and eight MCP tools remain the
-business boundary. Independent scenario trials, evidence reconciliation, objective
-scoring and versioned reports are implemented. FastAPI, full fault/attack injection,
-model-comparison experiments and Streamlit remain planned.
+Checkpoint 5 (0.6.0) retains one custom LangGraph `StateGraph`, optional OpenAI
+and scripted providers, PostgreSQL checkpoints, execution journals and independent
+scoring. It adds trusted fault interception, lower-trust response overlays,
+verified exposure, baseline/guarded scopes and paired trials. Existing database
+services/eight MCP tools remain the business boundary. FastAPI, multi-provider
+research comparisons and Streamlit remain planned.
 
 ```mermaid
 flowchart LR
@@ -85,9 +85,9 @@ Timeout cancellation cannot prove an executing remote write rolled back; receipt
 reconciliation is required. Documents/results remain untrusted message data.
 Redaction and bounds apply before graph/journal persistence.
 
-Both future baseline and guarded variants share these authorization boundaries.
-Checkpoint 3 implements one minimal recovery policy, not comparative guard
-configurations. No production authentication, HTTP endpoint, universal
+Baseline and guarded variants share these authorization boundaries and the same
+minimal bounded recovery policy. Checkpoint 5 adds explicit host write scopes,
+observation framing and paired defensive controls. No production authentication, HTTP endpoint, universal
 exactly-once guarantee is implemented. Objective predicates live in the separate
 evaluation package; model-declared completion remains unchanged in agent results.
 
@@ -126,4 +126,6 @@ and [ADR 0005](decisions/0005-objective-evaluation.md).
 All historical revisions remain frozen. A new evaluation migration is additive.
 Shared migration locking protects Alembic's global context, and cleanup optionally
 pins an expected marker atomically. Existing callers/tools retain their contracts.
-Fault/attack specifications are not executed; their exposure metrics remain N/A.
+Opt-in Checkpoint 5 sidecars execute controlled faults/attacks; unconfigured
+legacy specifications remain explicitly excluded. Verified exposure, not mere
+configuration, determines recovery/attack metric eligibility.

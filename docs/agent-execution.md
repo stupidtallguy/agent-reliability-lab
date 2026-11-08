@@ -1,5 +1,11 @@
 # Agent execution (Checkpoint 3)
 
+> Checkpoint 5 update: the existing contracts below remain the foundation. The
+> opt-in [fault/attack harness](fault-injection.md) now interposes around actual
+> MCP calls and adds verified exposure, guarded scopes and versioned scoring.
+> Historical checkpoint-specific limitations below describe their original gate;
+> see [current validation](checkpoint-5-validation.md) for present coverage.
+
 Implemented: real MCP discovery/calls, one custom graph, optional OpenAI and
 scripted providers, durable state, bounded recovery and structured results.
 The agent itself makes no verified task-success claim. Checkpoint 4 adds an

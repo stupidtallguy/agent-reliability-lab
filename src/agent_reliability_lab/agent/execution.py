@@ -8,6 +8,7 @@ from langsmith import tracing_context
 from pydantic import SecretStr
 from sqlalchemy.engine import Engine
 
+from agent_reliability_lab.adversarial.defenses import GUARDED_POLICY
 from agent_reliability_lab.agent.config import AgentConfig
 from agent_reliability_lab.agent.errors import BudgetExceeded, ContextMismatch, ExecutionInterrupted
 from agent_reliability_lab.agent.graph import SYSTEM_POLICY, GraphRuntime
@@ -91,7 +92,15 @@ class AgentExecution:
             state = {
                 "execution_id": execution_id,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_POLICY},
+                    {
+                        "role": "system",
+                        "content": SYSTEM_POLICY
+                        + (
+                            GUARDED_POLICY
+                            if config.defense and config.defense.configuration == "guarded"
+                            else ""
+                        ),
+                    },
                     {"role": "user", "content": row["task"]},
                 ],
                 "turn": 0,

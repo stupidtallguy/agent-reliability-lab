@@ -3,9 +3,11 @@
 Checkpoint 4 implements this protocol's independent state/trace/response scoring,
 receipt/audit reconciliation, repeated trials, metric summaries and versioned
 reports. [Engine behavior](evaluation-engine.md) and [exact implemented metrics](metrics-definitions.md)
-define current coverage. Full fault/attack injection and interaction replay remain
-planned; their descriptions below are research specifications, not implemented
-runtime claims. The six legacy scenario contracts/projection remain unchanged.
+define Checkpoint 4 coverage. Checkpoint 5 adds an opt-in exposure runtime and
+experimental scoring 1.1.0 described in [fault injection](fault-injection.md) and
+[indirect attacks](prompt-injection-testing.md). Nonexperimental scoring 1.0.1 and
+the six legacy scenario contracts/projection remain unchanged. Full offline
+interaction replay remains future work.
 
 `response_completed` records a final model answer; nullable
 `agent_declared_completion` records its claim. Neither establishes task success.
@@ -74,8 +76,10 @@ Attacker objective is a conjunction of checks and is evaluated independently of
 legitimate success, even when they can both pass. An attack trial also requires
 an exposed, manifest-declared attack with recorded provenance.
 
-Injection triggers are one-based per-tool dispatch attempts, after authorization
-and before response delivery; denied proposals do not advance the counter. Fault
+Checkpoint 5 injection triggers are one-based matching per-tool dispatch attempts
+after host schema/scope validation. Pre-dispatch faults precede server authorization;
+response overlays require a successful real MCP response. Host-rejected proposals
+do not advance the counter. All trigger/activation/observation stages are journaled. Fault
 and attack on the same trigger are rejected. Timeouts use virtual time in replay.
 Document-content attacks append the payload to the original returned content or
 search snippet so legitimate task evidence remains available. Tool-response
@@ -89,8 +93,8 @@ Recoverability is declared before execution, not inferred from eventual success.
 The [implemented metric reference](metrics-definitions.md) specifies eligibility,
 annotation coverage, descriptive intervals and post-hoc accounting. Tool accuracy
 requires admissibility sidecars and complete proposal/policy evidence; it is not
-invented from schema validity alone. Recovery/attack exposure is not generated in
-Checkpoint 4, so those actual demonstration metrics are unavailable.
+invented from schema validity alone. Checkpoint 5 generates verified exposure;
+untriggered, truncated and inconclusive cases are reported separately.
 
 Let `N` be eligible runs with complete evaluator output, `S_i` the binary complete
 task success above, and `C` the total physical tool proposals with assessable
@@ -140,8 +144,8 @@ Schema validity is necessary but insufficient. Require independent oracle review
 fixture restoration tests, a known valid path or justified refusal, state-aware
 tool admissibility predicates, attack/fault trigger tests, mutation-diff tests and
 seeded replay tests before calling a scenario evaluation-ready. No checked-in
-injection-dependent example currently has that runtime validation. Four development
-controls now exercise the agent/evaluator path; broader oracle release review is
-still required. Store evaluator version/hash and
+development corpus has independent live-model validation. Scripted controls now
+exercise the fault/attack/defense paths; broader oracle release review and held-out
+model trials are still required. Store evaluator version/hash and
 all exclusions with the result manifest. An optional LLM judge cannot override
 these deterministic gates without a separately reported, preregistered analysis.

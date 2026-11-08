@@ -528,6 +528,7 @@ class ExecutionStore:
                 effect=effect,
                 duration_ms=duration_ms,
                 result=self.redactor.capture(response),
+                response_hash=digest(response),
             )
             if retry:
                 self._event(

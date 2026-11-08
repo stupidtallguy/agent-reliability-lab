@@ -14,9 +14,11 @@ directional hypotheses before held-out runs:
 2. Guarded data handling reduces attack success; it may over-refuse benign tasks.
 3. Task success and unsafe execution differ across providers and workflow lengths.
 
-Checkpoint 4 produces scripted infrastructure-validation outputs, not live model
-performance measurements or comparative claims. Four development cases execute;
-fault/injection cases await actual Checkpoint 5 exposure infrastructure.
+Checkpoint 5 produces scripted infrastructure-validation outputs, not live-model
+performance or resistance claims. Its 12 fault/12 indirect-attack/8 benign controls
+and two original sidecar activations test measurable mechanisms. Guarded superiority
+is a hypothesis, never an assumed result. Matching manifests/seeds do not guarantee
+identical hosted-model behavior.
 
 ## Experimental unit and controls
 

@@ -4,6 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
+from agent_reliability_lab.adversarial.contracts import Defense, RuntimePlan
 from agent_reliability_lab.benchmarks.scenario import Contract, Identifier
 from agent_reliability_lab.mcp.contracts import Domain
 from agent_reliability_lab.opsdesk.database import schema_for
@@ -39,6 +40,8 @@ class AgentConfig(Contract):
     domains: list[Domain] = Field(default_factory=lambda: ["documents", "business", "tasks"])
     allowed_tools: list[str] | None = None
     transport: Literal["stdio", "memory"] = "stdio"
+    runtime_plan: RuntimePlan | None = Field(default=None, exclude_if=lambda value: value is None)
+    defense: Defense | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def valid_host(self) -> Self:

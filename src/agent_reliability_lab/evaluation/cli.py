@@ -3,10 +3,12 @@
 import argparse
 import asyncio
 import json
+import uuid
 from pathlib import Path
 
 import sqlalchemy as sa
 
+from agent_reliability_lab.adversarial.reporting import compare
 from agent_reliability_lab.evaluation import tables as t
 from agent_reliability_lab.evaluation.contracts import ExperimentConfig, OracleSpec
 from agent_reliability_lab.evaluation.reporting import export, report
@@ -35,6 +37,7 @@ async def execute(args: argparse.Namespace) -> None:
                     "repeats": args.repeat,
                     "transport": args.transport,
                     "source_commit": args.source_commit,
+                    "defense": args.defense,
                 }.items()
                 if value is not None
             }
@@ -50,6 +53,58 @@ async def execute(args: argparse.Namespace) -> None:
                 if args.development
                 else args.scenarios
             )
+            if args.suite:
+                kinds = ("faults", "attacks", "controls") if args.suite == "all" else (args.suite,)
+                paths = [
+                    path
+                    for kind in kinds
+                    for path in sorted(Path(f"benchmarks/{kind}/development").glob("*.json"))
+                ]
+                if not args.config:
+                    config = ExperimentConfig.model_validate_json(
+                        Path("benchmarks/evaluation/checkpoint5.json").read_text()
+                    )
+                    revised = config.model_dump(mode="json")
+                    revised.update(updates)
+                    if args.provider:
+                        revised["model"]["provider"] = args.provider
+                    if args.model:
+                        revised["model"]["model_id"] = args.model
+                    config = ExperimentConfig.model_validate_json(json.dumps(revised))
+            if args.paired:
+                pairing_id = uuid.uuid4().hex
+                ids = []
+                invalid = False
+                for variant in ("baseline", "guarded"):
+                    paired = config.model_copy(
+                        update={"defense": variant, "pairing_id": pairing_id}
+                    )
+                    identifier = await runner.run(paths, paired, live=args.live)
+                    ids.append(identifier)
+                    document = report(runner.store, identifier)
+                    invalid = invalid or any(
+                        result["status"]
+                        in {"infrastructure_failure", "invalid_scenario", "evidence_error"}
+                        for result in document["results"]
+                    )
+                    display(
+                        {
+                            "experiment_id": identifier,
+                            "configuration": variant,
+                            "export": str(export(document)),
+                        }
+                    )
+                comparison = compare(runner.store, *ids)
+                # Comparison is an immutable companion artifact, not another trial.
+                destination = Path("artifacts/evaluations/pairs") / pairing_id
+                destination.mkdir(parents=True, exist_ok=False)
+                (destination / "comparison.json").write_text(
+                    json.dumps(comparison, indent=2), encoding="utf-8"
+                )
+                display(comparison)
+                if invalid:
+                    raise RuntimeError("paired evaluation requires infrastructure/evidence review")
+                return
             experiment_id = await runner.run(paths, config, live=args.live)
             document = report(runner.store, experiment_id)
             display(
@@ -65,6 +120,8 @@ async def execute(args: argparse.Namespace) -> None:
                 for result in document["results"]
             ):
                 raise RuntimeError("evaluation requires infrastructure/evidence review")
+        elif args.command == "compare":
+            display(compare(runner.store, args.baseline, args.guarded))
         elif args.command == "report":
             document = report(runner.store, args.experiment)
             display(
@@ -143,6 +200,12 @@ def main() -> None:
     run.add_argument("--transport", choices=("stdio", "memory"))
     run.add_argument("--source-commit")
     run.add_argument("--live", action="store_true")
+    run.add_argument("--suite", choices=("all", "faults", "attacks", "controls"))
+    run.add_argument("--defense", choices=("baseline", "guarded"))
+    run.add_argument("--paired", action="store_true")
+    item = commands.add_parser("compare")
+    item.add_argument("baseline")
+    item.add_argument("guarded")
     item = commands.add_parser("report")
     item.add_argument("experiment")
     item = commands.add_parser("score")
@@ -160,6 +223,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "run" and args.development and args.scenarios:
         parser.error("choose --development or scenario paths")
+    if args.command == "run" and args.suite and (args.scenarios or args.development):
+        parser.error("choose --suite or scenario paths/--development")
     try:
         asyncio.run(execute(args))
     except KeyboardInterrupt:
