@@ -1,6 +1,6 @@
 # OpsDesk MCP integration
 
-Checkpoint 2, version 0.3.0. Three working local stdio servers expose eight
+Introduced in Checkpoint 2; retained in 0.4.0. Three local stdio servers expose eight
 business-service operations using official **MCP Python SDK 2.3.0**. A reusable
 trusted client and an isolated demonstration require no LLM or paid API key.
 No agent, evaluation engine, attack harness or HTTP listener is implemented.
@@ -143,9 +143,9 @@ async def example():
 anyio.run(example)
 ```
 
-No automatic retries occur. `LogicalOperation.model_dump_json()` can be persisted
-by a future execution host; this checkpoint does not implement that durable host
-loop, LLM tool-call correlation, retry budgets or provider adapters.
+The raw client performs no automatic retries. Checkpoint 3's
+[execution host](agent-execution.md) persists IDs, correlates proposals and
+separately budgets every bounded retry.
 
 ## Trusted identity and context boundary
 
@@ -159,8 +159,8 @@ material or `idempotency_key`. Extra fields are rejected. Ordinary MCP metadata
 claims cannot change identity. Every service still intersects role, tenant and
 persisted scenario permissions. Discoverability is not permission to execute.
 Approval-required operations continue to fail closed. Domain discovery is a fixed
-catalog; a future agent host should filter the model-facing list by scenario
-availability. The backend still rejects calls omitted from that scenario.
+catalog; the agent host filters the model list by scenario availability and its
+host allowlist. The backend still rejects forbidden scenario calls.
 
 The bound context records the sandbox ownership marker and seed hash. Every
 operation holds a shared lifecycle lock across that verification and the service
@@ -199,11 +199,12 @@ arguments**. Consequently:
 
 The response-discard test commits a write, discards its result, reconnects and
 retries the same operation. It does not simulate every socket/process failure.
-There is no claim of universal exactly-once network delivery. A future execution
-host must persist operation IDs and distinguish retries from new model proposals.
+There is no claim of universal exactly-once delivery. The Checkpoint 3 host
+persists IDs and distinguishes retries from new model proposals.
 Changing the signing key requires coordinated client/server launch configuration.
-Close clients and retire operation IDs before reset: reset deliberately clears
-receipts, and this checkpoint adds no reset-generation ledger or live-reset protocol.
+Close clients before reset: it clears receipts. Checkpoint 3 rotates the ownership
+marker atomically, invalidating old bound servers/executions. A shared execution
+lease blocks reset while the graph is active.
 
 ## Inputs, outputs and errors
 
@@ -268,6 +269,6 @@ reviewed OAuth integration, origin protections and isolated logs. Tool arguments
 and this local HMAC convention cannot substitute for authentication. Do not expose
 these stdio factories through an unauthenticated LAN/public HTTP wrapper.
 
-Checkpoint 3 may build the agent host after explicit authorization. Fault/prompt-
-injection harness work belongs to Checkpoint 5. This checkpoint provides tool
-transport and a trusted client only, with no LLM, scorer, benchmark runner or dashboard.
+Checkpoint 3 adds the [durable agent](agent-execution.md), providers and journal
+using this transport. The full fault/injection harness belongs to Checkpoint 5.
+No scorer, experiment runner or dashboard exists yet.

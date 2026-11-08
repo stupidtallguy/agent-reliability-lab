@@ -1,9 +1,16 @@
 # Evaluation protocol v1.0
 
-This is a specification for future evaluators. Checkpoint 2 exposes scenario-aware
-PostgreSQL services through MCP, but does not execute predicates, run agents,
-apply injections or compute metrics. The legacy benchmark projection
+This is a specification for future evaluators. Checkpoint 3 produces durable agent
+observations, proposal/attempt events, nullable usage and terminal responses.
+Ground-truth scoring, aggregate metrics and replay experiments remain planned for
+Checkpoint 4. No full injection harness is implemented. The legacy projection
 preserves the six existing scenario contracts; see [database.md](database.md).
+
+`response_completed` records a final model answer; nullable
+`agent_declared_completion` records its claim. Neither establishes task success.
+Future oracles must reconcile attempts and receipt-confirmed logical effects
+with business audits/final state. Hard-crash timing and missing usage remain
+explicitly incomplete. See [trace semantics](agent-tracing.md).
 
 ## Run lifecycle and eligibility
 

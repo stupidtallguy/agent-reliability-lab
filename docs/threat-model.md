@@ -1,10 +1,11 @@
 # Threat model
 
-Status after Checkpoint 2: service authorization/state controls and three bound
+Status after Checkpoint 3: service authorization/state controls and three bound
 stdio MCP servers are implemented. Strict protocol schemas, typed safe errors,
-signed host write identity and untrusted provenance are tested. Model defenses,
-production HTTP authentication, full proposal tracing and the Checkpoint 5 attack
-harness remain planned. See [MCP integration](mcp-integration.md) for exact limits.
+signed host write identity and provenance are tested. The agent adds bounded
+execution, durable proposals/attempts and restart safety. Comparative model
+defenses, production HTTP authentication and the Checkpoint 5 attack harness remain
+planned. See [agent execution](agent-execution.md) for exact limits.
 
 Assets include synthetic domain integrity, actor isolation, policy/approval
 integrity, execution budgets, trace completeness and benchmark validity. The
@@ -61,7 +62,7 @@ per-run schemas, ownership checks, restrictive cleanup and verified reset. The
 database has statement/lock timeouts and Compose has a memory limit. There are no
 production integrations. Schema isolation assumes cooperating trusted Python
 callers; database owners can bypass it. Services are not an authentication layer.
-Only the future model adapter may use explicitly configured provider egress;
+Only the explicitly opted-in model adapter uses its fixed provider endpoint;
 synthetic tool containers should have no Internet route. Pin images and review
 dependency changes. A future network policy must be tested rather than inferred
 from a Compose diagram. A private repository is not a secrets store.
@@ -69,7 +70,8 @@ from a Compose diagram. A private repository is not a secrets store.
 Output framing and model instructions alone cannot guarantee injection resistance.
 Local stdio binding/HMAC assumes a trusted OS account and host; it is not OAuth
 or production authentication. Database owners can bypass service policy. Reset
-clears receipts, so hosts must close clients and retire operation IDs before reset.
+clears receipts and rotates the marker; old bound clients/executions fail closed.
+Active execution leases block reset/cleanup.
 No HTTP transport is exposed; a future HTTP resource server must authenticate
 principal/audience/tenant/run access before creating trusted context. Application
 payload limits do not replace transport-level resource controls. Inert fixture
@@ -77,3 +79,23 @@ text is returned as data and does not prove general prompt-injection resilience.
 Authorization can prevent effects while the model still attempts violations.
 Incomplete logs create unknown safety outcomes. A curated benchmark cannot cover
 all adversarial content; report that limitation with every evaluation.
+
+## Checkpoint 3 execution boundary
+
+The host persists actor/run/config association and checks its hash on resume.
+Model call IDs are correlation data only. Logical write IDs and distinct attempt
+IDs are host-assigned; intended arguments commit before dispatch. Session locks
+prevent concurrent use of an execution. MCP services remain the authority for
+tenant/role/scenario permissions, including after malicious user text.
+
+Retrieved instructions remain `tool` message data with provenance. Only fixed
+host policy is a system message. There is no shell, SQL, URL-fetch or filesystem
+tool. Framing does not prove live-model injection resistance; scripted tests
+verify execution boundaries, not model security performance.
+
+JSON-only checkpoints avoid pickle. Known credentials, sensitive structured keys
+and recognizable tokens are redacted before persistence; sensitive arguments are
+rejected. SDK exceptions/signing metadata are not journaled. Redaction is best
+effort: never supply real data/secrets as tasks. Database owners and trusted
+Python callers can bypass local controls. Hosted journals need future access and
+retention policy.

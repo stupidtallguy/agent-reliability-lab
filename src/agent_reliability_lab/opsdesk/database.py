@@ -188,6 +188,13 @@ class Sandbox:
             populate(connection, seed)
             if digest(logical_state(connection)) != row["initial_hash"]:
                 raise ValueError("reset did not restore the original logical state; rolled back")
+            # Reset starts a new logical incarnation. Old bound servers/executions
+            # must not reuse receipts or pending writes after they were cleared.
+            marker = str(uuid.uuid4())
+            connection.execute(t.identity.update().values(marker=marker))
+            connection.execute(
+                t.registry.update().where(t.registry.c.run_id == self.run_id).values(marker=marker)
+            )
 
     def apply_migrations(self) -> None:
         with self.transaction(exclusive=True) as (connection, _):

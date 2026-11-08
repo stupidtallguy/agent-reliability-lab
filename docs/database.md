@@ -1,9 +1,10 @@
 # OpsDesk PostgreSQL sandbox
 
 Implemented in Checkpoint 1: PostgreSQL infrastructure, migrations, deterministic
-fixtures, isolated state lifecycle and eight internal Python services. There is
-no AI agent, evaluator, experiment runner or dashboard. Checkpoint 2 adds
-[stdio MCP adapters](mcp-integration.md) around these unchanged services.
+fixtures, isolated state lifecycle and eight internal Python services. Checkpoint 2
+adds [stdio MCP adapters](mcp-integration.md); Checkpoint 3 adds the
+[durable agent](agent-execution.md) around unchanged service contracts. No
+evaluator, experiment runner or dashboard is implemented.
 
 ## Prerequisites and configuration
 
@@ -242,13 +243,14 @@ there is no fuzzy title-based deduplication. Authorization is checked again befo
 receipt replay. Update requires the observed version and increments it atomically;
 stale concurrent proposals get `version_conflict`.
 
-Future MCP adapters must retain one host-assigned key per logical write across
+MCP adapters retain one host-assigned key per logical write across
 transport retries. A fresh retry key can create a second task. Receipts allow
-reconciliation after a lost response; this checkpoint does not implement network
-timeouts or retries. Successful writes advance a fixed simulation clock from
+reconciliation after a lost response; Checkpoint 3 adds durable bounded retries.
+Successful writes advance a fixed simulation clock from
 2026-02-01 UTC by one second. This clock is for deterministic state, not latency
 measurement. Audit entries cover committed changes, not denied attempts; the
-future execution journal must record all proposals separately.
+agent journal records proposals/attempts separately; audits remain evidence of
+committed changes. See [agent tracing](agent-tracing.md).
 
 ## Tests and limitations
 
@@ -273,6 +275,14 @@ malicious process holding the database-owner connection. There is no PostgreSQL
 row-level security or per-agent login. Read pagination uses explicit bounded
 `after_id` keysets, not snapshot-bound opaque MCP cursors. Full-text search uses
 English stemming and stable ID order rather than relevance ranking. Approval
-issuance, body-size transport limits, request/denial traces and fault injection
-remain deferred. This is local synthetic infrastructure, not a hardened hosted
+issuance, transport-level body-size controls and fault injection remain deferred.
+Checkpoint 3 adds bounded observations and request/denial traces. This is local
+synthetic infrastructure, not a hardened hosted
 multi-tenant product. See the actual [Checkpoint 1 validation record](checkpoint-1-validation.md).
+
+Checkpoint 3 adds separate `opsdesk_agent` metadata and `opsdesk_agent_checkpoints`
+schemas without changing business tables. Reset atomically rotates the existing
+registry/identity marker after fixture verification, invalidating old clients and
+paused executions whose receipts were cleared. Logical data remains equivalent;
+physical incarnation deliberately changes. Active agents hold shared leases, so
+reset/cleanup wait or fail at the configured lock timeout. See [ADR 0004](decisions/0004-durable-agent.md).

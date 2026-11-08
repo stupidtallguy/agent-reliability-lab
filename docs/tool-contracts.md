@@ -1,5 +1,12 @@
 # OpsDesk MCP tool contracts v1.0
 
+Checkpoint 3 uses these unchanged discovery contracts through existing clients.
+Provider schemas derive from discovery, never manual duplicates. Local validation
+and bounded capture supplement server enforcement. Identity and write IDs stay
+host-controlled. Durable proposal IDs differ from attempts and logical writes;
+see [agent execution](agent-execution.md). Tool outcomes do not establish objective
+task success.
+
 Implemented in Checkpoint 2 with official MCP SDK 2.3.0. Tools use flat strict JSON
 arguments and a typed envelope. All business rules remain in the existing service
 layer. See [MCP integration](mcp-integration.md) for launch/client commands and

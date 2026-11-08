@@ -3,11 +3,12 @@
 A reproducible lab for evaluating AI agent reliability, MCP tool use, failure
 recovery, and prompt-injection resilience in a synthetic enterprise environment.
 
-**Current status: Checkpoint 2 — MCP Tool Integration (version 0.3.0).** Three
-working stdio MCP servers expose eight typed tools over the isolated PostgreSQL
-sandbox. A trusted demonstration client runs without an LLM. The project does
-not yet run an AI agent, compute evaluation results or provide a dashboard.
-There are no benchmark results or performance/security claims.
+**Current status: Checkpoint 3 — Durable LangGraph Agent (version 0.4.0).** One
+tool-using agent discovers eight MCP tools, executes bounded workflows and persists
+checkpoints, write identities and a journal in PostgreSQL. A deterministic fake
+needs no keys; the official OpenAI adapter requires explicit live opt-in. No
+evaluation engine or dashboard is implemented, and no benchmark results or
+performance/security claims are made.
 
 ## Motivation and research questions
 
@@ -22,13 +23,13 @@ attacks?** We will study tool/argument accuracy, recovery, unauthorized attempts
 and execution, defensive tradeoffs, provider latency/cost, and failure patterns
 across task categories. Deterministic checks are primary; LLM judges are optional.
 
-## OpsDesk and planned architecture
+## OpsDesk and architecture
 
 OpsDesk is a fictional company with a document knowledge base, a business database
 of synthetic customers/orders/payments/accounts, and a support task system.
 
 ```text
-Request + trusted actor -> FastAPI -> LangGraph single-agent loop -> model adapter
+Trusted CLI / Python host -> LangGraph single-agent loop <-> model adapter
                                            |
                               validation / authorization / approval
                                            |
@@ -36,9 +37,9 @@ Request + trusted actor -> FastAPI -> LangGraph single-agent loop -> model adapt
                                            |
                                  isolated PostgreSQL state
                                            |
-                            state + trace + response evaluation
+                            durable checkpoints + execution journal
                                            |
-                               read-only Streamlit reports
+                     planned state/trace evaluation and Streamlit reports
 ```
 
 All operations are narrow and tenant-scoped. No arbitrary SQL or destructive
@@ -65,6 +66,10 @@ defenses. This is a single-agent design with interchangeable provider adapters.
   envelopes, untrusted provenance and immutable host-side actor/run binding.
 - A reusable trusted SDK client with signed logical write identities and safe
   idempotent retries, plus real in-memory and stdio protocol tests.
+- An explicit LangGraph graph, scripted/OpenAI adapters, execution budgets,
+  bounded retries, PostgreSQL checkpoints, durable intents and an ordered journal.
+- Actual MCP/PostgreSQL restart tests, including a process exit after a committed
+  write; fake-model CLI demos and trace inspection.
 
 The planned benchmark has approximately 100 scenarios: 20 normal, 20 multi-step,
 20 recovery, 20 injection, 10 authorization and 10 ambiguous/impossible. Targets
@@ -90,9 +95,9 @@ uv build
 ```
 
 `uv sync --locked` installs the scenario/database package and development tools.
-The core package includes official MCP SDK **2.3.0**. The `stack` extra installs
-future FastAPI, LangGraph 1 and Streamlit dependencies. CI validates that full extra on
-Python 3.11/3.12. Provider SDKs are deferred until adapters exist.
+The core includes official MCP **2.3.0**, LangGraph **1.2.20**, PostgreSQL
+checkpointer **3.2.0** and OpenAI SDK **3.46.0**. The `stack` extra installs planned
+FastAPI/Streamlit dependencies. CI validates the full extra on Python 3.11/3.12.
 `uv.lock` is committed; do not replace locked installation with an unconstrained
 `pip install`. Update dependencies intentionally with `uv lock --upgrade`, review
 the diff, and rerun checks before committing.
@@ -190,9 +195,11 @@ docs/
   checkpoint-2-validation.md
   database.md
   mcp-integration.md
+  agent-execution.md, agent-tracing.md, checkpoint-3-validation.md
   decisions/0001-initial-architecture.md
   decisions/0002-postgresql-sandbox.md
   decisions/0003-bound-stdio-mcp.md
+  decisions/0004-durable-agent.md
 src/agent_reliability_lab/
   __init__.py
   benchmarks/__init__.py
@@ -205,10 +212,16 @@ src/agent_reliability_lab/
   mcp/
     cli.py, client.py, context.py, contracts.py, errors.py
     servers/documents.py, business.py, tasks.py, shared.py
+  agent/
+    cli.py, config.py, state.py, graph.py, execution.py
+    tool_adapter.py, persistence.py, tables.py, journal.py, errors.py, demo.py
+    models/base.py, models/fake.py, models/openai.py
+    migrations/env.py, migrations/versions/0001_agent.py
 tests/test_scenarios.py
 tests/test_opsdesk_unit.py
 tests/integration/              real PostgreSQL lifecycle/service tests
 tests/mcp/                      in-memory protocol and real PostgreSQL/stdio tests
+tests/agent/                    provider/unit, real MCP/persistence/restart tests
 compose.yaml
 .env.example
 .gitattributes
@@ -225,15 +238,35 @@ Read [architecture](docs/architecture.md), [research design](docs/research-desig
 and the [database guide](docs/database.md), [ADR 0002](docs/decisions/0002-postgresql-sandbox.md)
 and [Checkpoint 2 validation](docs/checkpoint-2-validation.md) for assumptions and limits.
 
+## Durable agent demonstration
+
+With the same PostgreSQL environment configured:
+
+```powershell
+uv run --locked opsdesk-agent demo --case multi_step
+uv run --locked opsdesk-agent demo --case viewer_denied
+uv run --locked opsdesk-agent demo --case error
+uv run --locked opsdesk-agent journal EXECUTION_ID
+uv run --locked opsdesk-agent result EXECUTION_ID
+uv run --locked pytest tests/agent
+```
+
+Replace `EXECUTION_ID` with a printed demo ID. Demos use actual stdio MCP and
+unique disposable sandboxes. Fixed fake plans do not interpret arbitrary language.
+The optional real model uses `--provider openai --model YOUR_MODEL_ID --live` and
+a privately configured `OPENAI_API_KEY`; tests/CI need neither. No paid request
+ran during local validation. [Agent execution](docs/agent-execution.md) documents
+seven cases, trusted `ask`, resume, budgets and limits. [Tracing](docs/agent-tracing.md)
+explains attempts versus receipts and response completion versus objective success.
+
 ## Roadmap
 
-Checkpoint 2 implements MCP transport and the trusted client only. Later checkpoints
-add the LangGraph agent, deterministic evaluators, the Checkpoint 5 fault/injection
-harness, a reviewed benchmark, and live experiments/Streamlit reporting. Each has a
-separate acceptance gate in [the roadmap](docs/roadmap.md). Checkpoint 3 is not
-implemented. Local launch configuration assumes a trusted host/OS account;
-approval-required writes fail closed. Durable retry orchestration, live-reset
-coordination and authenticated HTTP remain planned.
+Checkpoint 3 implements the agent with one minimal recovery policy. Checkpoint 4
+will add deterministic evaluators; later work adds the Checkpoint 5 fault/injection
+harness, reviewed benchmark and live reporting. Each has a separate gate in
+[the roadmap](docs/roadmap.md). Local launch trusts the host; approval-required
+writes fail closed. Production authentication/HTTP, approval issuance and comparative
+baseline/guarded configurations remain planned. See [Checkpoint 3 validation](docs/checkpoint-3-validation.md).
 
 Keep fixtures, payloads and traces synthetic. Do not connect production systems,
 commit secrets or treat attack payload text as project instructions. This repository

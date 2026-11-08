@@ -1,138 +1,107 @@
 # Architecture
 
-Status after Checkpoint 2: scenario contracts, PostgreSQL infrastructure, fixtures,
-internal services and three stdio MCP servers are implemented, together with a
-trusted SDK client. The diagram below describes the eventual system; FastAPI,
-model adapters, graphs, evaluator and dashboard remain planned. See
-[database.md](database.md), [MCP integration](mcp-integration.md) and
-[ADR 0003](decisions/0003-bound-stdio-mcp.md) for implemented boundaries.
-
-## Components and data flow
+Checkpoint 3 (0.4.0) implements one custom LangGraph `StateGraph`, optional real
+OpenAI and deterministic scripted providers, PostgreSQL checkpoints and an
+execution journal. Existing database services and eight MCP tools remain the
+business boundary. FastAPI, objective scoring, experiment orchestration,
+fault/attack injection and Streamlit remain planned.
 
 ```mermaid
 flowchart LR
-  U[User request + trusted actor context] --> A[FastAPI control plane]
-  A --> G[LangGraph single-agent workflow]
-  G <--> M[Provider adapter]
-  G --> P[Schema validation + authorization + approval]
-  P --> C[MCP v2 client]
-  C --> D[Document tools]
-  C --> B[Business tools]
-  C --> T[Task tools]
-  D --> S[(Isolated OpsDesk PostgreSQL)]
-  B --> S
-  T --> S
-  G --> E[Structured event journal]
-  S --> V[Deterministic state evaluator]
-  E --> V
-  V --> R[Read-only Streamlit reports]
+  H[Trusted CLI / Python host] --> G[StateGraph]
+  G <--> M[Scripted or OpenAI adapter]
+  G --> V[Validate discovered schemas]
+  V --> I[Durable intent and attempt]
+  I --> C[Trusted MCP client]
+  C --> D[Documents / Business / Tasks servers]
+  D --> S[Services: authorization and receipts]
+  S --> B[(Per-run business schema)]
+  G --> P[(Agent metadata and journal)]
+  G --> K[(Official PostgreSQL checkpointer)]
 ```
 
-FastAPI will manage run requests, configuration and status, not bypass tool
-authorization. MCP servers now expose the eight narrow operations in
-[tool-contracts.md](tool-contracts.md). PostgreSQL will contain synthetic domain
-records, task mutation audit records, and run metadata in separate schemas. Each
-run gets a fresh database namespace and immutable fixture snapshot. Start with
-stdlib JSON artifacts for traces; add storage only when required. Streamlit will
-read completed experiment artifacts, not hold provider credentials or mutate runs.
+## Explicit graph
 
-Docker/Compose now packages PostgreSQL 18.6 with a release/digest pin, loopback
-port and persistent volume. The development bridge uses `internal: false` for
-Windows host connectivity and permits container egress; stronger evaluation
-isolation requires a separate tested configuration. Python services use SQLAlchemy Core/Psycopg, Alembic
-per-schema migrations and registered per-run schemas. MCP servers run as local
-stdio processes, not network-facing tool containers. No production
-connectors are allowed.
+`START -> prepare -> decide -> validate -> dispatch -> record -> decide ... ->
+finalize -> END`. Conditional edges terminate on limits/errors. A decision may
+propose several tools; dispatch is serial and each observation is recorded before
+the next model turn. Retryable tool failures take the bounded dispatch edge.
+There is no hidden agent loop, automatic LangGraph retry policy or second agent.
 
-## LangGraph workflow (planned)
+Typed JSON-only state carries messages, normalized decisions, proposal references,
+cursor/turn, error flags and final response status. Identity/configuration stays
+in the trusted execution host, outside tool arguments. Active graph nodes consume
+durable graph-step budget; model requests and MCP attempts have separate counters.
 
-`input -> budget check -> model -> tool proposals -> validate/authorize ->
-optional approval -> MCP execution -> validate result -> state update -> budget
-check -> model ... -> final response -> evaluation`.
+Discovery uses the three existing SDK clients. Provider schemas deep-copy MCP
+schemas with explicit OpenAI non-strict function mode to preserve optional/default
+semantics. Local JSON Schema validation precedes dispatch; MCP servers still
+validate inputs, outputs and authorization. The model catalog intersects scenario
+availability with the host allowlist. Role/tenant/resource/scenario permissions
+remain server-enforced. No direct business-service path exists in the agent.
 
-Use `StateGraph` with explicit conditional edges; do not hide this loop inside
-another agent framework. The state contains run/scenario/config IDs, actor context,
-typed message references, outstanding tool-call IDs, observations with provenance,
-budget counters, outcomes and termination reason. It does not store private
-chain-of-thought. A tool proposal cannot alter trusted identity, policy or budgets.
-Check limits before and after every call; timeouts and cancellation count toward
-wall time. Serialize mutations initially. Exhaustion yields a terminal result with
-an explicit reason and preserved trace, never another automatic retry.
+## Persistence boundaries
 
-Provider adapters normalize request messages, tool schemas, tool proposals, final
-responses, finish reasons, provider request IDs and nullable token usage. Preserve
-raw provider response metadata separately for audit. Do not assume identical tool
-semantics or tokenizer behavior across providers. Implement one adapter first;
-add a second before comparing providers. Provider SDKs are deferred dependencies.
+Business schemas remain `opsdesk_run_*`, registered in `opsdesk_control`.
+`opsdesk_agent` holds independently migrated executions, events, model requests,
+operation intents and attempts. `opsdesk_agent_checkpoints` holds official saver
+tables. JSON serialization excludes pickle and arbitrary Python reconstruction.
+Graph calls use synchronous checkpoint durability.
 
-## Baseline and guarded variants
+Official `PostgresSaver` blocking methods run in worker threads through a thin
+async adapter. This preserves Windows' Proactor loop for MCP stdio subprocesses
+while avoiding Psycopg async's incompatible loop requirement. The saver's own
+connection lock serializes checkpoint operations. Python 3.11 and 3.12 are
+supported; local validation uses 3.11, CI includes both.
 
-Both variants share graph, model, prompt task, tools, actor, essential schema
-checks, deny-by-default server authorization, transport limits, write idempotency,
-approval gates and total execution budgets. Baseline returns tool errors to the
-model with no application retry or repair loop; the model may try again within
-its ordinary budget. It never gets destructive unrestricted access.
+A session advisory lock claims each execution. A shared sandbox lifecycle lease
+blocks reset/cleanup during execution. Resume validates the complete host config
+hash and pinned marker/seed. Reset now atomically rotates the existing ownership
+marker after logical fixture verification: equivalent business data is restored,
+but paused executions cannot reuse identities after receipts are cleared.
 
-Guarded adds classified transient retry (at most two extra attempts per logical
-call), bounded argument repair (one extra model call per invalid proposal), output
-schema validation with fail-closed handling, explicit untrusted-data framing and
-injection alerts. Retry writes only with a stable idempotency key; ambiguous
-outcomes require reconciliation before retry. Every physical attempt consumes
-budget and cost. Fix policies before evaluation and use ablations to attribute
-effects; guards may reduce both attack success and legitimate task success.
+Intent arguments and host logical write ID commit before MCP dispatch. Distinct
+attempt IDs consume budgets. Resume of an unknown write reuses that intent and
+MCP receipt key. Responses commit before graph observations; completed replies
+and operations are cached across node replay. Terminal metadata/event commit
+together. See [execution](agent-execution.md), [tracing](agent-tracing.md) and
+[ADR 0004](decisions/0004-durable-agent.md).
 
-## Execution journal contract (planned)
+## Models, budgets and security
 
-Append events with schema version, run ID, sequence number, parent/logical-call ID,
-UTC timestamp, monotonic elapsed time, event kind, actor, config hash, tool name,
-validated/redacted arguments, authorization and approval decisions, dispatch flag,
-execution outcome, audit transaction ID, error class, injection ID and token/cost
-records. Log proposals **before** authorization, including unknown tools and invalid
-arguments. Record dispatch separately from committed effects; reconcile tool and
-database audit records after timeouts. A denied request has `executed=false`.
-Sensitive data is synthetic, but still minimize raw payload retention.
+Official OpenAI async Chat Completions uses an explicit model ID, output token
+limit, disabled SDK retries and `store=False`. Only `--live` permits requests.
+There is no fallback or hardcoded pricing. Provider identity/request IDs and
+nullable usage are captured. Scripted tests use the same execution path, indexed
+by durable model turn. Hidden reasoning is neither requested nor stored.
 
-## Stack and support
+UTC wall deadlines survive downtime; active latency uses `perf_counter`. Unknown
+crash intervals mark timing incomplete. Limits are checked before operations.
+Timeout cancellation cannot prove an executing remote write rolled back; receipt
+reconciliation is required. Documents/results remain untrusted message data.
+Redaction and bounds apply before graph/journal persistence.
 
-Supported Python: CPython 3.11 and 3.12; primary development version 3.11. Python
-3.13+ is deliberately outside this checkpoint's support range. Minimal installation
-requires Pydantic 2, SQLAlchemy 2.0 Core, Alembic, Psycopg 3, AnyIO and pinned
-official MCP SDK 2.3.0. Optional `stack` dependencies lock FastAPI, LangGraph 1 and
-Streamlit without claiming those future runtimes exist. Core
-provides safe queries without an ORM model/session layer. No vector database,
-multi-agent coordinator or extra orchestration framework is introduced.
+Both future baseline and guarded variants share these authorization boundaries.
+Checkpoint 3 implements one minimal recovery policy, not comparative guard
+configurations. No production authentication, HTTP endpoint, universal
+exactly-once guarantee or objective task-success evaluator is implemented.
 
-Dependency decisions were reviewed on 2026-11-08 against official sources:
+## Infrastructure and reviewed APIs
 
-- [LangGraph Graph API quickstart](https://docs.langchain.com/oss/python/langgraph/quickstart)
-  supports explicit graph nodes and tools; only `langgraph` is added directly.
-- [MCP installation](https://py.sdk.modelcontextprotocol.io/get-started/installation/)
-  identifies v2 as stable. Checkpoint 2 uses public `Server` callbacks and `Client`
-  for explicit schema/error validation (ADR 0003); consult
-  the [v2 migration guide](https://py.sdk.modelcontextprotocol.io/migration/),
-  not v1 `FastMCP` examples or mandatory legacy session handshakes.
-- [Pydantic models](https://docs.pydantic.dev/latest/concepts/models/),
-  [FastAPI versioning](https://fastapi.tiangolo.com/deployment/versions/),
-  [Psycopg installation](https://www.psycopg.org/psycopg3/docs/basic/install.html),
-  [Streamlit installation](https://docs.streamlit.io/get-started/installation), and
-  [uv lock/sync](https://docs.astral.sh/uv/concepts/projects/sync/).
+Compose retains PostgreSQL 18.6 pinned by digest, persistent storage, loopback
+`127.0.0.1:55432`, health checks and `internal: false` for Windows host connectivity.
+The container permits outbound networking; stronger evaluation isolation needs
+separate validation. SQLAlchemy Core/Psycopg and Alembic remain the database stack.
+No production connectors are supported.
 
-`uv.lock` records exact resolved artifacts and hashes; bounded declarations in
-`pyproject.toml` communicate supported major lines. CI uses uv 0.13.7 and
-`uv sync --locked --extra stack` so stale locks fail instead of silently changing.
+Pinned core libraries: LangGraph 1.2.20, checkpoint-postgres 3.2.0, official MCP
+2.3.0 and OpenAI 3.46.0. `uv.lock` fixes artifacts/hashes. FastAPI/Streamlit remain
+optional planned runtimes. Official sources reviewed:
 
-## Implemented MCP boundary
-
-Document/business/task factories share strict Pydantic adapters and stable result
-envelopes; all operations call existing services. Each process is bound to one
-trusted actor/tenant/run and a captured sandbox incarnation. A lifecycle lock spans
-incarnation verification and service execution. Services still enforce effective
-permissions. Write IDs are host allocated, signed in MCP metadata and mapped to
-existing receipt keys; no model-controlled identity or retry-key argument exists.
-Client caching is disabled and retries are explicit. Stdout is protocol only for
-servers; diagnostic stderr is developer-side and never a model observation.
-
-The local host is trusted; there is no production authentication, HTTP endpoint,
-complete attempt trace, durable agent execution ledger or live-reset protocol.
-Close server instances and retire operation IDs before reset. No Checkpoint 3
-agent graph or model API is implemented.
+- [LangGraph Graph API](https://docs.langchain.com/oss/python/langgraph/graph-api),
+  [persistence](https://docs.langchain.com/oss/python/langgraph/persistence),
+  [fault tolerance](https://docs.langchain.com/oss/python/langgraph/fault-tolerance),
+  [checkpointers](https://docs.langchain.com/oss/python/langgraph/checkpointers).
+- [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling),
+  [official Python Chat Completions API](https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create).
+- [MCP v2 documentation](https://py.sdk.modelcontextprotocol.io/).
