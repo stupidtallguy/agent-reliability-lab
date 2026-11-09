@@ -23,6 +23,7 @@ from agent_reliability_lab.agent import tables as t
 from agent_reliability_lab.agent.config import AgentConfig, ModelConfig
 from agent_reliability_lab.agent.errors import BudgetExceeded, ExecutionBusy
 from agent_reliability_lab.agent.journal import EVENTS, Redactor
+from agent_reliability_lab.agent.provenance import seal
 from agent_reliability_lab.agent.state import AgentResult, Decision, ModelCall
 from agent_reliability_lab.opsdesk.database import _MIGRATION_LOCK, SandboxManager
 from agent_reliability_lab.opsdesk.fixtures import digest
@@ -186,7 +187,50 @@ class ExecutionStore:
                     journal_seq=0,
                 )
             )
+            self._seal(
+                connection,
+                execution_id,
+                "execution_created",
+                execution_id,
+                dict(config_hash=digest(settings), context=context, task_hash=digest(task)),
+            )
         return execution_id
+
+    def _seal(self, connection, execution_id, kind, reference, body):
+        connection.execute(
+            sa.select(t.executions.c.execution_id)
+            .where(t.executions.c.execution_id == execution_id)
+            .with_for_update()
+        ).scalar_one()
+        prior = connection.execute(
+            sa.select(t.provenance.c.record)
+            .where(t.provenance.c.execution_id == execution_id)
+            .order_by(t.provenance.c.sequence.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        record = seal(
+            execution_id,
+            prior["sequence"] + 1 if prior else 1,
+            kind,
+            reference,
+            body,
+            prior["record_hash"] if prior else None,
+        )
+        connection.execute(
+            t.provenance.insert().values(
+                execution_id=execution_id, sequence=record["sequence"], record=record
+            )
+        )
+
+    def provenance(self, execution_id):
+        with self.engine.connect() as connection:
+            return list(
+                connection.execute(
+                    sa.select(t.provenance.c.record)
+                    .where(t.provenance.c.execution_id == execution_id)
+                    .order_by(t.provenance.c.sequence)
+                ).scalars()
+            )
 
     def update(self, execution_id: str, **values) -> None:
         with self.engine.begin() as connection:
@@ -216,20 +260,20 @@ class ExecutionStore:
             )
             .returning(t.executions.c.journal_seq)
         ).scalar_one()
-        connection.execute(
-            t.events.insert().values(
-                execution_id=execution_id,
-                sequence=sequence,
-                event_type=event_type,
-                timestamp=utcnow(),
-                elapsed_ms=elapsed_ms,
-                payload={
-                    "schema_version": "1.0",
-                    "correlation_id": execution_id,
-                    **self.redactor.clean(payload),
-                },
-            )
+        event = dict(
+            execution_id=execution_id,
+            sequence=sequence,
+            event_type=event_type,
+            timestamp=utcnow(),
+            elapsed_ms=elapsed_ms,
+            payload={
+                "schema_version": "1.0",
+                "correlation_id": execution_id,
+                **self.redactor.clean(payload),
+            },
         )
+        connection.execute(t.events.insert().values(**event))
+        self._seal(connection, execution_id, "journal_event", str(sequence), event)
 
     def event(self, execution_id: str, event_type: str, elapsed_ms: float, **payload) -> None:
         with self.engine.begin() as connection:
@@ -302,6 +346,7 @@ class ExecutionStore:
         model: ModelConfig,
         maximum: int,
         input_hash: str,
+        request_context: dict | None = None,
     ) -> str:
         request_id = uuid.uuid4().hex
         with self.engine.begin() as connection:
@@ -319,6 +364,21 @@ class ExecutionStore:
                 t.requests.insert().values(
                     request_id=request_id, execution_id=execution_id, turn=turn, status="started"
                 )
+            )
+            self._seal(
+                connection,
+                execution_id,
+                "model_started",
+                request_id,
+                dict(
+                    request_id=request_id,
+                    execution_id=execution_id,
+                    turn=turn,
+                    provider=model.provider,
+                    model=model.model_id,
+                    input_hash=input_hash,
+                    context=request_context or {},
+                ),
             )
             self._event(
                 connection,
@@ -343,10 +403,30 @@ class ExecutionStore:
     ) -> dict:
         safe = self.redactor.clean(reply.model_dump(mode="json"))
         with self.engine.begin() as connection:
-            connection.execute(
+            row = connection.execute(
                 t.requests.update()
-                .where(t.requests.c.request_id == request_id)
+                .where(
+                    t.requests.c.request_id == request_id,
+                    t.requests.c.execution_id == execution_id,
+                    t.requests.c.status == "started",
+                )
                 .values(reply=safe, status="completed", duration_ms=duration_ms)
+                .returning(t.requests.c.turn)
+            ).scalar_one_or_none()
+            if row is None:
+                raise ValueError("model request identity or completion conflict")
+            self._seal(
+                connection,
+                execution_id,
+                "model_completed",
+                request_id,
+                dict(
+                    execution_id=execution_id,
+                    request_id=request_id,
+                    turn=row,
+                    reply=safe,
+                    duration_ms=duration_ms,
+                ),
             )
             self._event(
                 connection,
@@ -417,6 +497,25 @@ class ExecutionStore:
                     status="rejected" if rejection else "prepared",
                     response=rejection,
                 )
+            )
+            self._seal(
+                connection,
+                execution_id,
+                "original_proposal",
+                proposal_id,
+                dict(
+                    execution_id=execution_id,
+                    proposal_id=proposal_id,
+                    turn=turn,
+                    position=position,
+                    tool=call.name,
+                    model_call_id=call.call_id,
+                    operation_id=operation_id,
+                    arguments=safe_arguments,
+                    arguments_hash=fingerprint,
+                    original=self.redactor.clean(call.model_dump(mode="json")),
+                    rejection=rejection,
+                ),
             )
             self._event(
                 connection,
@@ -529,6 +628,18 @@ class ExecutionStore:
                 duration_ms=duration_ms,
                 result=self.redactor.capture(response),
                 response_hash=digest(response),
+            )
+            self._seal(
+                connection,
+                execution_id,
+                "tool_response",
+                attempt_id,
+                dict(
+                    proposal_id=operation["proposal_id"],
+                    attempt_id=attempt_id,
+                    operation_id=operation["operation_id"],
+                    response=response,
+                ),
             )
             if retry:
                 self._event(

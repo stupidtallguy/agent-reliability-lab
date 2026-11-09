@@ -75,3 +75,17 @@ reports = sa.Table(
     sa.Column("summary_hash", sa.String(64), nullable=False),
 )
 sa.Index("ix_eval_trial_scenario", trials.c.scenario_id, trials.c.scenario_version)
+
+report_manifests = sa.Table(
+    "report_manifests",
+    metadata,
+    sa.Column(
+        "report_id",
+        sa.String(32),
+        sa.ForeignKey("opsdesk_evaluation.reports.report_id"),
+        primary_key=True,
+    ),
+    sa.Column("manifest", JSONB, nullable=False),
+    sa.Column("manifest_hash", sa.String(64), nullable=False),
+    sa.Column("content_hash", sa.String(64), nullable=False),
+)

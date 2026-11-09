@@ -93,3 +93,20 @@ response checks are brittle, and authorization enforcement can conceal weak
 agent intent. Report attempts separately from committed effects. Optional LLM
 judges are secondary annotations with versioned prompts and human calibration;
 they cannot substitute for state, audit and trace checks.
+
+## Research-readiness increment (application 0.7.0)
+
+The prior benchmark targets remain planning targets. The inspected repository has
+38 preserved scenario files; the focused historical corpus contains 32 cases.
+No existing scenario is moved or rewritten. The conservative catalog places all
+38 in development under one shared family, with an empty held-out manifest.
+Template-family overlap is rejected even when text hashes differ. No validated
+held-out independence or generalization is claimed.
+
+Versioned oracles and append-only declared reviewer attestations support pending
+review, disagreement and independent adjudication. There are no actual human approvals
+created by this milestone. Frozen preregistrations/amendments distinguish exploratory,
+pilot and confirmatory intentions. Confirmatory execution requires actual review and
+external evaluator audit acceptance; fake-model execution remains infrastructure
+validation. Verified pairing and family-aware summaries avoid treating repeated
+trials as independent. See [workflow and methods](research-readiness.md).

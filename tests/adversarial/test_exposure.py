@@ -4,10 +4,10 @@ import copy
 from types import SimpleNamespace
 
 import pytest
-from conftest import configuration
 
 from agent_reliability_lab.adversarial.exposure import verify
 from agent_reliability_lab.opsdesk.fixtures import digest
+from tests.adversarial.support import configuration
 
 
 def evidence():

@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0",
+  "identity": "example_exploratory_plan",
+  "version": 1,
+  "created_at": "2026-11-09T00:00:00Z",
+  "author": "repository_operator",
+  "kind": "preregistration",
+  "mode": "exploratory",
+  "research_question": "Can the synthetic infrastructure reproduce a read-only workflow?",
+  "hypotheses": [
+    "The scripted order response satisfies the existing state/response contract."
+  ],
+  "primary_outcome": "objective_task_success",
+  "secondary_outcomes": [
+    "tool_call_count"
+  ],
+  "configurations": {
+    "defense": "baseline",
+    "transport": "memory"
+  },
+  "model": {
+    "provider": "fake",
+    "model_id": "scripted-v1",
+    "script": [],
+    "repeat_last": false
+  },
+  "scenario_population": [
+    "normal_order_status"
+  ],
+  "categories": [
+    "normal"
+  ],
+  "sample_size": 1,
+  "trial_allocation": {
+    "normal_order_status": 1
+  },
+  "pairing_design": {
+    "paired": false
+  },
+  "oracles": [
+    {
+      "kind": "oracle",
+      "identity": "example_order_oracle",
+      "version": 1,
+      "content_hash": "9711c38e1e138251dbc78257831e38fa6f6d699a7f5fcebdf557b24fe41005e0"
+    }
+  ],
+  "evaluator_version": "1.5.0",
+  "evaluator_audit_reference": null,
+  "split": {
+    "kind": "split",
+    "identity": "opsdesk_development_v1",
+    "version": 1,
+    "content_hash": "c736546bb95581677c96b13de57a75978dd421c4bae9e7e0c55836ae92eb6242"
+  },
+  "exclusion_rules": [
+    "infrastructure_failure"
+  ],
+  "missing_data_rules": [
+    "Never impute unknown outcomes."
+  ],
+  "statistical_plan": {
+    "descriptive_only": true
+  },
+  "interval_method": "Wilson_descriptive_not_independent_inference",
+  "planned_comparisons": [],
+  "stopping_rules": [
+    "Stop after one scripted trial."
+  ],
+  "budget_limits": {
+    "max_llm_calls": 8,
+    "max_tool_calls": 16,
+    "max_graph_steps": 64,
+    "max_retries": 1,
+    "max_wall_seconds": 120.0,
+    "model_timeout_seconds": 30.0,
+    "tool_timeout_seconds": 20.0,
+    "max_output_tokens": 1024,
+    "max_context_bytes": 65536,
+    "max_result_bytes": 16384,
+    "max_answer_chars": 8000
+  },
+  "approval_status": "pending_human_review"
+}

@@ -5,7 +5,6 @@ import hashlib
 import json
 
 import pytest
-from conftest import ROOT, configuration, path_for
 from pydantic import ValidationError
 
 from agent_reliability_lab.adversarial.contracts import (
@@ -21,6 +20,7 @@ from agent_reliability_lab.adversarial.triggers import fires, subset
 from agent_reliability_lab.agent.config import AgentConfig, ModelConfig
 from agent_reliability_lab.agent.models.fake import ScriptedModel
 from agent_reliability_lab.evaluation.runner import read_case
+from tests.adversarial.support import ROOT, configuration, path_for
 
 
 @pytest.mark.parametrize("category,count", [("faults", 12), ("attacks", 12), ("controls", 8)])

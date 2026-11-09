@@ -299,3 +299,14 @@ registry/identity marker after fixture verification, invalidating old clients an
 paused executions whose receipts were cleared. Logical data remains equivalent;
 physical incarnation deliberately changes. Active agents hold shared leases, so
 reset/cleanup wait or fail at the configured lock timeout. See [ADR 0004](decisions/0004-durable-agent.md).
+
+## 0.7.0 additive evidence migrations
+
+New agent migration `0002_provenance` adds a sealed append-only ledger and protects
+completed model decisions/journal rows. Evaluation migrations `0002_reports`,
+`0003_research` and `0004_capture_guard` add report manifests/research artifacts and
+freeze scenario/oracle/captured evidence fields. They do not rewrite historical
+scoring/evidence rows. Initialization runs upgrades under existing advisory locks;
+only the two corresponding Alembic head metadata rows advance. Business schemas,
+registered sandboxes and persistent volumes are unchanged. Do not downgrade/delete
+research history as cleanup. Test/demo scopes contain explicit synthetic artifacts.

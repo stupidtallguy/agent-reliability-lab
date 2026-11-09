@@ -299,3 +299,92 @@ class EvaluationStore:
                 )
             )
         return report_id
+
+    def save_report_bundle(self, experiment_id, scores, summary, envelope):
+        report_id = uuid.uuid4().hex
+        envelope = {**envelope, "report_id": report_id, "generated_at": now().isoformat()}
+
+        # Schema-defined distributions have labels, not authentication headers.
+        # Preserve every label/value for string/secret inspection, recursively.
+        def inspection(value):
+            if isinstance(value, list):
+                return [inspection(item) for item in value]
+            if isinstance(value, dict):
+                return {
+                    key: dict(labels=list(item), values=[inspection(v) for v in item.values()])
+                    if key in {"per_category", "per_scenario", "scenario_distribution"}
+                    and isinstance(item, dict)
+                    else inspection(item)
+                    for key, item in value.items()
+                }
+            return value
+
+        if self.contains_sensitive([inspection(summary), envelope]):
+            raise ValueError("sensitive report cannot be persisted")
+        with self.engine.begin() as connection:
+            rows = list(
+                connection.execute(
+                    sa.select(t.scores, t.trials.c.experiment_id)
+                    .join(t.trials)
+                    .where(t.scores.c.scoring_id.in_([s.scoring_id for s in scores]))
+                ).mappings()
+            )
+            actual = {r["scoring_id"]: r for r in rows}
+            if len(actual) != len(scores) or any(
+                actual[s.scoring_id]["experiment_id"] != experiment_id
+                or actual[s.scoring_id]["result_hash"] != digest(s.model_dump(mode="json"))
+                for s in scores
+            ):
+                raise ValueError("report score association mismatch")
+            for selected in envelope["selected_scores"]:
+                if selected["revision"] != actual[selected["scoring_id"]]["revision"]:
+                    raise ValueError("report revision mismatch")
+            connection.execute(
+                t.reports.insert().values(
+                    report_id=report_id,
+                    experiment_id=experiment_id,
+                    created_at=now(),
+                    score_ids=[s.scoring_id for s in scores],
+                    summary=summary,
+                    summary_hash=digest(summary),
+                )
+            )
+            connection.execute(
+                t.report_manifests.insert().values(
+                    report_id=report_id,
+                    manifest=envelope,
+                    manifest_hash=digest(envelope),
+                    content_hash=envelope["content_hash"],
+                )
+            )
+        return report_id, envelope
+
+    def saved_report(self, report_id):
+        with self.engine.connect() as c:
+            row = dict(
+                c.execute(sa.select(t.reports).where(t.reports.c.report_id == report_id))
+                .mappings()
+                .one()
+            )
+            manifest = (
+                c.execute(
+                    sa.select(t.report_manifests).where(t.report_manifests.c.report_id == report_id)
+                )
+                .mappings()
+                .one_or_none()
+            )
+            records = list(
+                c.execute(
+                    sa.select(t.scores).where(t.scores.c.scoring_id.in_(row["score_ids"]))
+                ).mappings()
+            )
+        if digest(row["summary"]) != row["summary_hash"]:
+            raise ValueError("report integrity mismatch")
+        if manifest and digest(manifest["manifest"]) != manifest["manifest_hash"]:
+            raise ValueError("report manifest integrity mismatch")
+        if any(digest(r["result"]) != r["result_hash"] for r in records):
+            raise ValueError("score integrity mismatch")
+        by_id = {r["scoring_id"]: r for r in records}
+        if set(by_id) != set(row["score_ids"]):
+            raise ValueError("missing report score")
+        return row, dict(manifest) if manifest else None, [by_id[i] for i in row["score_ids"]]

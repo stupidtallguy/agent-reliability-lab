@@ -38,6 +38,7 @@ async def execute(args: argparse.Namespace) -> None:
                     "transport": args.transport,
                     "source_commit": args.source_commit,
                     "defense": args.defense,
+                    "experimental_evaluator": args.experimental_evaluator,
                 }.items()
                 if value is not None
             }
@@ -123,7 +124,33 @@ async def execute(args: argparse.Namespace) -> None:
         elif args.command == "compare":
             display(compare(runner.store, args.baseline, args.guarded))
         elif args.command == "report":
-            document = report(runner.store, args.experiment)
+            versions = getattr(args, "compare_evaluators", None)
+            if versions:
+                documents = [
+                    report(runner.store, args.experiment, evaluator_version=v) for v in versions
+                ]
+                display(
+                    {
+                        "comparison": "separate_version_cohorts",
+                        "warning": "Incompatible scoring semantics; no pooled metrics.",
+                        "reports": [
+                            {
+                                "evaluator_version": v,
+                                "summary": d["summary"],
+                                "export": str(export(d)),
+                            }
+                            for v, d in zip(versions, documents, strict=True)
+                        ],
+                    }
+                )
+                return
+            document = report(
+                runner.store,
+                args.experiment,
+                evaluator_version=getattr(args, "evaluator_version", None),
+                scoring_ids=getattr(args, "score_id", None),
+                trial_ids=getattr(args, "trial_id", None),
+            )
             display(
                 {
                     "experiment_id": args.experiment,
@@ -137,7 +164,11 @@ async def execute(args: argparse.Namespace) -> None:
                 if args.oracle
                 else None
             )
-            display(runner.rescore(args.trial, oracle).model_dump(mode="json"))
+            display(
+                runner.rescore(
+                    args.trial, oracle, experimental_evaluator=args.experimental_evaluator
+                ).model_dump(mode="json")
+            )
         elif args.command == "inspect":
             trial = runner.store.trial(args.trial)
             if not args.evidence:
@@ -203,14 +234,24 @@ def main() -> None:
     run.add_argument("--suite", choices=("all", "faults", "attacks", "controls"))
     run.add_argument("--defense", choices=("baseline", "guarded"))
     run.add_argument("--paired", action="store_true")
+    run.add_argument(
+        "--experimental-evaluator", choices=("1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0")
+    )
     item = commands.add_parser("compare")
     item.add_argument("baseline")
     item.add_argument("guarded")
     item = commands.add_parser("report")
     item.add_argument("experiment")
+    item.add_argument("--evaluator-version")
+    item.add_argument("--score-id", action="append")
+    item.add_argument("--trial-id", action="append")
+    item.add_argument("--compare-evaluators", nargs="+")
     item = commands.add_parser("score")
     item.add_argument("trial")
     item.add_argument("--oracle", type=Path)
+    item.add_argument(
+        "--experimental-evaluator", choices=("1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0")
+    )
     item = commands.add_parser("inspect")
     item.add_argument("trial")
     item.add_argument("--evidence", action="store_true")

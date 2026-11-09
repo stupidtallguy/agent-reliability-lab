@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "study": {
+    "reference": {
+      "kind": "preregistration",
+      "identity": "example_exploratory_plan",
+      "version": 1,
+      "content_hash": "57687f9f4bb0015228cf6808d72a870db8175031744f9d43e8ffdc1aa29acbd2"
+    },
+    "scope": "demo_research_examples"
+  },
+  "configuration_id": "development_default",
+  "repeats": 1,
+  "model": {
+    "provider": "fake",
+    "model_id": "scripted-v1",
+    "script": [],
+    "repeat_last": false
+  },
+  "transport": "memory",
+  "budgets": {
+    "max_llm_calls": 8,
+    "max_tool_calls": 16,
+    "max_graph_steps": 64,
+    "max_retries": 1,
+    "max_wall_seconds": 120.0,
+    "model_timeout_seconds": 30.0,
+    "tool_timeout_seconds": 20.0,
+    "max_output_tokens": 1024,
+    "max_context_bytes": 65536,
+    "max_result_bytes": 16384,
+    "max_answer_chars": 8000
+  },
+  "scripts": {},
+  "annotations": {},
+  "prices": null,
+  "source_commit": null,
+  "accounting_limits": "posthoc_usage_cost_v1",
+  "harnesses": {},
+  "defense": "baseline",
+  "write_scopes": {},
+  "pairing_id": null,
+  "experimental_evaluator": "1.5.0"
+}

@@ -168,6 +168,7 @@ class PriceBook(Contract):
 
 class ExperimentConfig(Contract):
     schema_version: Literal["1.0"] = "1.0"
+    study: dict | None = Field(default=None, exclude_if=lambda value: value is None)
     configuration_id: Identifier = "development_default"
     repeats: int = Field(default=1, ge=1, le=100)
     model: ModelConfig = Field(default_factory=ModelConfig)
@@ -182,6 +183,9 @@ class ExperimentConfig(Contract):
     defense: Literal["baseline", "guarded"] = "baseline"
     write_scopes: dict[str, list[WriteScope]] = Field(default_factory=dict)
     pairing_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    experimental_evaluator: Literal["1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0"] = Field(
+        default="1.1.0", exclude_if=lambda value: value == "1.1.0"
+    )
 
 
 class Exposure(Contract):
@@ -218,6 +222,8 @@ class Evidence(Contract):
     timing_complete: bool = True
     exposures: list[Exposure] = Field(default_factory=list)
     experimental: dict | None = Field(default=None, exclude_if=lambda value: value is None)
+    provenance: list[dict] = Field(default_factory=list, exclude_if=lambda value: not value)
+    trial_binding: dict | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class CallAssessment(Contract):

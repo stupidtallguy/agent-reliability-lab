@@ -58,3 +58,23 @@ Opted-in live pilot measurements must remain separate from scripted validation.
 Review false positives, contamination failures, missing exposure and statistical
 limits. No second provider, 100-case expansion, dashboard or production auth was
 implemented. Checkpoint 6 has not started.
+
+## 0.7.0 finalization candidate (current)
+
+The historical checkpoint descriptions above describe their original handoffs.
+Checkpoint 6 research infrastructure has now begun: evaluator 1.5.0 candidate,
+version-pinned reporting, immutable execution provenance, pending human review,
+explicit pairing, split manifests, frozen studies and descriptive statistical controls.
+See [finalization validation](finalization-validation.md) for actual checks.
+
+Remaining gates before v1.0, in order:
+
+1. Independent read-only audit of 1.5.0 and research/reporting controls; correct any
+   findings under separate version semantics when durable results require it.
+2. Actual independent human oracle review, identity/conflict assessment and adjudication;
+   independently authored held-out families and approved preregistration. No fake approvals.
+3. Separately authorized small live pilot with provider spending controls, if desired;
+   report it apart from scripted infrastructure controls.
+4. Read-only Streamlit results/trace demonstration on approved scoring semantics.
+5. Final Windows/Linux reproduction, distribution, CI, documentation/security review,
+   versioned release artifacts and release-validation record. No v1.0 tag in this increment.

@@ -4,7 +4,25 @@ from agent_reliability_lab.evaluation.metrics import proportion, summarize
 from agent_reliability_lab.opsdesk.fixtures import digest
 
 
-def experimental_summary(results):
+def experimental_summary(
+    results, *, evaluator_version=None, experiment=None, trials=(), revisions=None
+):
+    if evaluator_version == "1.5.0" or any(
+        getattr(r, "evaluator_version", None) == "1.5.0" for r in results
+    ):
+        from agent_reliability_lab.evaluation.population import security_summary
+
+        return security_summary(results, _legacy_summary(results), experiment, trials, revisions)
+    if evaluator_version == "1.4.0" or any(
+        getattr(r, "evaluator_version", None) == "1.4.0" for r in results
+    ):
+        from agent_reliability_lab.adversarial.reporting_v140 import coverage_summary
+
+        return coverage_summary(results, _legacy_summary(results))
+    return _legacy_summary(results)
+
+
+def _legacy_summary(results):
     trials = [r for r in results if r.experimental]
     eligible = [r for r in trials if r.eligible]
     exposures = [e for r in eligible for e in r.experimental.get("exposures", [])]
@@ -44,7 +62,7 @@ def experimental_summary(results):
                 }
             )
     objectives = grouped_objectives
-    return {
+    summary = {
         "configured_trials": len(trials),
         "case_distribution": {
             kind: sum(r.experimental.get("case_kind") == kind for r in trials)
@@ -114,6 +132,27 @@ def experimental_summary(results):
             "refusals are separate task failures.",
         ],
     }
+    if any(getattr(r, "evaluator_version", None) == "1.3.0" for r in eligible):
+        attacked = [r for r in eligible if r.attack_eligible]
+        known = [r for r in attacked if r.attacker_success is not None]
+        summary["attack_outcome_coverage"] = {
+            "configured_attack_trials": sum(
+                bool(r.experimental.get("objectives")) for r in eligible
+            ),
+            "exposed_trials": len(attacked),
+            "measured_successes": sum(r.attacker_success is True for r in known),
+            "measured_failures": sum(r.attacker_success is False for r in known),
+            "unknown_trials": len(attacked) - len(known),
+            "unverified_exposure_trials": sum(
+                any(
+                    e["kind"] == "attack" and e.get("exposed") is None
+                    for e in r.experimental.get("exposures", [])
+                )
+                for r in eligible
+            ),
+            "coverage": proportion(len(known), len(attacked)),
+        }
+    return summary
 
 
 def compare(store, baseline_id, guarded_id):
@@ -155,7 +194,11 @@ def compare(store, baseline_id, guarded_id):
             or a.evaluator_version != b.evaluator_version
             or any(
                 a.scoring_provenance.get(name) != b.scoring_provenance.get(name)
-                for name in ("evaluator_source_hash", "adversarial_source_hash")
+                for name in (
+                    "evaluator_source_hash",
+                    "adversarial_source_hash",
+                    "scoring_implementation_hash",
+                )
             )
         ):
             raise ValueError("paired scoring contracts differ; re-score both sides consistently")
@@ -183,8 +226,16 @@ def compare(store, baseline_id, guarded_id):
         "pairs": pairs,
         "baseline": summarize(list(groups[0].values())),
         "guarded": summarize(list(groups[1].values())),
-        "baseline_security": experimental_summary(list(groups[0].values())),
-        "guarded_security": experimental_summary(list(groups[1].values())),
+        "baseline_security": experimental_summary(
+            list(groups[0].values()),
+            experiment=store.experiment(baseline_id),
+            trials=store.list_trials(experiment_id=baseline_id),
+        ),
+        "guarded_security": experimental_summary(
+            list(groups[1].values()),
+            experiment=store.experiment(guarded_id),
+            trials=store.list_trials(experiment_id=guarded_id),
+        ),
         "limitations": "Descriptive paired infrastructure controls; no statistical superiority "
         "or deterministic hosted-model claim.",
     }

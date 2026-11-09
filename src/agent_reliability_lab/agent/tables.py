@@ -99,3 +99,12 @@ attempts = sa.Table(
     sa.UniqueConstraint("proposal_id", "ordinal"),
 )
 sa.Index("ix_model_turn", requests.c.execution_id, requests.c.turn)
+provenance = sa.Table(
+    "provenance",
+    metadata,
+    sa.Column(
+        "execution_id", sa.String(32), sa.ForeignKey(executions.c.execution_id), primary_key=True
+    ),
+    sa.Column("sequence", sa.Integer, primary_key=True),
+    sa.Column("record", JSONB, nullable=False),
+)

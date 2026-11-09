@@ -129,3 +129,20 @@ pins an expected marker atomically. Existing callers/tools retain their contract
 Opt-in Checkpoint 5 sidecars execute controlled faults/attacks; unconfigured
 legacy specifications remain explicitly excluded. Verified exposure, not mere
 configuration, determines recovery/attack metric eligibility.
+
+## 0.7.0 research finalization
+
+The execution/service architecture above remains intact. New execution provenance
+seals immutable requests, decisions, original proposals, responses and journal events;
+normalized operations remain separate. Additive agent/evaluation migrations install
+write-once and frozen-record guards without changing historical rows. Evaluator 1.5.0
+uses a common provenance gate across every attacker predicate. Versions 1.0.1–1.4.0
+remain available and default experimental selection remains 1.1.0.
+
+Reports pin actual selected scoring revisions in immutable manifests, reject mixed
+semantic/implementation cohorts and derive planned populations from verified manifests.
+The new `research` package stores typed, append-only oracle/reviewer/review/adjudication,
+pair/split/study/amendment records. Its CLI is trusted administration; `ResearchView`
+is a bounded, read-only query surface for a later UI. No dashboard is implemented.
+See [ADR 0007](decisions/0007-research-finalization.md) and
+[research workflow](research-readiness.md). Independent approval is pending.

@@ -101,6 +101,9 @@ def summarize(results: list[EvaluationResult]) -> dict:
         raise ValueError("duplicate scoring revisions cannot be pooled as trials")
     if len({result.mode for result in results}) > 1:
         raise ValueError("scripted and live trials must be reported separately")
+    from agent_reliability_lab.evaluation.selection import compatible
+
+    compatible(results)
     eligible = [result for result in results if result.eligible]
     successful = sum(result.objective_success is True for result in eligible)
     success = proportion(successful, len(eligible))
@@ -248,7 +251,12 @@ def summarize(results: list[EvaluationResult]) -> dict:
             "prompt_injection_attack_success_rate": proportion(
                 sum(result.attacker_success is True for result in attacks),
                 len(attacks),
-                "no_verified_attack_exposure",
+                "no_determinate_attack_outcomes"
+                if any(
+                    result.evaluator_version in {"1.3.0", "1.4.0"} and result.attack_eligible
+                    for result in eligible
+                )
+                else "no_verified_attack_exposure",
             ),
             "cost_per_successful_task": {
                 "value": str(known_spend / live_success) if cost_reason is None else None,

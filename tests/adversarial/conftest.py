@@ -1,29 +1,10 @@
 """All integration resources are fresh and explicitly owned by this test fixture."""
 
-import json
-from pathlib import Path
-
 import pytest
 
-from agent_reliability_lab.evaluation.contracts import ExperimentConfig
 from agent_reliability_lab.evaluation.runner import ScenarioRunner
 from agent_reliability_lab.opsdesk.database import engine_from_env
-
-ROOT = Path(__file__).parents[2]
-
-
-def configuration(**updates):
-    payload = json.loads((ROOT / "benchmarks/evaluation/checkpoint5.json").read_text())
-    payload.update({"transport": "memory", **updates})
-    return ExperimentConfig.model_validate_json(json.dumps(payload))
-
-
-def path_for(sid):
-    for category in ("faults", "attacks", "controls"):
-        path = ROOT / f"benchmarks/{category}/development/{sid}.json"
-        if path.exists():
-            return path
-    return ROOT / f"benchmarks/development/{sid}.json"
+from tests.adversarial.support import configuration, path_for
 
 
 @pytest.fixture

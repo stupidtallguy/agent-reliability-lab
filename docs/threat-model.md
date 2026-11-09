@@ -99,3 +99,19 @@ rejected. SDK exceptions/signing metadata are not journaled. Redaction is best
 effort: never supply real data/secrets as tasks. Database owners and trusted
 Python callers can bypass local controls. Hosted journals need future access and
 retention policy.
+
+## 0.7.0 evidence and research boundaries
+
+New execution seals and database triggers make completed decisions/journal/provenance
+append-only. Frozen trial captures and reports are guarded against replacement.
+Hashes detect changes; a privileged database owner can disable triggers or recompute
+chains, so no external authenticity is claimed. Original proposals stay bounded and
+redacted, separate from validated/authorized operations. Old records are not backfilled.
+
+Oracle/review/preregistration records are trusted research-side inputs and never
+enter model prompts or MCP tools. Reviewer identity is declared/unverified, not
+production authentication. Human approval requires actual attestations; synthetic
+records cannot satisfy it. The read-only research view uses read-only transactions,
+not migration/scoring commands. A future UI needs its own deployment/access policy.
+Cost-capped live execution is disabled when a safe reservation cannot be established.
+No live or paid provider request is part of this milestone.

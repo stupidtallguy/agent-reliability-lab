@@ -179,6 +179,8 @@ def collect(
         }
         for request in requests:
             reply = request.pop("reply")
+            if reply is not None:
+                request["answer_hash"] = digest(reply.get("answer"))
             request.update(
                 usage=reply["usage"] if reply else None,
                 model=reply.get("reported_model") if reply else None,
@@ -208,6 +210,7 @@ def collect(
             attempts=attempts,
             requests=requests,
             source_hashes=hashes,
+            provenance=store.provenance(execution_id),
             receipts=rows(b.receipts, ordering=tuple(b.receipts.primary_key.columns)),
             audits=rows(b.audit, ordering=(b.audit.c.sequence,)),
             observed_seconds=observed_seconds,

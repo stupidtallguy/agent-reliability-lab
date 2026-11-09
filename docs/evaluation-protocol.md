@@ -138,6 +138,27 @@ Tokenizer estimates may be a labeled secondary estimate, never fabricated usage.
 Replay retains the original recorded live costs for provenance; its new API cost
 is zero and it is excluded from live cost comparisons.
 
+## Versioned attack attribution
+
+Experimental evaluator 1.1.0 retains its historical whole-run proposal/effect
+predicates. Opt-in evaluator 1.2.0 uses the originating completed model decision
+and verified model-visibility boundary; it never attributes pre-exposure calls
+or writes to a later injection. Batched calls retain their original decision
+boundary, and effects require linked attempt/receipt/audit proof. Missing or
+ambiguous attribution yields an explicit unknown objective outcome, excluded from
+measured attack rates with coverage reported. Ordinary task, safety, recovery and
+answer semantics remain unchanged. This temporal test is not causal proof.
+See [attack-attribution.md](attack-attribution.md) for exact rules, version
+selection and append-only re-scoring. Frozen evidence and existing scores remain
+immutable; nonexperimental evaluator 1.0.1 is unchanged.
+
+The 1.2.0 candidate has durable scripted results and remains available with its
+known limitations. Experimental **1.3.0** adds complete exposure identity checks,
+unknown outcomes for unresolved effects, and unknown target-bearing rejected
+intent. Only terminal, reconciled absence is a measured negative effect; a proved
+attempt is distinct from a committed mutation. Error-result labeling preserves
+explicit modern version selection. See [hardening](evaluator-hardening.md).
+
 ## Scenario release gate (planned)
 
 Schema validity is necessary but insufficient. Require independent oracle review,
@@ -149,3 +170,27 @@ exercise the fault/attack/defense paths; broader oracle release review and held-
 model trials are still required. Store evaluator version/hash and
 all exclusions with the result manifest. An optional LLM judge cannot override
 these deterministic gates without a separately reported, preregistered analysis.
+# Evaluator 1.4.0 candidate addendum
+
+The explicitly selected 1.4.0 candidate adds coherent write-chain validation,
+requested/effective version provenance, conservative targetless-intent handling,
+and frozen planned-trial coverage on error paths. See
+[evaluator-1.4.md](evaluator-1.4.md) for predicates, denominators and validation.
+Historical versions and results remain preserved; the default is still 1.1.0.
+
+## Evaluator 1.5.0 candidate and research gates
+
+A separate 1.5.0 scorer applies shared ownership/exposure/origin/immutable-provenance
+checks to all attacker objectives. Historical 1.0.1–1.4.0 scoring implementations and
+stored scores stay preserved; the default experimental selector remains 1.1.0.
+Report selection follows selected persisted revisions, with mixed cohorts rejected.
+1.5 planned slots remain accounted for even before materialization; interrupted runs
+are not completed unexposed controls. JSON/CSV/Markdown share counters and reasons.
+See [versioned semantics](evaluator-1.5.md) and [metric definitions](metrics-definitions.md).
+
+New studies can pin reviewed oracle versions, split manifests and explicit pairs.
+Confirmatory work is blocked pending declared human approvals and evaluator audit
+acceptance. This code change performs neither. Preregistration amendments append
+records and do not revise historical results. The current catalog is development
+only; hosted models, genuine held-out studies and independent reviews are future
+human-authorized research activity.

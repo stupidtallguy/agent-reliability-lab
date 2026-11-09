@@ -28,6 +28,11 @@ from agent_reliability_lab.evaluation.oracles import (
 )
 from agent_reliability_lab.evaluation.reconciliation import reconcile
 from agent_reliability_lab.evaluation.tool_scoring import assess_calls
+from agent_reliability_lab.evaluation.versions import (
+    error_identity,
+    validate_selection,
+    version_provenance,
+)
 from agent_reliability_lab.opsdesk.fixtures import digest
 
 
@@ -63,14 +68,25 @@ def base_result(meta: dict, oracle: OracleSpec, **values) -> EvaluationResult:
     )
 
 
-def excluded(meta: dict, oracle: OracleSpec, status: str, reason: str) -> EvaluationResult:
+def excluded(
+    meta: dict,
+    oracle: OracleSpec,
+    status: str,
+    reason: str,
+    *,
+    experimental_evaluator: str | None = None,
+    experiment=None,
+    evidence=None,
+) -> EvaluationResult:
+    if experimental_evaluator is not None:
+        validate_selection(experimental_evaluator)
     label = "invalid_scenario" if status == "invalid_scenario" else "infrastructure_failure"
     findings = (
         []
         if status == "not_executed"
         else [Finding(label=label, detail=reason, references=["trial"])]
     )
-    return base_result(
+    result = base_result(
         meta,
         oracle,
         status=status,
@@ -80,11 +96,135 @@ def excluded(meta: dict, oracle: OracleSpec, status: str, reason: str) -> Evalua
         findings=findings,
         warnings=[reason],
     )
+    if evidence is not None:
+        result.evidence_hash = digest(evidence.model_dump(mode="json"))
+        result.evidence_reference = f"opsdesk-eval://trials/{meta['trial_id']}/evidence"
+    if experimental_evaluator is not None:
+        version_provenance(result, experimental_evaluator, error=reason)
+        config = (experiment or {}).get("manifest", {}).get("config", {})
+        result.scoring_provenance["experimental_context_required"] = bool(
+            isinstance(config, dict) and config.get("harnesses", {}).get(meta["scenario_id"])
+        )
+        if experimental_evaluator in {"1.4.0", "1.5.0"}:
+            from agent_reliability_lab.evaluation.experimental_context import (
+                ExperimentalContextError,
+                attach_plan,
+                manifest_plan,
+                runtime_plan,
+            )
+
+            try:
+                trusted = manifest_plan(experiment, meta)
+                plan = trusted[2] if trusted else runtime_plan(evidence)
+                attach_plan(result, plan)
+            except ExperimentalContextError as error:
+                attach_plan(result, error.plan, error.code)
+    return result
 
 
 def score(
-    scenario, oracle: OracleSpec, evidence: Evidence, meta: dict, prices=None
+    scenario,
+    oracle: OracleSpec,
+    evidence: Evidence,
+    meta: dict,
+    prices=None,
+    *,
+    experimental_evaluator: str = "1.1.0",
+    experiment=None,
 ) -> EvaluationResult:
+    validate_selection(experimental_evaluator)
+    used, plan = evidence, None
+    captured_config = evidence.execution.get("config", {}) if evidence is not None else {}
+    from agent_reliability_lab.evaluation.experimental_context import (
+        ExperimentalContextError,
+        manifest_plan,
+    )
+
+    declared = False
+    manifest_error = None
+    if experiment is not None:
+        try:
+            declared = manifest_plan(experiment, meta)[1] is not None
+        except ExperimentalContextError as error:
+            manifest_error = error
+    context_required = (
+        declared
+        or evidence is not None
+        and evidence.experimental is not None
+        or isinstance(captured_config, dict)
+        and captured_config.get("runtime_plan") is not None
+    )
+    requires_context = (
+        manifest_error is not None
+        or experimental_evaluator in {"1.4.0", "1.5.0"}
+        or (
+            evidence is not None
+            and evidence.experimental is None
+            and (
+                declared
+                or isinstance(captured_config, dict)
+                and captured_config.get("runtime_plan") is not None
+            )
+        )
+    )
+    if requires_context:
+        from agent_reliability_lab.evaluation.experimental_context import (
+            attach_plan,
+            resolve_context,
+        )
+
+        try:
+            if manifest_error is not None:
+                raise manifest_error
+            used, plan = resolve_context(evidence, meta, experiment)
+        except ExperimentalContextError as error:
+            result = base_result(
+                meta,
+                oracle,
+                status="evidence_error",
+                objective_success=None,
+                eligible=bool(meta.get("execution_id")),
+                evidence_hash=digest(evidence.model_dump(mode="json")) if evidence else None,
+                evidence_reference=f"opsdesk-eval://trials/{meta['trial_id']}/evidence",
+                findings=[
+                    Finding(
+                        label="incomplete_evidence", detail=error.code, references=["experimental"]
+                    )
+                ],
+                warnings=[error.code],
+            )
+            attach_plan(result, error.plan, error.code)
+            result.scoring_provenance.update(
+                experimental_context_required=True, required_context="experimental_capture"
+            )
+            result.evaluator_version = experimental_evaluator
+            return version_provenance(result, experimental_evaluator, error=error.code)
+    result = _score(
+        scenario, oracle, used, meta, prices, experimental_evaluator=experimental_evaluator
+    )
+    effective = result.scoring_provenance.pop("_effective_scorer", None)
+    error = result.status if result.status in {"evidence_error", "infrastructure_failure"} else None
+    version_provenance(result, experimental_evaluator, effective, error)
+    result.scoring_provenance.update(
+        experimental_context_required=bool(context_required),
+        required_context="experimental_capture" if context_required else "nonexperimental",
+    )
+    if experimental_evaluator in {"1.4.0", "1.5.0"}:
+        if experimental_evaluator == "1.5.0":
+            result.experimental["planned_trial"] = plan
+        else:
+            attach_plan(result, plan)
+        result.evidence_hash = digest(evidence.model_dump(mode="json"))
+        if plan.get("context_recovered"):
+            result.scoring_provenance["recovered_context_hash"] = digest(used.experimental)
+        result.scoring_provenance.update(
+            context_reconstructed=bool(plan.get("context_recovered")),
+            context_provenance={k: plan.get(k) for k in ("source", "source_hash")},
+        )
+    return result
+
+
+def _score(scenario, oracle, evidence, meta, prices=None, *, experimental_evaluator="1.1.0"):
     if (
         evidence.execution.get("status") == "failed"
         and (evidence.execution.get("result") or {}).get("reason") == "execution_error"
@@ -92,7 +232,7 @@ def score(
         result = excluded(meta, oracle, "infrastructure_failure", "agent_host_execution_error")
         result.evidence_hash = digest(evidence.model_dump(mode="json"))
         result.evidence_reference = f"opsdesk-eval://trials/{meta['trial_id']}/evidence"
-        return result
+        return error_identity(result, evidence, experimental_evaluator)
     findings, checks, warnings = [], [], []
 
     def finding(label, detail, reference):
@@ -102,7 +242,7 @@ def score(
         reconciliation = reconcile(scenario, evidence)
         calls, coverage = assess_calls(scenario, oracle, evidence, reconciliation)
     except (KeyError, ValueError, TypeError, IndexError) as error:
-        return base_result(
+        result = base_result(
             meta,
             oracle,
             status="evidence_error",
@@ -118,6 +258,7 @@ def score(
                 )
             ],
         )
+        return error_identity(result, evidence, experimental_evaluator)
     reconciliation.update(
         tool_rubric_available=oracle.tool_rules is not None, tool_coverage=coverage
     )
@@ -419,7 +560,25 @@ def score(
         },
     }
     if evidence.experimental is not None:
+        result.scoring_provenance["_effective_scorer"] = experimental_evaluator
+        if experimental_evaluator == "1.5.0":
+            from agent_reliability_lab.adversarial.attribution_v150 import apply
+
+            return apply(result, scenario, evidence, oracle)
+        if experimental_evaluator == "1.4.0":
+            from agent_reliability_lab.adversarial.attribution_v140 import apply
+
+            return apply(result, scenario, evidence, oracle)
+        if experimental_evaluator == "1.3.0":
+            from agent_reliability_lab.adversarial.attribution_v130 import apply
+
+            return apply(result, scenario, evidence, oracle)
+        if experimental_evaluator == "1.2.0":
+            from agent_reliability_lab.adversarial.attribution import apply
+
+            return apply(result, scenario, evidence, oracle)
         from agent_reliability_lab.adversarial.objectives import apply
 
         return apply(result, scenario, evidence)
+    result.scoring_provenance["_effective_scorer"] = EVALUATOR_VERSION
     return result

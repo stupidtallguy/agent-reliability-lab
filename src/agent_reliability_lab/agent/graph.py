@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agent_reliability_lab.adversarial.defenses import blocks, frame
 from agent_reliability_lab.adversarial.runtime import Interceptor
+from agent_reliability_lab.agent.budgets import before_model_call
 from agent_reliability_lab.agent.config import AgentConfig
 from agent_reliability_lab.agent.errors import BudgetExceeded, ModelFailure
 from agent_reliability_lab.agent.models.base import ModelAdapter
@@ -121,6 +122,7 @@ class GraphRuntime:
                 raise BudgetExceeded("context_size")
             cached = self.store.cached_reply(self.execution_id, state["turn"])
             if cached is None:
+                before_model_call(self.config, self.store.usage(self.execution_id), state["turn"])
                 request_id = self.store.model_started(
                     self.execution_id,
                     state["turn"],
@@ -128,6 +130,12 @@ class GraphRuntime:
                     self.config.model,
                     self.config.budgets.max_llm_calls,
                     digest([state["messages"], tools]),
+                    dict(
+                        system_template_hash=digest(SYSTEM_POLICY),
+                        tool_schema_hash=digest(tools),
+                        max_output_tokens=self.config.budgets.max_output_tokens,
+                        source_commit=self.config.source_commit,
+                    ),
                 )
                 if self.interceptor:
                     self.interceptor.model_exposure(

@@ -1,5 +1,6 @@
 """Trusted host settings; credentials never belong in this model or checkpoints."""
 
+from decimal import Decimal
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
@@ -11,6 +12,11 @@ from agent_reliability_lab.opsdesk.database import schema_for
 
 
 class Budgets(Contract):
+    max_known_tokens: int | None = Field(default=None, ge=1, exclude_if=lambda value: value is None)
+    max_estimated_cost: Decimal | None = Field(
+        default=None, gt=0, allow_inf_nan=False, exclude_if=lambda value: value is None
+    )
+    price_schedule: dict | None = Field(default=None, exclude_if=lambda value: value is None)
     max_llm_calls: Annotated[int, Field(ge=1, le=100)] = 8
     max_tool_calls: Annotated[int, Field(ge=1, le=100)] = 16
     max_graph_steps: Annotated[int, Field(ge=1, le=1000)] = 64
@@ -32,6 +38,9 @@ class ModelConfig(Contract):
 
 
 class AgentConfig(Contract):
+    source_commit: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{40}$", exclude_if=lambda value: value is None
+    )
     sandbox_run_id: str
     actor_id: Identifier
     tenant_id: Identifier

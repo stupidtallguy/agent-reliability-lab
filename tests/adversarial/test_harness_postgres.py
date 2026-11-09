@@ -7,7 +7,6 @@ import sys
 import uuid
 
 import pytest
-from conftest import ROOT, configuration, path_for
 
 from agent_reliability_lab.adversarial.replay import verify_replay
 from agent_reliability_lab.adversarial.reporting import compare, experimental_summary
@@ -21,6 +20,7 @@ from agent_reliability_lab.evaluation.reporting import export, report
 from agent_reliability_lab.evaluation.runner import read_case
 from agent_reliability_lab.evaluation.scoring import score
 from agent_reliability_lab.opsdesk.fixtures import digest, from_scenario
+from tests.adversarial.support import ROOT, configuration, path_for
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 

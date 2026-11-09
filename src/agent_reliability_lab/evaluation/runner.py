@@ -12,7 +12,7 @@ from pathlib import Path
 from pydantic import ValidationError
 from sqlalchemy.engine import Engine
 
-from agent_reliability_lab.adversarial import ADVERSARIAL_EVALUATOR_VERSION, HARNESS_VERSION
+from agent_reliability_lab.adversarial import HARNESS_VERSION
 from agent_reliability_lab.adversarial.contracts import Defense
 from agent_reliability_lab.agent.config import AgentConfig
 from agent_reliability_lab.agent.execution import AgentExecution
@@ -57,7 +57,7 @@ def provenance(config: ExperimentConfig) -> dict:
         "python": platform.python_version(),
         "platform": platform.system(),
         "sdk_versions": {name: version(name) for name in ("langgraph", "mcp", "openai", "psycopg")},
-        "evaluator_version": ADVERSARIAL_EVALUATOR_VERSION
+        "evaluator_version": config.experimental_evaluator
         if config.harnesses
         else EVALUATOR_VERSION,
         "harness_version": HARNESS_VERSION if config.harnesses else None,
@@ -119,6 +119,51 @@ class ScenarioRunner:
         ]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate scenario IDs; use repeats for repeated trials")
+        study_validation = None
+        if config.study is not None:
+            from agent_reliability_lab.research.contracts import Reference
+            from agent_reliability_lab.research.persistence import ResearchStore
+
+            reference = Reference.model_validate(config.study["reference"])
+            research = ResearchStore(self.engine, config.study.get("scope", "research"))
+            study = research.validate_study(
+                reference,
+                ids,
+                accept_declared_reviewers=config.study.get("accept_declared_reviewers") is True,
+            )
+            if study.evaluator_version != config.experimental_evaluator:
+                raise ValueError("preregistered evaluator mismatch")
+            if study.model != config.model.model_dump(mode="json"):
+                raise ValueError("preregistered model mismatch")
+            if study.budget_limits != config.budgets.model_dump(mode="json"):
+                raise ValueError("preregistered execution budget mismatch")
+            if study.sample_size != len(ids) * config.repeats:
+                raise ValueError("preregistered sample size mismatch")
+            variants = study.configurations.get("variants", [study.configurations])
+            if dict(defense=config.defense, transport=config.transport) not in variants:
+                raise ValueError("preregistered configuration mismatch")
+            split = research.get(study.split)
+            planned = {item.scenario_id: item for item in split.templates}
+            for sid, (_case, fingerprint, problem) in zip(ids, cases, strict=True):
+                if problem or planned[sid].content_hash != fingerprint:
+                    raise ValueError("preregistered scenario content mismatch")
+            for ref in study.oracles:
+                oracle = research.get(ref)
+                if oracle.scenario_hash != planned[oracle.scenario_id].content_hash:
+                    raise ValueError("preregistered oracle scenario mismatch")
+                if config.annotations.get(oracle.scenario_id, OracleSpec()) != oracle.scoring_rules:
+                    raise ValueError("preregistered oracle rules mismatch")
+            study_validation = dict(
+                reference=reference.model_dump(mode="json"),
+                mode=study.mode,
+                validated_at=now().isoformat(),
+                review_statuses=[research.review_status(ref) for ref in study.oracles],
+                evaluator_audit_reference=study.evaluator_audit_reference,
+            )
+            if study.mode == "confirmatory" and config.model.provider == "fake":
+                raise ValueError(
+                    "scripted infrastructure trials cannot be confirmatory model evidence"
+                )
         await self.store.initialize()
         manifest = {
             "schema_version": "1.0",
@@ -133,7 +178,10 @@ class ScenarioRunner:
             if config.model.provider == "fake"
             else "live_evaluation",
         }
+        if study_validation is not None:
+            manifest["study_validation"] = study_validation
         experiment_id = self.store.create_experiment(manifest)
+        experiment = self.store.experiment(experiment_id)
         mode = "scripted" if config.model.provider == "fake" else "live"
         for case, fingerprint, problem in cases:
             scenario = case.scenario if case else None
@@ -183,7 +231,16 @@ class ScenarioRunner:
                         in {"oracle_scenario_hash_mismatch", "harness_scenario_binding_mismatch"}
                         else "not_executed"
                     )
-                    self.store.save_score(excluded(meta, oracle, status, reason))
+                    self.store.save_score(
+                        excluded(
+                            meta,
+                            oracle,
+                            status,
+                            reason,
+                            experimental_evaluator=config.experimental_evaluator,
+                            experiment=experiment,
+                        )
+                    )
                     self.store.update_trial(meta["trial_id"], state="excluded", completed_at=now())
                     continue
                 await self._trial(
@@ -195,13 +252,17 @@ class ScenarioRunner:
                     live,
                     model_factory,
                     execution_options or {},
+                    experiment,
                 )
         return experiment_id
 
-    async def _trial(self, scenario, oracle, config, meta, script, live, model_factory, options):
+    async def _trial(
+        self, scenario, oracle, config, meta, script, live, model_factory, options, experiment
+    ):
         trial_id = meta["trial_id"]
         sandbox = None
         result = None
+        evidence = None
         try:
             run_id = "eval_" + uuid.uuid4().hex[:27]
             sandbox = self.manager.provision(run_id, from_scenario(scenario), scenario.tools)
@@ -232,6 +293,7 @@ class ScenarioRunner:
             )
             model_config = config.model.model_copy(update={"script": script or []})
             agent_config = AgentConfig(
+                source_commit=experiment["manifest"]["provenance"]["source_commit"],
                 sandbox_run_id=run_id,
                 actor_id=scenario.actor.actor_id,
                 tenant_id=scenario.actor.tenant_id,
@@ -265,6 +327,16 @@ class ScenarioRunner:
             )
             duration = time.perf_counter() - started
             evidence = collect(self.engine, sandbox, execution_id, initial, catalog, duration)
+            evidence.trial_binding = dict(
+                trial_id=trial_id,
+                experiment_id=meta["experiment_id"],
+                scenario_id=scenario.scenario_id,
+                scenario_hash=meta["scenario_hash"],
+                execution_id=execution_id,
+                sandbox_run_id=run_id,
+                marker=evidence.marker,
+                seed_hash=evidence.seed_hash,
+            )
             if scenario.scenario_id in config.harnesses:
                 harness = config.harnesses[scenario.scenario_id]
                 evidence.experimental = {
@@ -280,10 +352,24 @@ class ScenarioRunner:
             self.store.save_evidence(trial_id, evidence)
             if result.status == "failed" and result.reason == "execution_error":
                 scored = excluded(
-                    meta, oracle, "infrastructure_failure", "agent_host_execution_error"
+                    meta,
+                    oracle,
+                    "infrastructure_failure",
+                    "agent_host_execution_error",
+                    experimental_evaluator=config.experimental_evaluator,
+                    experiment=experiment,
+                    evidence=evidence,
                 )
             else:
-                scored = score(scenario, oracle, evidence, meta, config.prices)
+                scored = score(
+                    scenario,
+                    oracle,
+                    evidence,
+                    meta,
+                    config.prices,
+                    experimental_evaluator=config.experimental_evaluator,
+                    experiment=experiment,
+                )
             self.store.save_score(scored)
         except Exception as error:
             self.store.save_score(
@@ -292,6 +378,9 @@ class ScenarioRunner:
                     oracle,
                     "infrastructure_failure",
                     f"evaluation_infrastructure_{type(error).__name__}",
+                    experimental_evaluator=config.experimental_evaluator,
+                    experiment=experiment,
+                    evidence=evidence,
                 )
             )
             self.store.update_trial(trial_id, state="failed", completed_at=now())
@@ -326,7 +415,13 @@ class ScenarioRunner:
         self.store.update_trial(trial_id, cleanup=outcome)
         return outcome
 
-    def rescore(self, trial_id: str, oracle: OracleSpec | None = None):
+    def rescore(
+        self,
+        trial_id: str,
+        oracle: OracleSpec | None = None,
+        *,
+        experimental_evaluator: str | None = None,
+    ):
         trial = self.store.trial(trial_id)
         if trial["evidence"] is None or trial["scenario"] is None:
             raise ValueError("frozen evidence and a valid scenario are required for re-scoring")
@@ -334,7 +429,8 @@ class ScenarioRunner:
         selected = oracle or OracleSpec.model_validate(trial["oracle"])
         if selected.scenario_hash and selected.scenario_hash != trial["scenario_hash"]:
             raise ValueError("oracle scenario hash mismatch")
-        manifest = self.store.experiment(trial["experiment_id"])["manifest"]
+        experiment = self.store.experiment(trial["experiment_id"])
+        manifest = experiment["manifest"]
         config = ExperimentConfig.model_validate_json(json.dumps(manifest["config"]))
         result = score(
             scenario,
@@ -342,6 +438,10 @@ class ScenarioRunner:
             Evidence.model_validate_json(json.dumps(trial["evidence"])),
             trial["metadata"],
             config.prices,
+            experimental_evaluator=config.experimental_evaluator
+            if experimental_evaluator is None
+            else experimental_evaluator,
+            experiment=experiment,
         )
         self.store.save_score(result)
         return result

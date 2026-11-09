@@ -8,6 +8,14 @@ from pathlib import Path
 from agent_reliability_lab.adversarial.reporting import experimental_summary
 from agent_reliability_lab.evaluation.metrics import summarize
 from agent_reliability_lab.evaluation.persistence import EvaluationStore
+from agent_reliability_lab.opsdesk.fixtures import digest
+
+RENDERER_VERSION = "2.0.0"
+
+
+def content_hash(manifest_hash, results, summary):
+    return digest(dict(experiment_manifest_hash=manifest_hash, results=results, summary=summary))
+
 
 DEFINITIONS = {
     "task_success_rate": (
@@ -35,20 +43,44 @@ DEFINITIONS = {
 }
 
 
-def report(store: EvaluationStore, experiment_id: str) -> dict:
-    manifest = store.experiment(experiment_id)["manifest"]
+def report(
+    store: EvaluationStore,
+    experiment_id: str,
+    *,
+    evaluator_version=None,
+    scoring_ids=None,
+    trial_ids=None,
+) -> dict:
+    from agent_reliability_lab.evaluation.selection import select
+
+    experiment = store.experiment(experiment_id)
+    manifest = experiment["manifest"]
     trials = store.list_trials(experiment_id=experiment_id)
-    scores = []
-    for trial in trials:
-        revisions = store.scores(trial["trial_id"])
-        if not revisions:
-            raise ValueError(
-                "experiment has unscored trials; inspect its lifecycle before reporting"
-            )
-        scores.append(revisions[-1])
+    cohort = select(
+        store,
+        experiment,
+        trials,
+        evaluator_version=evaluator_version,
+        scoring_ids=scoring_ids,
+        trial_ids=trial_ids,
+    )
+    scores = cohort.results
+    if (
+        cohort.unavailable
+        and cohort.version != "1.5.0"
+        and evaluator_version is None
+        and not scoring_ids
+    ):
+        raise ValueError("experiment has unscored trials; inspect its lifecycle before reporting")
     summary = summarize(scores)
-    if any(score.experimental for score in scores):
-        summary["security"] = experimental_summary(scores)
+    if any(score.experimental for score in scores) or cohort.version in {"1.4.0", "1.5.0"}:
+        summary["security"] = experimental_summary(
+            scores,
+            evaluator_version=cohort.version,
+            experiment=experiment,
+            trials=trials,
+            revisions=cohort.revisions,
+        )
     summary["metric_definitions"] = DEFINITIONS
     summary["per_scenario"] = {
         scenario_id: summarize([score for score in scores if score.scenario_id == scenario_id])
@@ -58,16 +90,94 @@ def report(store: EvaluationStore, experiment_id: str) -> dict:
         category: summarize([score for score in scores if score.category == category])
         for category in sorted({score.category for score in scores})
     }
-    report_id = store.save_report(experiment_id, scores, summary)
+    payloads = [score.model_dump(mode="json") for score in scores]
+    selection = {
+        "evaluator_version": cohort.version,
+        "revisions": cohort.revisions,
+        "unavailable": cohort.unavailable,
+    }
+    cleanup = {trial["trial_id"]: trial["cleanup"] for trial in trials}
+    envelope = dict(
+        schema_version="1.0",
+        experiment_id=experiment_id,
+        experiment_manifest_hash=experiment["manifest_hash"],
+        renderer_version=RENDERER_VERSION,
+        metric_definition_version=cohort.version,
+        selection=selection,
+        cleanup_snapshot=cleanup,
+        content_hash=content_hash(experiment["manifest_hash"], payloads, summary),
+        selected_scores=[
+            dict(
+                scoring_id=s.scoring_id,
+                trial_id=s.trial_id,
+                revision=cohort.revisions[s.scoring_id],
+                requested_evaluator=s.scoring_provenance.get(
+                    "requested_evaluator_version", s.evaluator_version
+                ),
+                effective_evaluator=s.scoring_provenance.get("effective_evaluator_version"),
+                result_evaluator=s.evaluator_version,
+                scoring_schema=s.schema_version,
+                evidence_hash=s.evidence_hash,
+                rules_hash=s.rules_hash,
+                implementation_hashes={
+                    k: s.scoring_provenance.get(k)
+                    for k in (
+                        "evaluator_source_hash",
+                        "adversarial_source_hash",
+                        "scoring_implementation_hash",
+                        "dependency_lock_hash",
+                    )
+                },
+                implementation_scope=s.scoring_provenance.get("implementation_scope"),
+            )
+            for s in scores
+        ],
+    )
+    if hasattr(store, "save_report_bundle"):
+        report_id, envelope = store.save_report_bundle(experiment_id, scores, summary, envelope)
+    else:
+        report_id = store.save_report(experiment_id, scores, summary)
+        envelope = {**envelope, "report_id": report_id, "generated_at": None}
     return {
         "schema_version": "1.0",
+        "renderer_version": RENDERER_VERSION,
+        "report_manifest": envelope,
+        "selection": selection,
         "report_id": report_id,
         "experiment_id": experiment_id,
         "manifest": manifest,
         "summary": summary,
-        "results": [score.model_dump(mode="json") for score in scores],
-        "cleanup": {trial["trial_id"]: trial["cleanup"] for trial in trials},
+        "results": payloads,
+        "cleanup": cleanup,
     }
+
+
+def reproduce(store, report_id):
+    row, record, scores = store.saved_report(report_id)
+    if record is None:
+        raise ValueError("historical report has no renderer manifest; inspect preserved export")
+    envelope = record["manifest"]
+    if envelope["renderer_version"] != RENDERER_VERSION:
+        raise ValueError("report requires a different renderer version")
+    experiment = store.experiment(row["experiment_id"])
+    payloads = [r["result"] for r in scores]
+    if (
+        content_hash(experiment["manifest_hash"], payloads, row["summary"])
+        != record["content_hash"]
+    ):
+        raise ValueError("report substantive content integrity mismatch")
+    return dict(
+        schema_version="1.0",
+        renderer_version=RENDERER_VERSION,
+        report_manifest=envelope,
+        selection=envelope["selection"],
+        report_id=report_id,
+        experiment_id=row["experiment_id"],
+        manifest=experiment["manifest"],
+        summary=row["summary"],
+        results=payloads,
+        cleanup=envelope["cleanup_snapshot"],
+    )
 
 
 def markdown(document: dict) -> str:
@@ -99,11 +209,11 @@ def markdown(document: dict) -> str:
             "Exposure and per-objective outcomes below are scripted infrastructure controls.",
             "",
             "```json",
-            json.dumps(summary["security"], indent=2),
+            json.dumps(summary["security"], indent=2, sort_keys=True),
             "```",
             "",
         ]
-    for name, metric in summary["metrics"].items():
+    for name, metric in sorted(summary["metrics"].items()):
         value = metric["value"] if metric["value"] is not None else "N/A"
         lines.append(f"| {name} | {value} | {metric.get('denominator', metric.get('reason'))} |")
     lines += [
@@ -122,6 +232,26 @@ def markdown(document: dict) -> str:
             f"| {result['scenario_id']} / {result['trial_index']} | {result['status']} | "
             f"{result['agent_status']} | {result['trial_id']} / {result['execution_id']} |"
         )
+    routed = [
+        r
+        for r in document["results"]
+        if "requested_evaluator_version" in r.get("scoring_provenance", {})
+    ]
+    if routed:
+        lines += [
+            "",
+            "## Scoring version provenance",
+            "",
+            "| Trial | Requested | Effective scorer | Classification |",
+            "| --- | --- | --- | --- |",
+        ]
+        for result in routed:
+            p = result["scoring_provenance"]
+            lines.append(
+                f"| {result['trial_id']} | {p['requested_evaluator_version']} | "
+                f"{p['effective_evaluator_version'] or 'none (not executed)'} | "
+                f"{p['result_classification']} |"
+            )
     lines += [
         "",
         "## Failure labels",
@@ -133,6 +263,24 @@ def markdown(document: dict) -> str:
     ]
     lines.extend(f"- {name}: {definition}" for name, definition in DEFINITIONS.items())
     lines += ["", "## Missing data and limits", ""]
+    coverage = summary.get("security", {}).get("attack_outcome_coverage")
+    if coverage is not None:
+        if "determinate_trials" in coverage:
+            lines.append(
+                f"- Attack outcomes: {coverage['measured_successes']} measured successes, "
+                f"{coverage['measured_failures']} measured failures; "
+                f"unresolved trials: {coverage['unknown_trials']}. "
+                f"Verified exposed: {coverage['exposed_trials']}; "
+                f"unknown exposure: {coverage['unverified_exposure_trials']}; "
+                f"completed unexposed controls: {coverage['unexposed_controls']}."
+            )
+        else:
+            lines.append(
+                f"- Attack outcomes: {coverage['measured_successes']} measured successes, "
+                f"{coverage['measured_failures']} measured failures, "
+                f"{coverage['unknown_trials']} unknown of "
+                f"{coverage['exposed_trials']} exposed trials."
+            )
     lines.extend(f"- {warning}" for warning in summary["warnings"])
     lines += [
         "- Recovery/attack metrics require exposure chains; missing proof is inconclusive.",
@@ -165,7 +313,7 @@ def export(document: dict, root: Path = Path("artifacts/evaluations")) -> Path:
     writer.writeheader()
     groups = {"__all__": document["summary"], **document["summary"]["per_scenario"]}
     for scope, summary in groups.items():
-        for name, record in summary["metrics"].items():
+        for name, record in sorted(summary["metrics"].items()):
             row = {key: record.get(key) for key in writer.fieldnames}
             row.update(
                 scenario_id=scope,
@@ -192,6 +340,58 @@ def export(document: dict, root: Path = Path("artifacts/evaluations")) -> Path:
             )
     if "security" in document["summary"]:
         security = document["summary"]["security"]
+        coverage = security.get("attack_outcome_coverage", {})
+        if "determinate_trials" in coverage:
+            counts = {
+                "configured_trials": security["configured_trials"],
+                "trial_metadata_unavailable": security["trial_metadata_unavailable"],
+                **{
+                    k: v
+                    for k, v in coverage.items()
+                    if k not in {"coverage", "attack_success", "units", "schema_version"}
+                },
+            }
+            for name, value in counts.items():
+                writer.writerow(
+                    dict(
+                        scenario_id="__security__",
+                        metric=name,
+                        value=value,
+                        status="available" if value is not None else "unavailable",
+                        units="trials",
+                    )
+                )
+            for name in ("coverage", "attack_success"):
+                metric = coverage[name]
+                writer.writerow(
+                    dict(
+                        scenario_id="__security__",
+                        metric="attack_outcome_" + name,
+                        units="proportion",
+                        **metric,
+                    )
+                )
+        if "population" in security:
+            for name, value in security["population"].items():
+                if name in {
+                    "planned_trials",
+                    "materialized_trials",
+                    "selected_scores",
+                    "unmaterialized_trials",
+                    "unscored_trials",
+                    "completed_trials",
+                    "eligible_trials",
+                    "excluded_trials",
+                }:
+                    writer.writerow(
+                        dict(
+                            scenario_id="__population__",
+                            metric=name,
+                            value=value,
+                            status="available" if value is not None else "unavailable",
+                            units="trials",
+                        )
+                    )
         for name, metric in {
             **security["per_objective"],
             "defensive_false_positive_rate": security["defensive_false_positive_rate"],
@@ -209,8 +409,21 @@ def export(document: dict, root: Path = Path("artifacts/evaluations")) -> Path:
                     },
                 }
             )
+    for result in document["results"]:
+        p = result.get("scoring_provenance", {})
+        if "requested_evaluator_version" in p:
+            for name in ("requested_evaluator_version", "effective_evaluator_version"):
+                writer.writerow(
+                    dict(
+                        scenario_id="__trial__:" + result["trial_id"],
+                        metric=name,
+                        value=p[name],
+                        status="available" if p[name] else "not_executed",
+                        units="version",
+                    )
+                )
     contents = {
-        "results.json": json.dumps(document, indent=2, ensure_ascii=False),
+        "results.json": json.dumps(document, indent=2, ensure_ascii=False, sort_keys=True),
         "metrics.csv": output.getvalue(),
         "report.md": markdown(document),
     }
