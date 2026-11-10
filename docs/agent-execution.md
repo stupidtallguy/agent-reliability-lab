@@ -146,3 +146,8 @@ shared sandbox lease blocks reset/cleanup while active. Reset rotates the marker
 and clears receipts; old executions/servers fail closed even though logical data
 matches. Metadata remains inspectable after sandbox cleanup. Automatic retention
 deletion is not yet implemented.
+
+
+## Checkpoint 9 extension (0.9.0)
+
+The product demonstration runs the existing LangGraph agent through actual MCP with the deterministic scripted provider. It does not bypass business authorization or use a paid model. Trusted host-side selection remains mandatory. See demo-guide.md and dashboard.md for execution inspection.

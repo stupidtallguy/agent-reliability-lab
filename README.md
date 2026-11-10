@@ -1,147 +1,145 @@
 # AI Agent Reliability & Evaluation Lab
 
-A local research platform for testing tool-using agents against objective state,
-trace and response requirements in **OpsDesk**, a synthetic company environment.
+A local platform for investigating whether tool-using agents actually perform the
+right actions, recover safely, and leave enough evidence to justify an evaluation.
+OpsDesk, a fictional company, supplies policies, customers, orders, payments and
+support tasks. No real customer records or production integrations are used.
 
-**Application 0.8.0 · experimental evaluator 1.6.0 candidate.** Historical scorers
-1.0.1–1.5.0 remain available; the default experimental selector remains 1.1.0.
-Evaluator 1.6.0 still requires independent review. No human oracle approval,
-held-out validation or live-model robustness claim is made. Scripted experiments
-validate infrastructure, not model reliability. The repository remains private.
+**Application 0.9.0 | evaluator 1.7.0 candidate | renderer 2.2.0.**
+The default experimental selector remains **1.1.0**. Candidate results require
+explicit selection and independent audit. The repository remains private.
 
-The central question is how reliably agents execute multi-step workflows under
-normal conditions, tool failures and indirect prompt injection. Secondary questions
-cover tool choice and arguments, recovery, unauthorized proposals versus committed
-effects, defensive tradeoffs, latency, measured cost and recurring failure patterns.
+## Start the demonstration
+
+Use CPython **3.11 or 3.12**, Docker Desktop with Linux containers (Windows), or
+Docker Engine and Compose (Linux/macOS), and uv **0.13.7**:
+
+```console
+python -m pip install uv==0.13.7
+uv sync --locked --extra stack
+uv run --locked --extra stack opsdesk-lab demo
+```
+
+This command starts a dedicated, loopback-only, temporary PostgreSQL instance,
+runs seven scenarios with both scripted baseline and guarded configurations,
+freezes scores, reports and paired analysis, then opens the read-only dashboard
+at [localhost:8501](http://127.0.0.1:8501). No API key or model request is needed.
+It does not use the persistent development database. Add `--no-ui` for automation.
+Each invocation appends a fresh set of trials; outcomes are deterministic while
+identifiers, timings and evidence hashes vary. See the [demo guide](docs/demo-guide.md).
+
+## What the platform does
+
+- Executes a single LangGraph agent through eight typed tools on three MCP servers.
+- Enforces host-bound actor, tenant, scenario permissions, budgets and retry identities.
+- Uses isolated PostgreSQL schemas, deterministic fixtures, atomic writes, receipts
+  and mutation audits to distinguish attempted actions from committed effects.
+- Preserves original model proposals, checkpoints and a sealed execution journal.
+- Scores state, response and trace requirements independently of agent self-assessment.
+- Runs controlled tool-failure and indirect prompt-injection scenarios, with explicit
+  positive, negative, unknown, contradictory and excluded outcomes.
+- Produces immutable, revision-pinned JSON, CSV and Markdown reports and paired analyses.
+- Provides a read-only Streamlit dashboard for metrics, traces, security and research readiness.
+
+This is more than a chatbot demonstration: an answer claiming a task was completed
+is insufficient without matching state and execution evidence.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    Host[Trusted CLI / execution configuration] --> Graph[LangGraph single agent]
-    Graph <--> Model[Scripted model / opt-in OpenAI adapter]
-    Graph <--> MCP[Three bound stdio MCP servers]
-    MCP --> Services[Tenant-scoped OpsDesk services]
+    Host[Trusted host configuration] --> Agent[LangGraph agent]
+    Agent <--> Model[Scripted adapter / optional OpenAI adapter]
+    Agent <--> MCP[Documents / Business / Tasks MCP]
+    MCP --> Services[Authorized OpsDesk services]
     Services --> Sandbox[Isolated PostgreSQL run schema]
-    Graph --> Ledger[Checkpoints, immutable decisions, sealed journal]
-    Sandbox --> Evidence[Frozen evidence, receipts and mutation audits]
+    Agent --> Ledger[Checkpoints / original proposals / sealed journal]
+    Sandbox --> Evidence[Frozen state / receipts / mutation audits]
     Ledger --> Evidence
-    Evidence --> Evaluator[Independent state / trace / response oracles]
+    Evidence --> Evaluator[Independent objective evaluator]
     Evaluator --> Scores[Append-only scoring revisions]
-    Scores --> Reports[Version-pinned JSON / CSV / Markdown]
-    Research[Frozen oracle reviews, split and study records] --> Evaluator
+    Scores --> Reports[Version-pinned reports]
+    Reports --> Dashboard[Read-only local dashboard]
+    Research[Oracle / dataset / study / pairing artifacts] --> Evaluator
 ```
 
-Eight tools cover document search/retrieval, order/customer retrieval and customer
-order listing, plus task listing/creation/update. Agent access has no arbitrary SQL
-or filesystem tool. Baseline and guarded configurations share authorization,
-idempotency, optimistic task versions and execution budgets. Tool content remains
-untrusted data; trusted host configuration fixes identity, tenant and sandbox.
+```mermaid
+flowchart LR
+    Decision[Model decision] --> Proposal[Original proposal]
+    Proposal --> Validation[Validation and permissions]
+    Validation --> Dispatch[MCP dispatch]
+    Dispatch --> Attempt[Attempt and response]
+    Attempt --> Receipt[Receipt and audit]
+    Receipt --> State[Final state]
+    State --> Scoring[Objective scoring]
+```
 
-Research controls include explicit verified pairing, template-family split
-validation, frozen preregistrations and amendments, declared reviewer attestations,
-disagreement/adjudication, cluster-aware descriptive analysis and immutable report
-manifests. The read-only research view is an API boundary for a future dashboard;
-no dashboard or production HTTP authentication service is implemented.
+Eight tools: `search_documents`, `get_document`, `get_order`, `get_customer`,
+`list_customer_orders`, `list_tasks`, `create_task`, `update_task`. No arbitrary SQL
+or filesystem operation is exposed to the agent. Both configurations share the
+same fundamental authorization layer. Untrusted document text cannot grant permissions.
 
-## Install and test
+## Research questions and current evidence
 
-Supported: **CPython 3.11 and 3.12**, uv **0.13.7**, Docker Desktop with Linux
-containers on Windows, or Docker Engine/Compose on Linux.
+The central question is how reliably agents execute multi-step workflows under
+normal conditions, tool failures and indirect injection. Secondary questions cover
+tool accuracy, recovery, unauthorized attempts versus executed effects, defensive
+tradeoffs, latency and attributable cost.
+
+The repository contains **38 development scenarios and zero held-out scenarios**.
+Scripted experiments validate infrastructure, not live-model reliability. Temporal
+eligibility does not establish causal influence. Local hashes do not authenticate
+an external provider. Declared human identities do not establish independent review.
+No defense-superiority or held-out generalization claim is made.
+
+Oracle reviews, disagreements, adjudication, composite dataset releases,
+preregistrations/amendments, pairing and family-aware analysis are implemented.
+Genuine independent review, new held-out families and approved preregistration
+remain human research activities. The demo creates pending specifications, not approvals.
+
+## Test and reproduce
 
 ```console
-python -m pip install uv==0.13.7
-uv sync --locked --extra stack
-uv lock --check
-uv run --locked pytest -m 'not integration'
+uv run --locked --extra stack opsdesk-lab doctor
+uv run --locked --extra stack opsdesk-lab test --unit-only
+uv run --locked --extra stack opsdesk-lab test
 uv run --locked ruff check .
 uv run --locked ruff format --check .
+uv lock --check
 uv build
 ```
 
-Core locks: MCP 2.3.0, LangGraph 1.2.20, PostgreSQL checkpointer 3.2.0, OpenAI SDK
-3.46.0, SQLAlchemy 2.0 and Psycopg 3. The optional `stack` extra installs planned
-FastAPI/Streamlit dependencies. No API key is needed for tests or scripted demos.
-[Windows and Linux setup](docs/installation.md) includes database environment
-configuration; [database operations](docs/database.md) documents safe run ownership.
+`opsdesk-lab test` uses a separate owned tmpfs PostgreSQL instance on loopback
+port 55436, overriding inherited database configuration. Tests never need paid APIs.
+Keep the persistent database and `docker_probe_01` untouched. See
+[installation](docs/installation.md), [database management](docs/database.md) and
+[validation evidence](docs/checkpoint-9-validation.md).
 
-After configuring the database environment:
+For a developer-owned disposable database configured through `OPSDESK_DATABASE_URL`:
 
 ```console
-docker compose up -d --wait postgres
-uv run --locked pytest
-uv run --locked opsdesk-mcp demo
 uv run --locked opsdesk-agent demo --case multi_step
-uv run --locked opsdesk-eval run --development --config benchmarks/evaluation/development.json
-```
-
-PostgreSQL integration tests fail when required configuration is absent; they do
-not silently substitute SQLite or skip database failures. Every scenario trial gets
-its own registered schema and fresh fixture. Never reset someone else's run,
-`docker_probe_01`, or the persistent volume. Development PostgreSQL binds to
-127.0.0.1:55432; outbound bridge networking is permitted for Windows host access.
-
-## Evaluate and reproduce
-
-```console
-uv run --locked opsdesk-eval run --suite all --transport memory --experimental-evaluator 1.6.0
-uv run --locked opsdesk-eval report EXPERIMENT_ID --evaluator-version 1.6.0
-uv run --locked opsdesk-eval report EXPERIMENT_ID --score-id SCORE_ID
-uv run --locked opsdesk-eval report EXPERIMENT_ID --compare-evaluators 1.1.0 1.6.0
+uv run --locked opsdesk-eval run --suite all --transport memory --experimental-evaluator 1.7.0
+uv run --locked opsdesk-eval report EXPERIMENT_ID --evaluator-version 1.7.0
+uv run --locked opsdesk-eval score TRIAL_ID --experimental-evaluator 1.7.0
 uv run --locked opsdesk-research --help
-uv run --locked opsdesk-research validate benchmarks/research/split-development.json
+uv run --locked opsdesk-lab review-workspace .local/review
 ```
 
-Reports select actual persisted scoring revisions. Mixed semantics are rejected;
-explicit cross-version comparisons produce separate reports and denominators.
-`reporting.reproduce(store, report_id)` reconstructs a pinned report without writes
-or model calls. Generated exports go under ignored `artifacts/`.
+Historical evaluators 1.0.1-1.6.0 and renderers 2.0.0/2.1.0 remain available.
+Mixed-version cohorts are rejected; explicit comparisons retain separate denominators.
+Exports go under ignored `artifacts/`. Dashboard downloads perform no database writes.
 
-For 1.6.0, configured attack slots come from the verified frozen manifest.
-Exposure-conditioned outcome coverage is **K/(A−U)**: determinate exposed outcomes
-over configured attack slots less verified completed unexposed controls. Attack
-success is **successes/(successes+failures)**. Missing, contradictory, incomplete
-and unmaterialized slots remain unknown. Zero determinate outcomes yield null ASR.
-See [metric definitions](docs/metrics-definitions.md).
+## Documentation and release path
 
-## Research status and limitations
+- [Evaluator 1.7.0](docs/evaluator-1.7.md), [audit remediation](docs/audit-remediation-1.6.md)
+- [Dashboard](docs/dashboard.md), [demonstration](docs/demo-guide.md), [troubleshooting](docs/troubleshooting.md)
+- [Architecture](docs/architecture.md), [MCP](docs/mcp-integration.md), [agent execution](docs/agent-execution.md)
+- [Metrics](docs/metrics-definitions.md), [statistical methodology](docs/statistical-methodology.md)
+- [Research workflow](docs/research-readiness.md), [authoring templates](docs/templates/README.md)
+- [Security boundaries](docs/threat-model.md), [provenance](docs/agent-tracing.md)
+- [v1.0.0 gates](docs/release-readiness-v1.0.0.md), [changelog](CHANGELOG.md)
 
-There are 38 preserved scenario files: six original scenarios plus 12 fault,
-12 adversarial and eight benign cases. The historical focused comparison used
-32 cases; sidecars can also configure original examples. The new catalog places
-all content in one conservative development family. **Held-out population: zero**;
-there is no validated template-disjoint generalization experiment yet.
-
-Human review identities are declared and unverified. Synthetic workflow tests
-cannot approve real oracles. Confirmatory runs require pinned study specifications,
-actual human reviews, explicit acceptance of their identity assurance and an external
-evaluator-audit reference. No such approval is supplied by this implementation.
-
-Hash chains detect altered evidence; a privileged database owner can disable
-triggers and rewrite a chain. Logical exactly-once task effects rely on this
-sandbox's receipts; they do not generalize to arbitrary external services. Hosted
-responses can vary under fixed settings. Missing usage/prices remain unknown.
-Cost-capped live execution is disabled without a reliable provider reservation.
-
-## Repository and roadmap
-
-- `src/agent_reliability_lab/{opsdesk,mcp,agent}`: sandbox, services, transport and execution.
-- `src/agent_reliability_lab/{adversarial,evaluation,research}`: controlled experiments,
-  independent scoring, evidence and research artifacts.
-- `benchmarks/`: original scenarios, development corpus and pending-review examples.
-- `tests/`: unit, real PostgreSQL/MCP, process-restart and historical preservation tests.
-- `docs/`: [architecture](docs/architecture.md), [research workflow](docs/research-readiness.md),
-  [reproduction](docs/reproducibility.md), [validation](docs/finalization-validation.md),
-  [threat model](docs/threat-model.md) and [roadmap](docs/roadmap.md).
-
-Before v1.0: independently audit evaluator 1.6.0 and the research controls; obtain
-real oracle reviews; curate independently authored held-out families; approve a
-preregistered study; then build the read-only dashboard and complete release
-validation. Optional live pilots require separate authorization. No v1.0 release
-or tag is created by this milestone.
-
-The 0.8.0 correction addresses all eight reproduced 1.5 audit findings. Historical
-1.5 scores remain unchanged. See [semantics](docs/evaluator-1.6.md),
-[remediation](docs/audit-remediation-1.5.md) and [validation](docs/checkpoint-8-validation.md).
-Corrective integration tests require isolated `opsdesk_lab_test`/`opsdesk_lab_ci`
-resources, not the protected research database. No independent approval is implied.
+The next release gate is an independent read-only audit of the exact delivered
+commit. No v1.0.0 tag, public deployment, production authentication service or
+live-model pilot is included in this milestone.

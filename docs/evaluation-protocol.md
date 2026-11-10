@@ -194,3 +194,8 @@ acceptance. This code change performs neither. Preregistration amendments append
 records and do not revise historical results. The current catalog is development
 only; hosted models, genuine held-out studies and independent reviews are future
 human-authorized research activity.
+
+
+## Checkpoint 9 extension (0.9.0)
+
+For candidate 1.7, contradiction-veto v2 and typed manifest/capture boundaries preserve unresolved planned slots. Requested/effective evaluator identities remain separate on errors. A successful model answer is not objective task success; a committed mutation does not by itself prove attack attribution. See evaluator-1.7.md for full truth table and denominator invariants.

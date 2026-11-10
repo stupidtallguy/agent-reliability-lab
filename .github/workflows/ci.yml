@@ -33,6 +33,7 @@ jobs:
       UV_PYTHON: ${{ matrix.python-version }}
       OPSDESK_DATABASE_URL: postgresql+psycopg://opsdesk_ci@127.0.0.1:5432/opsdesk_lab_ci
       OPSDESK_ALLOW_SANDBOX: '1'
+      OPSDESK_TEST_OWNED: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,6 +48,8 @@ jobs:
           uv lock --check
           uv sync --locked --extra stack
           uv run --locked python -c "import sys; assert sys.version_info[:2] == tuple(map(int, '${{ matrix.python-version }}'.split('.'))); print(sys.version)"
+      - name: POSIX installer and environment validation
+        run: sh scripts/setup.sh
       - name: Research CLI and historical source integrity
         run: |
           uv run --locked opsdesk-research --help
@@ -69,6 +72,11 @@ jobs:
         run: uv run --locked opsdesk-eval run --development --config benchmarks/evaluation/development.json
       - name: Paired fault, attack and benign control smoke (no paid API)
         run: uv run --locked opsdesk-eval run --suite all --paired --transport memory
+      - name: Complete local product demo and review authoring workspace
+        run: |
+          uv run --locked opsdesk-lab --version
+          uv run --locked opsdesk-lab review-workspace .local/review
+          uv run --locked opsdesk-lab demo --no-ui --output .local/product-demo
       - name: Validate Compose configuration without rendering credentials
         env:
           POSTGRES_PASSWORD: unused-config-validation-only
@@ -80,9 +88,9 @@ jobs:
       - name: Install built wheel with locked dependencies in an isolated environment
         run: |
           uv venv --python python .local/ci-wheel
-          uv export --locked --no-dev --no-emit-project --no-hashes --output-file .local/runtime.txt > /dev/null
+          uv export --locked --extra stack --no-dev --no-emit-project --no-hashes --output-file .local/runtime.txt > /dev/null
           uv pip install --python .local/ci-wheel/bin/python -r .local/runtime.txt dist/*.whl
           WHEEL_PYTHON="$PWD/.local/ci-wheel/bin/python"
           pushd "$RUNNER_TEMP"
-          "$WHEEL_PYTHON" -I -c "import importlib.metadata as m; import agent_reliability_lab as p; import agent_reliability_lab.agent, agent_reliability_lab.mcp, agent_reliability_lab.evaluation, agent_reliability_lab.research; assert p.__version__ == m.version('agent-reliability-lab'); assert 'site-packages' in p.__file__; print(p.__version__, p.__file__)"
+          "$WHEEL_PYTHON" -I -c "import importlib.metadata as m; import agent_reliability_lab as p; import agent_reliability_lab.agent, agent_reliability_lab.mcp, agent_reliability_lab.evaluation, agent_reliability_lab.research; import agent_reliability_lab.dashboard.app, streamlit; from agent_reliability_lab.platform.demo import assets; assert (assets() / 'compose.demo.yaml').is_file(); assert p.__version__ == m.version('agent-reliability-lab'); assert 'site-packages' in p.__file__; print(p.__version__, p.__file__)"
           popd

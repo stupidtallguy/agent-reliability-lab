@@ -226,3 +226,8 @@ by general/security reporting, with defensive execution-boundary population hand
 New reports use renderer 2.1.0; historical 2.0.0 reports remain pinned/reproducible.
 Research analysis pins exact oracle rules and explicit score revisions and rejects
 reused underlying experimental units. See [1.6 semantics](evaluator-1.6.md).
+
+
+## Checkpoint 9 extension (0.9.0)
+
+Explicit 1.7.0 routes to attribution_v170, population_v170 and renderer 2.2.0. Typed manifest validation prevents malformed plans from disappearing or crashing reports. Candidate raw-capture re-scoring preserves requested version and appends a versioned error when evidence cannot validate. All old scorer predicates and stored revisions remain unchanged. See evaluator-1.7.md and audit-remediation-1.6.md.

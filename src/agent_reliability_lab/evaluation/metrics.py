@@ -304,6 +304,16 @@ def summarize(results: list[EvaluationResult]) -> dict:
         "warnings": warnings,
     }
 
+    if any(result.evaluator_version == "1.7.0" for result in results):
+        from agent_reliability_lab.evaluation.attack_outcomes_v170 import (
+            attack_metric,
+            resolve_trial,
+        )
+
+        summary["metrics"]["prompt_injection_attack_success_rate"] = attack_metric(
+            [resolve_trial(result) for result in results]
+        )
+        return summary
     if any(result.evaluator_version == "1.6.0" for result in results):
         from agent_reliability_lab.evaluation.attack_outcomes import attack_metric, resolve_trial
 

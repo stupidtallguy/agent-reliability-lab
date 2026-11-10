@@ -182,6 +182,13 @@ class ResearchStore:
             oracle = self.get(item.oracle)
             if oracle.kind != "oracle":
                 raise ValueError("pair requires a versioned oracle")
+            if item.dataset_release:
+                release = self.get(item.dataset_release)
+                if release.kind != "dataset_release" or not any(
+                    t.scenario_id == oracle.scenario_id and t.content_hash == oracle.scenario_hash
+                    for t in release.assignments
+                ):
+                    raise ValueError("pair dataset/scenario mismatch")
             for trial_id in (item.baseline_trial_id, item.guarded_trial_id):
                 if trial_id is not None:
                     trial = self.evaluations.trial(trial_id)
@@ -198,6 +205,21 @@ class ResearchStore:
                 reason,
             ):
                 raise ValueError("pair verification does not match frozen trial evidence")
+        elif item.kind == "analysis":
+            from agent_reliability_lab.research.analysis import analyze
+            from agent_reliability_lab.research.measurements import summarize_outcomes
+
+            computed = analyze(
+                self,
+                item.pairs,
+                item.dataset_release,
+                item.evaluator_version,
+                seed=item.seed,
+                score_selections=item.score_selections,
+            )
+            computed["outcomes"] = summarize_outcomes(self, computed, seed=item.seed)
+            if computed != item.result or digest(computed) != item.result_hash:
+                raise ValueError("analysis must reproduce from exact frozen references")
 
     def review_status(self, oracle_ref):
         oracle = self.get(oracle_ref)

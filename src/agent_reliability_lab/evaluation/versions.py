@@ -6,7 +6,7 @@ from pathlib import Path
 from agent_reliability_lab.evaluation.contracts import EvaluationResult, Evidence
 from agent_reliability_lab.opsdesk.fixtures import digest
 
-EXPERIMENTAL_VERSIONS = frozenset({"1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0"})
+EXPERIMENTAL_VERSIONS = frozenset({"1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0"})
 
 
 class UnsupportedEvaluatorVersion(ValueError):
@@ -18,10 +18,14 @@ def validate_selection(version: str) -> None:
         raise UnsupportedEvaluatorVersion("Unsupported experimental evaluator version.")
 
 
-def implementation_identity(package: Path | None = None, lockfile: Path | None = None) -> dict:
+def implementation_identity(
+    package: Path | None = None, lockfile: Path | None = None, *, packaged_lock: bool = False
+) -> dict:
     """Source snapshot, including shared helpers; not executed-code attestation."""
     package = package or Path(__file__).parents[1]
     lockfile = lockfile or Path("uv.lock")
+    if packaged_lock and not lockfile.is_file():
+        lockfile = package / "resources/uv.lock"
     files = {
         p.relative_to(package).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in sorted(package.rglob("*.py"))
@@ -49,15 +53,15 @@ def version_provenance(result, selected, effective=None, error=None):
     result.scoring_provenance.setdefault(
         "required_context",
         "experimental_capture"
-        if selected in {"1.4.0", "1.5.0", "1.6.0"}
+        if selected in {"1.4.0", "1.5.0", "1.6.0", "1.7.0"}
         else "when_experimental_plan_configured",
     )
     result.scoring_provenance.setdefault("context_reconstructed", False)
     result.scoring_provenance.setdefault("context_provenance", None)
-    if selected in {"1.4.0", "1.5.0", "1.6.0"}:
+    if selected in {"1.4.0", "1.5.0", "1.6.0", "1.7.0"}:
         result.evaluator_version = selected
-    if selected in {"1.5.0", "1.6.0"}:
-        result.scoring_provenance.update(implementation_identity())
+    if selected in {"1.5.0", "1.6.0", "1.7.0"}:
+        result.scoring_provenance.update(implementation_identity(packaged_lock=selected == "1.7.0"))
     return result
 
 

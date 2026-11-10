@@ -4,13 +4,14 @@
 > opt-in [fault/attack harness](fault-injection.md) now interposes around actual
 > MCP calls and adds verified exposure, guarded scopes and versioned scoring.
 > Historical checkpoint-specific limitations below describe their original gate;
-> see [current validation](checkpoint-5-validation.md) for present coverage.
+> see [current validation](checkpoint-9-validation.md) for present coverage.
 
 Implemented in Checkpoint 1: PostgreSQL infrastructure, migrations, deterministic
 fixtures, isolated state lifecycle and eight internal Python services. Checkpoint 2
 adds [stdio MCP adapters](mcp-integration.md); Checkpoint 3 adds the
 [durable agent](agent-execution.md) around unchanged service contracts. Checkpoint 4
-adds [objective evaluation](evaluation-engine.md); no dashboard is implemented.
+adds [objective evaluation](evaluation-engine.md). Application 0.9.0 adds a separate
+[read-only dashboard](dashboard.md) and isolated scripted demonstration.
 
 ## Prerequisites and configuration
 
@@ -262,11 +263,11 @@ committed changes. See [agent tracing](agent-tracing.md).
 ## Tests and limitations
 
 ```powershell
-uv run --locked pytest -m 'not integration'
-# Requires the real PostgreSQL URL and opt-in above; missing/unreachable DB fails.
-uv run --locked pytest -m integration
-# Full suite with configured PostgreSQL:
-uv run --locked pytest
+uv run --locked --extra stack opsdesk-lab test --unit-only
+# Starts a separate owned tmpfs PostgreSQL instance; inherited DB URL is replaced.
+uv run --locked --extra stack opsdesk-lab test
+# Raw pytest integration commands are only for an explicitly isolated CI/test DB.
+# Never point them at the preserved research database on 55432 or prior evidence on 55433.
 uv run --locked ruff check .
 uv run --locked ruff format --check .
 uv build
@@ -310,3 +311,8 @@ scoring/evidence rows. Initialization runs upgrades under existing advisory lock
 only the two corresponding Alembic head metadata rows advance. Business schemas,
 registered sandboxes and persistent volumes are unchanged. Do not downgrade/delete
 research history as cleanup. Test/demo scopes contain explicit synthetic artifacts.
+
+
+## Checkpoint 9 extension (0.9.0)
+
+Checkpoint 9 testing and demonstration use separate standalone compose.test.yaml (55436) and compose.demo.yaml (55435), labeled ownership, loopback bindings and tmpfs storage with no persistent volume. opsdesk-lab test replaces inherited database configuration. These instances must never be confused with protected persistent research PostgreSQL on 55432 or preserved prior test evidence on 55433. The original Compose/network/volume configuration is unchanged.

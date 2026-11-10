@@ -51,3 +51,8 @@ Scripted canonical re-execution and frozen evidence re-scoring do not measure li
 model reliability, invoice cost or counterfactual behavior. Fixed hosted parameters
 do not guarantee deterministic responses. Independent oracle review, externally
 audited evaluator approval and held-out studies remain human research tasks.
+
+
+## Checkpoint 9 extension (0.9.0)
+
+Candidate 1.7 requires exact dataset release, oracle/score revisions and complete compatible implementation identities for verified comparison. Anonymous mathematical summaries are explicitly unverified. Dashboard downloads render pinned reports without writes. Historical renderer 2.0.0/2.1.0 reproductions route to the byte-preserved legacy renderer; candidate output uses 2.2.0. See demo-guide.md for repeatable logical scripted outcomes and varying physical IDs/timing.

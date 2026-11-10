@@ -1,6 +1,6 @@
 """Pinned oracle/revision comparisons over unique underlying experimental units."""
 
-from agent_reliability_lab.evaluation.selection import compatible, semantic_version
+from agent_reliability_lab.evaluation.selection import semantic_version
 from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research.statistics import paired_summary
 from agent_reliability_lab.research.units import validate_units
@@ -72,6 +72,8 @@ def analyze(
         pair = store.get(reference)
         if pair.kind != "pair":
             raise ValueError("analysis requires frozen pairing records")
+        if evaluator_version == "1.7.0" and pair.dataset_release != split_reference:
+            raise IncompatibleComparisonRules("candidate pair requires the exact dataset release")
         oracle = store.get(pair.oracle)
         if oracle.kind != "oracle" or oracle.scenario_id not in catalog:
             raise IncompatibleComparisonRules("pair oracle absent from split catalog")
@@ -164,7 +166,9 @@ def analyze(
         raise ValueError(
             "research analysis requires one compatible pair group/configuration/environment"
         )
-    compatible(selected)
+    from agent_reliability_lab.research.identity import require_compatible
+
+    identity_checks = require_compatible(selected)
     summary = paired_summary(rows, seed=seed)
     return dict(
         schema_version="1.1",
@@ -176,6 +180,7 @@ def analyze(
         evaluator_version=evaluator_version,
         rows=rows,
         exclusions=[],
+        implementation_identity=identity_checks,
     )
 
 

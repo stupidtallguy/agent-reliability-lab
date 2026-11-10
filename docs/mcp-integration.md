@@ -279,3 +279,8 @@ these stdio factories through an unauthenticated LAN/public HTTP wrapper.
 Checkpoint 3 adds the [durable agent](agent-execution.md), providers and journal
 using this transport. The full fault/injection harness belongs to Checkpoint 5.
 No scorer, experiment runner or dashboard exists yet.
+
+
+## Checkpoint 9 extension (0.9.0)
+
+The 0.9 product demo reuses the existing MCP client/server paths; no tool schema or permission is widened. Tests include actual stdio and in-memory interactions. Dashboard components never dispatch MCP calls and never accept actor/tenant/run identity as model-controlled parameters.

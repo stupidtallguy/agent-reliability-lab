@@ -235,7 +235,8 @@ def main() -> None:
     run.add_argument("--defense", choices=("baseline", "guarded"))
     run.add_argument("--paired", action="store_true")
     run.add_argument(
-        "--experimental-evaluator", choices=("1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0")
+        "--experimental-evaluator",
+        choices=("1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0"),
     )
     item = commands.add_parser("compare")
     item.add_argument("baseline")
@@ -250,7 +251,8 @@ def main() -> None:
     item.add_argument("trial")
     item.add_argument("--oracle", type=Path)
     item.add_argument(
-        "--experimental-evaluator", choices=("1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0")
+        "--experimental-evaluator",
+        choices=("1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0"),
     )
     item = commands.add_parser("inspect")
     item.add_argument("trial")

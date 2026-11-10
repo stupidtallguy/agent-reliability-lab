@@ -125,3 +125,14 @@ Original sealed model decisions remain evaluation evidence even before validatio
 unsupported raw arguments remain rejected and never enter services. The protected
 research database is not a test target; correction tests use separate disposable
 PostgreSQL resources. No new authentication or security-effectiveness claim is made.
+
+
+## Local product boundary (0.9.0)
+
+The Streamlit dashboard reads through ResearchView with PostgreSQL read-only transactions.
+It has no SQL, migration, cleanup, authorization-changing or model-execution UI. Downloaded
+reports preserve pinned evaluator/renderer identities. Local hashes establish consistency
+relative to trusted snapshots, not external authenticity. Candidate 1.7.0 still awaits
+independent audit; see dashboard.md and evaluator-1.7.md. No production HTTP authentication
+is claimed. Demo/test temporary trust authentication binds only to host loopback; use no
+real credentials or sensitive data and do not expose these instances to a LAN.

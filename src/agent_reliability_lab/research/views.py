@@ -1,15 +1,30 @@
 """Bounded read-only data boundary for future presentation clients; no UI or scoring."""
 
 import sqlalchemy as sa
+from sqlalchemy.engine import make_url
 
 from agent_reliability_lab.agent import tables as a
 from agent_reliability_lab.evaluation import tables as e
 from agent_reliability_lab.research.persistence import artifacts
 
 
+def readonly_engine(url):
+    """Host-supplied URL only. Every transaction defaults to PostgreSQL read-only."""
+    parsed = make_url(url)
+    if parsed.drivername != "postgresql+psycopg":
+        raise ValueError("dashboard requires PostgreSQL with Psycopg")
+    return sa.create_engine(
+        parsed,
+        hide_parameters=True,
+        pool_pre_ping=True,
+        execution_options={"postgresql_readonly": True},
+        connect_args={"options": "-c default_transaction_read_only=on -c statement_timeout=15000"},
+    )
+
+
 class ResearchView:
     def __init__(self, engine):
-        self.engine = engine
+        self.engine = engine.execution_options(postgresql_readonly=True)
 
     def rows(self, resource, *, identifier=None, kind=None, limit=50, offset=0):
         if not 1 <= limit <= 100 or offset < 0:
@@ -23,6 +38,10 @@ class ResearchView:
             artifacts=(artifacts, "scope"),
             traces=(a.events, "execution_id"),
             provenance=(a.provenance, "execution_id"),
+            executions=(a.executions, "execution_id"),
+            decisions=(a.requests, "execution_id"),
+            operations=(a.operations, "execution_id"),
+            attempts=(a.attempts, "proposal_id"),
         )
         if resource not in registry:
             raise ValueError("unknown read-only research resource")
@@ -42,3 +61,51 @@ class ResearchView:
                     query.order_by(*table.primary_key.columns).limit(limit).offset(offset)
                 ).mappings()
             ]
+
+    def counts(self):
+        with self.engine.connect() as connection, connection.begin():
+            connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+            return {
+                name: connection.execute(sa.select(sa.func.count()).select_from(table)).scalar_one()
+                for name, table in dict(
+                    experiments=e.experiments, trials=e.trials, scores=e.scores, reports=e.reports
+                ).items()
+            }
+
+    def report(self, report_id):
+        from agent_reliability_lab.evaluation.persistence import EvaluationStore
+        from agent_reliability_lab.evaluation.reporting import reproduce
+
+        return reproduce(EvaluationStore(self.engine), report_id)
+
+    def trial(self, trial_id):
+        from agent_reliability_lab.evaluation.persistence import EvaluationStore
+
+        return EvaluationStore(self.engine).trial(trial_id)
+
+    def readiness(self, scope):
+        from agent_reliability_lab.research.contracts import parse_artifact
+        from agent_reliability_lab.research.persistence import ResearchStore
+
+        store = ResearchStore(self.engine, scope)
+        records = store.list()
+        oracles = [parse_artifact(r["body"]) for r in records if r["kind"] == "oracle"]
+        reviews = [store.review_status(store.reference(o)) for o in oracles]
+        releases = [parse_artifact(r["body"]) for r in records if r["kind"] == "dataset_release"]
+        return dict(
+            scope=scope,
+            oracle_count=len(oracles),
+            reviews=reviews,
+            human_declared_attestations=sum(
+                r["kind"] == "attestation" and r["body"].get("origin") == "human_declared"
+                for r in records
+            ),
+            externally_verified_humans=None,
+            held_out_count=max(
+                (sum(t.split == "held_out" for t in release.assignments) for release in releases),
+                default=0,
+            ),
+            preregistrations=[r for r in records if r["kind"] == "preregistration"],
+            independent_audit_approval="not_recorded_by_this_interface",
+            warning="Declared identities are not independent authentication or human approval.",
+        )

@@ -203,3 +203,8 @@ under a separate 1.6.0 candidate, with default selection still 1.1.0. This histo
 0.7.0 validation record is retained; see [remediation](audit-remediation-1.5.md) and
 [0.8.0 actual validation](checkpoint-8-validation.md). Passing engineering checks do
 not constitute independent evaluator approval.
+
+
+## Checkpoint 9 extension (0.9.0)
+
+This is a historical validation record. Its original counts and claims are not replaced by the 0.9 milestone. See checkpoint-9-validation.md for current executed checks, protected database fingerprints and candidate status. No historical score, evidence or report is relabeled.

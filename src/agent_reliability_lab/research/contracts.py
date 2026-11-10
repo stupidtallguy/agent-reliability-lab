@@ -129,6 +129,7 @@ class Preregistration(Artifact):
     scenario_population: list[Identifier] = Field(min_length=1)
     categories: list[str]
     sample_size: int = Field(ge=1)
+    sample_size_rationale: str | None = Field(default=None, exclude_if=lambda v: v is None)
     trial_allocation: dict
     pairing_design: dict
     oracles: list[Reference] = Field(min_length=1)
@@ -161,9 +162,22 @@ class Pair(Artifact):
     guarded_trial_id: str | None
     intended_difference: Literal["defense_configuration"] = "defense_configuration"
     oracle: Reference
+    dataset_release: Reference | None = Field(default=None, exclude_if=lambda v: v is None)
     criteria: dict
     verification: Literal["verified", "incomplete", "excluded"]
     exclusion_reason: str | None
+
+
+class AnalysisRecord(Artifact):
+    kind: Literal["analysis"] = "analysis"
+    interpretation: Literal["exploratory_descriptive"] = "exploratory_descriptive"
+    pairs: list[Reference]
+    dataset_release: Reference
+    evaluator_version: str
+    score_selections: dict[str, dict]
+    seed: int = 0
+    result: dict
+    result_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 ARTIFACTS = {
@@ -178,6 +192,7 @@ ARTIFACTS = {
         Preregistration,
         Amendment,
         Pair,
+        AnalysisRecord,
     )
 }
 

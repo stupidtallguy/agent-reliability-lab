@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0 - Evaluator 1.7.0 and local research product
+
+- Correct AUD16-01 through AUD16-06 with candidate-only provenance, lifecycle,
+  canonical population, typed metadata and mandatory comparison/unit identities.
+- Add renderer 2.2.0, append-only selected-score analyses and read-only downloads.
+- Add seven-page local Streamlit dashboard and actual seven-case scripted demo.
+- Add safe temporary PostgreSQL test/demo workflows, Windows/Linux setup and research templates.
+- Preserve historical evaluators/renderers, all 38 development cases and empty held-out data.
+- Default remains 1.1.0; independent audit, genuine reviews and research approval pending.
+
 ## 0.8.0 - Evaluator 1.6.0 corrective candidate
 
 - Address AUD15-01 through AUD15-08 with original-decision intent, common lifecycle

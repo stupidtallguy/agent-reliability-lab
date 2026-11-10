@@ -1,5 +1,13 @@
 # Checkpoint roadmap
 
+Current engineering milestone: **0.9.0 / explicit evaluator 1.7.0 candidate**.
+The original checkpoint table and handoffs below are historical planning records.
+The read-only dashboard, deterministic demo, research workflows and packaging are now
+implemented. See checkpoint-9-validation.md for executed checks and
+release-readiness-v1.0.0.md for the current remaining gates. Neither a 100-case quota
+nor a live pilot is required to manufacture a software release; genuine held-out
+validation and research claims need independent human work.
+
 Do not implement a later checkpoint until its scope is explicitly authorized.
 
 | Checkpoint | Deliverables | Acceptance gate |
@@ -44,7 +52,7 @@ fault/injection harness, model comparison, dashboard, authenticated HTTP or appr
 issuance was added. Review hosted Python 3.11/3.12 CI before expanding scope.
 
 
-## Checkpoint 5 current gate
+## Historical Checkpoint 5 gate
 
 Implemented: bounded deterministic fault interception, typed indirect-injection
 overlays, verified transport/model exposure, independent attacker/recovery scoring,
@@ -59,7 +67,7 @@ Review false positives, contamination failures, missing exposure and statistical
 limits. No second provider, 100-case expansion, dashboard or production auth was
 implemented. Checkpoint 6 has not started.
 
-## 0.7.0 finalization candidate (current)
+## Historical 0.7.0 finalization candidate
 
 The historical checkpoint descriptions above describe their original handoffs.
 Checkpoint 6 research infrastructure has now begun: evaluator 1.5.0 candidate,
@@ -87,3 +95,8 @@ After verification: independently audit the exact delivered commit; complete gen
 human oracle review and dataset curation; approve studies; then build the read-only
 dashboard and finish distribution/release validation. No held-out generalization,
 live-model robustness or production readiness follows from scripted tests.
+
+
+## Checkpoint 9 extension (0.9.0)
+
+Checkpoint 9 adds evaluator 1.7.0 candidate, read-only dashboard, actual scripted product demonstration, research authoring/export workflows, immutable selected-score analyses and safe installation/testing. Application target is 0.9.0; no final tag is created. Remaining software release gate is an independent audit of the exact commit; human research gates remain separately pending in release-readiness-v1.0.0.md.

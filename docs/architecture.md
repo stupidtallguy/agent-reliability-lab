@@ -1,11 +1,12 @@
 # Architecture
 
-Checkpoint 5 (0.6.0) retains one custom LangGraph `StateGraph`, optional OpenAI
+Application 0.9.0 retains one custom LangGraph `StateGraph`, optional OpenAI
 and scripted providers, PostgreSQL checkpoints, execution journals and independent
 scoring. It adds trusted fault interception, lower-trust response overlays,
 verified exposure, baseline/guarded scopes and paired trials. Existing database
 services/eight MCP tools remain the business boundary. FastAPI, multi-provider
-research comparisons and Streamlit remain planned.
+live research comparisons remain optional future work. A local read-only Streamlit
+dashboard, immutable paired analysis and scripted product demonstration are implemented.
 
 ```mermaid
 flowchart LR
@@ -154,3 +155,18 @@ Canonical outcome resolution connects scoring and reporting. Composite dataset-r
 artifacts reuse append-only research storage; no persistence redesign or migration
 is required. Pair analysis checks oracle/revision identities and distinct underlying
 trial/execution units before statistics. See [audit remediation](audit-remediation-1.5.md).
+
+
+## Checkpoint 9 extension (0.9.0)
+
+Candidate 1.7 uses projection v3, logical/physical lifecycle joins and canonical outcome policy v2. Renderer 2.2.0, immutable exact-score AnalysisRecord artifacts and a seven-page Streamlit dashboard extend the existing architecture; no new agent architecture or business service is introduced. Dashboard ResearchView connections enforce read-only PostgreSQL transactions. Demo/test launchers use separate labeled tmpfs instances, not the persistent research database.
+
+
+### Product boundaries
+
+The `platform` CLI is the trusted operator: it can start only named, ownership-checked
+standalone demo/test instances. The `dashboard` is a reader: it cannot provision,
+execute agents, alter artifacts or register reviews. `evaluation.downloads` is a pure
+serializer. `AnalysisRecord` adds a kind to the existing immutable generic artifact
+store, so no database migration is required. Wheel resources include only committed
+synthetic specifications and standalone Compose definitions, never local reports.

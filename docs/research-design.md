@@ -110,3 +110,8 @@ pilot and confirmatory intentions. Confirmatory execution requires actual review
 external evaluator audit acceptance; fake-model execution remains infrastructure
 validation. Verified pairing and family-aware summaries avoid treating repeated
 trials as independent. See [workflow and methods](research-readiness.md).
+
+
+## Checkpoint 9 extension (0.9.0)
+
+Current catalog remains 38 development cases and zero held-out. The product demo adds no benchmark specifications. It executes seven existing cases under two conditions, with immutable pending oracle and selected-score analysis artifacts. These scripts validate infrastructure, not model reliability or causal attack influence. Genuine review, held-out authorship and approved preregistration remain external human gates.

@@ -53,6 +53,10 @@ def test_clustered_repeats_do_not_receive_independent_pair_test():
     rows = [
         dict(
             pair_id=str(i),
+            baseline_trial_id=f"baseline_{i}",
+            guarded_trial_id=f"guarded_{i}",
+            baseline_execution_id=f"baseline_exec_{i}",
+            guarded_execution_id=f"guarded_exec_{i}",
             family_id="shared",
             scenario_id="one",
             verified=True,
@@ -72,6 +76,10 @@ def test_seeded_family_analysis_and_missing_pair_sensitivity():
     rows = [
         dict(
             pair_id=str(i),
+            baseline_trial_id=f"baseline_{i}",
+            guarded_trial_id=f"guarded_{i}",
+            baseline_execution_id=f"baseline_exec_{i}",
+            guarded_execution_id=f"guarded_exec_{i}",
             family_id=str(i),
             scenario_id=str(i),
             verified=True,
@@ -99,7 +107,20 @@ def test_seeded_family_analysis_and_missing_pair_sensitivity():
 
 
 def test_unknown_outcomes_not_imputed_or_called_failures():
-    summary = paired_summary([dict(pair_id="unknown", verified=True, baseline=None, guarded=False)])
+    summary = paired_summary(
+        [
+            dict(
+                pair_id="unknown",
+                verified=True,
+                baseline=None,
+                guarded=False,
+                baseline_trial_id="unknown_b",
+                guarded_trial_id="unknown_g",
+                baseline_execution_id="exec_b",
+                guarded_execution_id="exec_g",
+            )
+        ]
+    )
     assert summary["complete_verified_pairs"] == 0
     assert summary["paired_risk_difference"] is None
     assert summary["wilson_descriptive_guarded"] is None

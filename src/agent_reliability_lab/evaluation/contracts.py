@@ -183,9 +183,9 @@ class ExperimentConfig(Contract):
     defense: Literal["baseline", "guarded"] = "baseline"
     write_scopes: dict[str, list[WriteScope]] = Field(default_factory=dict)
     pairing_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
-    experimental_evaluator: Literal["1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0"] = Field(
-        default="1.1.0", exclude_if=lambda value: value == "1.1.0"
-    )
+    experimental_evaluator: Literal[
+        "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0"
+    ] = Field(default="1.1.0", exclude_if=lambda value: value == "1.1.0")
 
 
 class Exposure(Contract):

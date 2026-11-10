@@ -95,3 +95,8 @@ sanitized PostgreSQL records. No journals are exported to Git. Production access
 control, encryption/retention and authenticated HTTP remain deployment work.
 Hosted LangSmith tracing is explicitly disabled around graph execution, including
 when enabled in the ambient environment; the durable journal remains local.
+
+
+## Checkpoint 9 extension (0.9.0)
+
+Candidate-only projection v3 joins original sealed request input hashes to journal request/exposure hashes and verifies authoritative ledger ordering. Original decisions/proposals remain distinct from validation DTOs, dispatches, attempts and effects. Historical projection modules are not modified. Local temporal consistency is not causal influence or external execution authentication.

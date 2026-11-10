@@ -1,61 +1,86 @@
-# Windows and Linux installation
+# Windows, Linux and macOS installation
 
-Supported interpreters: CPython 3.11 and 3.12. Use uv 0.13.7 and Docker Desktop
-(Linux containers) on Windows, or Docker Engine with Compose on Linux.
+Supported: CPython 3.11/3.12, uv 0.13.7, Docker Desktop with Linux containers on
+Windows/macOS or Docker Engine with Compose on Linux. Use the private repository
+with your existing Git authentication; never paste credentials into commands.
 
 ```console
+git clone https://github.com/stupidtallguy/agent-reliability-lab.git
+cd agent-reliability-lab
 python -m pip install uv==0.13.7
 uv sync --locked --extra stack
-uv lock --check
-uv run --locked pytest -m 'not integration'
+uv run --locked --extra stack opsdesk-lab doctor
+uv run --locked --extra stack opsdesk-lab demo
 ```
 
-PowerShell, from the repository root:
+Alternatively, from PowerShell run `./scripts/setup.ps1 -Test`; from a POSIX shell
+run `sh scripts/setup.sh --test`. Scripts install locked dependencies and check the
+environment. They never configure paid APIs, print secrets or migrate protected databases.
+Python must already be installed; setup disables automatic interpreter downloads.
+
+## Safe test workflow
+
+```console
+uv run --locked --extra stack opsdesk-lab test --unit-only
+uv run --locked --extra stack opsdesk-lab test
+uv run --locked --extra stack opsdesk-lab stop-tests
+```
+
+Full tests use `compose.test.yaml`, project opsdesk-tests, a labeled tmpfs instance
+on 127.0.0.1:55436 with no volume. The host launcher replaces inherited database
+configuration with that dedicated test URL and explicit test ownership opt-in.
+All PostgreSQL/MCP tests execute; unavailable PostgreSQL fails instead of skipping.
+The instance remains available for inspection until explicitly stopped. Export needed
+test evidence first: tmpfs data is disposable. Stopping it never touches the persistent
+research database or docker_probe_01. Run each interpreter separately in its own locked
+environment; hosted CI independently installs and tests both versions.
+
+## Explicit disposable development services
+
+The demo database on 55435 is separate from tests and persistent development on
+55432. The demo initializes only its own instance automatically. For manual service
+commands against that developer-owned disposable instance:
+
+PowerShell:
 
 ```powershell
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-# Edit .env and set a disposable local POSTGRES_PASSWORD.
-docker compose config --quiet
-docker compose up -d --wait postgres
-$env:OPSDESK_DATABASE_URL = 'postgresql+psycopg://opsdesk_lab:PASSWORD@127.0.0.1:55432/opsdesk_lab'
+$env:OPSDESK_DATABASE_URL = 'postgresql+psycopg://opsdesk_demo@127.0.0.1:55435/opsdesk_lab_test'
 $env:OPSDESK_ALLOW_SANDBOX = '1'
-uv run --locked pytest
-uv run --locked opsdesk-research init
+uv run --locked opsdesk provision --help
 uv run --locked opsdesk-agent demo --case multi_step
+uv run --locked opsdesk-eval run --suite all --transport memory --experimental-evaluator 1.7.0
 ```
 
-Linux shell:
+Linux/macOS:
 
 ```bash
-test -f .env || cp .env.example .env
-# Edit .env and set a disposable local POSTGRES_PASSWORD.
-docker compose config --quiet
-docker compose up -d --wait postgres
-export OPSDESK_DATABASE_URL='postgresql+psycopg://opsdesk_lab:PASSWORD@127.0.0.1:55432/opsdesk_lab'
+export OPSDESK_DATABASE_URL='postgresql+psycopg://opsdesk_demo@127.0.0.1:55435/opsdesk_lab_test'
 export OPSDESK_ALLOW_SANDBOX=1
-uv run --locked pytest
-uv run --locked opsdesk-research init
+uv run --locked opsdesk provision --help
 uv run --locked opsdesk-agent demo --case multi_step
+uv run --locked opsdesk-eval run --suite all --transport memory --experimental-evaluator 1.7.0
 ```
 
-Replace PASSWORD with the matching URL-encoded disposable value. Compose reads
-`.env`; Python reads shell variables. Never print or commit credentials. The official
-PostgreSQL 18.6 image/digest and loopback binding are documented in [database.md](database.md).
-The development bridge permits outbound access (`internal: false`); stronger
-evaluation isolation requires a separate reviewed environment.
+Use `opsdesk --help` for explicit provision/inspect/reset/cleanup contracts. Never
+select another person's run. Cleanup requires its trusted incarnation marker.
+See database.md for the separately configured persistent local database; do not run
+tests or candidate initialization against preserved historical evidence.
 
-Agent/evaluation initialization applies additive migrations under advisory locks.
-Research initialization reuses evaluation migrations. No manual arbitrary SQL or
-database recreation is needed. See [research workflow](research-readiness.md) for
-frozen specs/reviews and [reproducibility](reproducibility.md) for report selection.
+## Build and install distributions
 
-To validate an installed wheel outside the checkout, install `dist/*.whl` into a
-fresh environment using locked dependencies, then import `agent_reliability_lab`,
-`agent`, `mcp`, `evaluation` and `research`. Unit tests require no database or API key;
-integration tests require real PostgreSQL and explicit sandbox opt-in. Test each
-interpreter separately; `uv run --python 3.12 --locked pytest` needs an already
-installed 3.12 interpreter and a suitable environment.
+```console
+uv lock --check
+uv build
+uv venv .local/wheel
+uv export --locked --extra stack --no-dev --no-emit-project --no-hashes --output-file .local/runtime.txt
+```
 
-`docker compose down` stops containers and retains the volume. Never use volume
-deletion as cleanup. Reset/cleanup commands are only for explicitly owned disposable
-runs; do not alter `docker_probe_01` or another execution's resources.
+Install the exported requirements and exact built wheel with `uv pip install --python`
+pointing to `.local/wheel/Scripts/python.exe` (Windows) or `.local/wheel/bin/python`
+(POSIX). Import from outside the checkout using Python `-I`; verify the package is
+inside site-packages and its version matches installed metadata. Wheel resources
+include synthetic benchmark specifications, the dependency lock and standalone demo/test Compose files.
+From a wheel outside Git, pass `--source-commit` for reproducible demo provenance.
+No editable checkout import should be mistaken for an isolated installation check.
+
+See troubleshooting.md for network, ownership, port and missing-data diagnostics.

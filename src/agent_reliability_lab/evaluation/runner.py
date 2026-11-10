@@ -48,6 +48,8 @@ def provenance(config: ExperimentConfig) -> dict:
         }
     )
     lock = Path("uv.lock")
+    if config.experimental_evaluator == "1.7.0" and not lock.is_file():
+        lock = source / "resources/uv.lock"
     status = git("status", "--porcelain")
     return {
         "source_commit": commit,
@@ -430,6 +432,14 @@ class ScenarioRunner:
         if selected.scenario_hash and selected.scenario_hash != trial["scenario_hash"]:
             raise ValueError("oracle scenario hash mismatch")
         experiment = self.store.experiment(trial["experiment_id"])
+        if experimental_evaluator == "1.7.0":
+            from agent_reliability_lab.evaluation.capture_v170 import score_capture
+
+            result = score_capture(
+                scenario, selected, trial["evidence"], trial["metadata"], experiment
+            )
+            self.store.save_score(result)
+            return result
         manifest = experiment["manifest"]
         config = ExperimentConfig.model_validate_json(json.dumps(manifest["config"]))
         result = score(

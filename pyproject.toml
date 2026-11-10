@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-reliability-lab"
-version = "0.8.0"
+version = "0.9.0"
 description = "A reproducible lab for evaluating AI agent reliability, MCP tool use, failure recovery, and prompt-injection resilience."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -24,6 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
+opsdesk-lab = "agent_reliability_lab.platform.cli:main"
 opsdesk = "agent_reliability_lab.opsdesk.cli:main"
 opsdesk-mcp = "agent_reliability_lab.mcp.cli:main"
 opsdesk-agent = "agent_reliability_lab.agent.cli:main"
@@ -31,7 +32,7 @@ opsdesk-research = "agent_reliability_lab.research.cli:main"
 opsdesk-eval = "agent_reliability_lab.evaluation.cli:main"
 
 [project.optional-dependencies]
-# Planned API/dashboard dependencies; the agent and database services are core.
+# Dashboard/API dependencies are optional; core agent/evaluation services stay separate.
 stack = [
   "fastapi>=0.162.2,<0.163",
   "streamlit>=1.67.0,<2",
@@ -54,3 +55,10 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"benchmarks" = "agent_reliability_lab/resources/benchmarks"
+"compose.demo.yaml" = "agent_reliability_lab/resources/compose.demo.yaml"
+
+"compose.test.yaml" = "agent_reliability_lab/resources/compose.test.yaml"
+"uv.lock" = "agent_reliability_lab/resources/uv.lock"
