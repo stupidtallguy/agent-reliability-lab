@@ -103,6 +103,20 @@ class SplitManifest(Artifact):
         return self
 
 
+class DatasetRelease(Artifact):
+    """One immutable release binds all partitions; empty held-out stays explicit."""
+
+    kind: Literal["dataset_release"] = "dataset_release"
+    validation_version: Literal["partitions_v1"] = "partitions_v1"
+    development: Reference
+    held_out: Reference
+    assignments: list[Template]
+
+    @property
+    def templates(self):
+        return self.assignments
+
+
 class Preregistration(Artifact):
     kind: Literal["preregistration"] = "preregistration"
     mode: Literal["exploratory", "pilot", "confirmatory"]
@@ -160,6 +174,7 @@ ARTIFACTS = {
         Attestation,
         Adjudication,
         SplitManifest,
+        DatasetRelease,
         Preregistration,
         Amendment,
         Pair,

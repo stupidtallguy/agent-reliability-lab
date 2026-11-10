@@ -7,6 +7,12 @@ from agent_reliability_lab.opsdesk.fixtures import digest
 def experimental_summary(
     results, *, evaluator_version=None, experiment=None, trials=(), revisions=None
 ):
+    if evaluator_version == "1.6.0" or any(
+        getattr(r, "evaluator_version", None) == "1.6.0" for r in results
+    ):
+        from agent_reliability_lab.evaluation.population_v160 import security_summary
+
+        return security_summary(results, _legacy_summary(results), experiment, trials, revisions)
     if evaluator_version == "1.5.0" or any(
         getattr(r, "evaluator_version", None) == "1.5.0" for r in results
     ):

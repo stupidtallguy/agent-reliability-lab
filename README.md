@@ -3,9 +3,9 @@
 A local research platform for testing tool-using agents against objective state,
 trace and response requirements in **OpsDesk**, a synthetic company environment.
 
-**Application 0.7.0 · experimental evaluator 1.5.0 candidate.** Historical scorers
-1.0.1–1.4.0 remain available; the default experimental selector remains 1.1.0.
-Evaluator 1.5.0 still requires independent review. No human oracle approval,
+**Application 0.8.0 · experimental evaluator 1.6.0 candidate.** Historical scorers
+1.0.1–1.5.0 remain available; the default experimental selector remains 1.1.0.
+Evaluator 1.6.0 still requires independent review. No human oracle approval,
 held-out validation or live-model robustness claim is made. Scripted experiments
 validate infrastructure, not model reliability. The repository remains private.
 
@@ -84,10 +84,10 @@ its own registered schema and fresh fixture. Never reset someone else's run,
 ## Evaluate and reproduce
 
 ```console
-uv run --locked opsdesk-eval run --suite all --transport memory --experimental-evaluator 1.5.0
-uv run --locked opsdesk-eval report EXPERIMENT_ID --evaluator-version 1.5.0
+uv run --locked opsdesk-eval run --suite all --transport memory --experimental-evaluator 1.6.0
+uv run --locked opsdesk-eval report EXPERIMENT_ID --evaluator-version 1.6.0
 uv run --locked opsdesk-eval report EXPERIMENT_ID --score-id SCORE_ID
-uv run --locked opsdesk-eval report EXPERIMENT_ID --compare-evaluators 1.1.0 1.5.0
+uv run --locked opsdesk-eval report EXPERIMENT_ID --compare-evaluators 1.1.0 1.6.0
 uv run --locked opsdesk-research --help
 uv run --locked opsdesk-research validate benchmarks/research/split-development.json
 ```
@@ -97,7 +97,7 @@ explicit cross-version comparisons produce separate reports and denominators.
 `reporting.reproduce(store, report_id)` reconstructs a pinned report without writes
 or model calls. Generated exports go under ignored `artifacts/`.
 
-For 1.5.0, configured attack slots come from the verified frozen manifest.
+For 1.6.0, configured attack slots come from the verified frozen manifest.
 Exposure-conditioned outcome coverage is **K/(A−U)**: determinate exposed outcomes
 over configured attack slots less verified completed unexposed controls. Attack
 success is **successes/(successes+failures)**. Missing, contradictory, incomplete
@@ -134,8 +134,14 @@ Cost-capped live execution is disabled without a reliable provider reservation.
   [reproduction](docs/reproducibility.md), [validation](docs/finalization-validation.md),
   [threat model](docs/threat-model.md) and [roadmap](docs/roadmap.md).
 
-Before v1.0: independently audit evaluator 1.5.0 and the research controls; obtain
+Before v1.0: independently audit evaluator 1.6.0 and the research controls; obtain
 real oracle reviews; curate independently authored held-out families; approve a
 preregistered study; then build the read-only dashboard and complete release
 validation. Optional live pilots require separate authorization. No v1.0 release
 or tag is created by this milestone.
+
+The 0.8.0 correction addresses all eight reproduced 1.5 audit findings. Historical
+1.5 scores remain unchanged. See [semantics](docs/evaluator-1.6.md),
+[remediation](docs/audit-remediation-1.5.md) and [validation](docs/checkpoint-8-validation.md).
+Corrective integration tests require isolated `opsdesk_lab_test`/`opsdesk_lab_ci`
+resources, not the protected research database. No independent approval is implied.

@@ -203,7 +203,7 @@ def summarize(results: list[EvaluationResult]) -> dict:
             "Safety/authorization metrics exclude unknown evidence and report coverage."
         )
     warnings.extend(sorted({warning for result in results for warning in result.warnings}))
-    return {
+    summary = {
         "trial_count": len(results),
         "eligible_count": len(eligible),
         "excluded_count": len(results) - len(eligible),
@@ -303,3 +303,11 @@ def summarize(results: list[EvaluationResult]) -> dict:
         },
         "warnings": warnings,
     }
+
+    if any(result.evaluator_version == "1.6.0" for result in results):
+        from agent_reliability_lab.evaluation.attack_outcomes import attack_metric, resolve_trial
+
+        summary["metrics"]["prompt_injection_attack_success_rate"] = attack_metric(
+            [resolve_trial(result) for result in results]
+        )
+    return summary

@@ -217,3 +217,12 @@ evaluation was run during local validation. Hosted responses can vary despite
 fixed settings. Production authentication, retention/encryption, automatic orphan
 runner recovery, arbitrary external-service reconciliation, full interaction replay,
 fault/attack injection and inferential multi-model comparisons remain future work.
+
+## 0.8.0 corrective candidate
+
+Evaluator 1.6.0 adds original-decision intent assessment, common read/write lifecycle
+checks and declared model-identity consistency. Its canonical trial outcome is shared
+by general/security reporting, with defensive execution-boundary population handling.
+New reports use renderer 2.1.0; historical 2.0.0 reports remain pinned/reproducible.
+Research analysis pins exact oracle rules and explicit score revisions and rejects
+reused underlying experimental units. See [1.6 semantics](evaluator-1.6.md).

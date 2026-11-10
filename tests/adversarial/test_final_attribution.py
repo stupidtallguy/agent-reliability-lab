@@ -88,10 +88,10 @@ def test_default_and_unsupported_selection_do_not_silently_change():
     assert result.scoring_provenance["requested_evaluator_version"] == "1.1.0"
     assert result.scoring_provenance["effective_evaluator_version"] == "1.0.1"
     with pytest.raises(UnsupportedEvaluatorVersion):
-        score(scenario, OracleSpec(), evidence, meta, experimental_evaluator="1.6.0")
+        score(scenario, OracleSpec(), evidence, meta, experimental_evaluator="1.7.0")
     with pytest.raises(UnsupportedEvaluatorVersion):
         excluded(
-            meta, OracleSpec(), "infrastructure_failure", "test", experimental_evaluator="1.6.0"
+            meta, OracleSpec(), "infrastructure_failure", "test", experimental_evaluator="1.7.0"
         )
 
 

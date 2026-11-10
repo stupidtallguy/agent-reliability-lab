@@ -78,3 +78,12 @@ Remaining gates before v1.0, in order:
 4. Read-only Streamlit results/trace demonstration on approved scoring semantics.
 5. Final Windows/Linux reproduction, distribution, CI, documentation/security review,
    versioned release artifacts and release-validation record. No v1.0 tag in this increment.
+
+## 0.8.0 corrective candidate
+
+The eight reproduced 1.5 audit weaknesses are the scope of evaluator 1.6.0, not a new
+agent/research feature expansion. See [validation](checkpoint-8-validation.md).
+After verification: independently audit the exact delivered commit; complete genuine
+human oracle review and dataset curation; approve studies; then build the read-only
+dashboard and finish distribution/release validation. No held-out generalization,
+live-model robustness or production readiness follows from scripted tests.

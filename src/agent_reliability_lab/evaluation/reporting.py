@@ -11,6 +11,7 @@ from agent_reliability_lab.evaluation.persistence import EvaluationStore
 from agent_reliability_lab.opsdesk.fixtures import digest
 
 RENDERER_VERSION = "2.0.0"
+CANDIDATE_RENDERER_VERSION = "2.1.0"
 
 
 def content_hash(manifest_hash, results, summary):
@@ -64,16 +65,17 @@ def report(
         scoring_ids=scoring_ids,
         trial_ids=trial_ids,
     )
+    renderer = CANDIDATE_RENDERER_VERSION if cohort.version == "1.6.0" else RENDERER_VERSION
     scores = cohort.results
     if (
         cohort.unavailable
-        and cohort.version != "1.5.0"
+        and cohort.version not in {"1.5.0", "1.6.0"}
         and evaluator_version is None
         and not scoring_ids
     ):
         raise ValueError("experiment has unscored trials; inspect its lifecycle before reporting")
     summary = summarize(scores)
-    if any(score.experimental for score in scores) or cohort.version in {"1.4.0", "1.5.0"}:
+    if any(score.experimental for score in scores) or cohort.version in {"1.4.0", "1.5.0", "1.6.0"}:
         summary["security"] = experimental_summary(
             scores,
             evaluator_version=cohort.version,
@@ -81,6 +83,10 @@ def report(
             trials=trials,
             revisions=cohort.revisions,
         )
+    if cohort.version == "1.6.0":
+        summary["metrics"]["prompt_injection_attack_success_rate"] = summary["security"][
+            "attack_outcome_coverage"
+        ]["attack_success"]
     summary["metric_definitions"] = DEFINITIONS
     summary["per_scenario"] = {
         scenario_id: summarize([score for score in scores if score.scenario_id == scenario_id])
@@ -101,7 +107,7 @@ def report(
         schema_version="1.0",
         experiment_id=experiment_id,
         experiment_manifest_hash=experiment["manifest_hash"],
-        renderer_version=RENDERER_VERSION,
+        renderer_version=renderer,
         metric_definition_version=cohort.version,
         selection=selection,
         cleanup_snapshot=cleanup,
@@ -140,7 +146,7 @@ def report(
         envelope = {**envelope, "report_id": report_id, "generated_at": None}
     return {
         "schema_version": "1.0",
-        "renderer_version": RENDERER_VERSION,
+        "renderer_version": renderer,
         "report_manifest": envelope,
         "selection": selection,
         "report_id": report_id,
@@ -157,7 +163,7 @@ def reproduce(store, report_id):
     if record is None:
         raise ValueError("historical report has no renderer manifest; inspect preserved export")
     envelope = record["manifest"]
-    if envelope["renderer_version"] != RENDERER_VERSION:
+    if envelope["renderer_version"] not in {RENDERER_VERSION, CANDIDATE_RENDERER_VERSION}:
         raise ValueError("report requires a different renderer version")
     experiment = store.experiment(row["experiment_id"])
     payloads = [r["result"] for r in scores]
@@ -168,7 +174,7 @@ def reproduce(store, report_id):
         raise ValueError("report substantive content integrity mismatch")
     return dict(
         schema_version="1.0",
-        renderer_version=RENDERER_VERSION,
+        renderer_version=envelope["renderer_version"],
         report_manifest=envelope,
         selection=envelope["selection"],
         report_id=report_id,

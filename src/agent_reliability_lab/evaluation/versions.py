@@ -6,7 +6,7 @@ from pathlib import Path
 from agent_reliability_lab.evaluation.contracts import EvaluationResult, Evidence
 from agent_reliability_lab.opsdesk.fixtures import digest
 
-EXPERIMENTAL_VERSIONS = frozenset({"1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0"})
+EXPERIMENTAL_VERSIONS = frozenset({"1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0"})
 
 
 class UnsupportedEvaluatorVersion(ValueError):
@@ -49,14 +49,14 @@ def version_provenance(result, selected, effective=None, error=None):
     result.scoring_provenance.setdefault(
         "required_context",
         "experimental_capture"
-        if selected in {"1.4.0", "1.5.0"}
+        if selected in {"1.4.0", "1.5.0", "1.6.0"}
         else "when_experimental_plan_configured",
     )
     result.scoring_provenance.setdefault("context_reconstructed", False)
     result.scoring_provenance.setdefault("context_provenance", None)
-    if selected in {"1.4.0", "1.5.0"}:
+    if selected in {"1.4.0", "1.5.0", "1.6.0"}:
         result.evaluator_version = selected
-    if selected == "1.5.0":
+    if selected in {"1.5.0", "1.6.0"}:
         result.scoring_provenance.update(implementation_identity())
     return result
 

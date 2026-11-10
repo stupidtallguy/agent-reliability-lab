@@ -110,3 +110,29 @@ oracle. Alternate IDs cannot revive a stale decision. Versions append under a
 scope advisory lock. Study manifests retain the review references/statuses observed
 before execution. Analysis rejects incompatible pair groups, configurations,
 environments and scoring implementation identities; it does not pool them silently.
+
+## 0.8.0 corrective controls
+
+Paired analysis now checks each selected scoring revision against the pair's pinned
+oracle rules, scenario/version/hash, evidence and execution. Multiple matching scores
+require `score_selections` keyed by trial ID, with `scoring_id` and/or `revision`.
+Analysis outputs pin every selected revision. Aliases/reused trials/executions raise
+a structured experimental-unit error with exclusion reasons; implicit weighting or
+shared-control repeated-measures designs are unsupported. Distinct repeated trials
+remain clustered descriptive observations, not automatically independent samples.
+
+`dataset_release` artifacts pin both development and held-out references plus their
+complete assignments and validation version. Registration verifies family/template/
+scenario disjointness across partitions and detects hash substitution. Confirmatory
+studies must reference a composite release; historical development-only exploratory
+split references remain supported. The checked-in release has 38 development records
+and zero held-out records. Labels cannot prove semantic independence; human curation
+and review are still needed.
+
+After registering both existing split manifests in a chosen scope, register
+`benchmarks/research/dataset-release.json`; `opsdesk-research --scope SCOPE verify-release`
+accepts the same release file and reads its pinned partitions without writing.
+Analysis JSON can provide `score_selections`, for example
+`{"TRIAL_ID":{"revision":1}}`. Explicit `evaluator_versions` comparisons require
+`comparison_policy=separate_pinned_oracle_cohorts_v1` and produce separate cohorts;
+they never pool incompatible semantics or claim equal scoring behavior.

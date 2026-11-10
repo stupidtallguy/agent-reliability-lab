@@ -154,11 +154,15 @@ class ResearchStore:
                 ]
                 if existing and any(r["identity"] != item.identity for r in existing):
                     raise ValueError("one attestation stream per oracle/reviewer is required")
+        elif item.kind == "dataset_release":
+            from agent_reliability_lab.research.partitions import validate_release
+
+            validate_release(self, item)
         elif item.kind == "preregistration":
             split = self.get(item.split)
-            if split.kind != "split" or not set(item.scenario_population) <= {
-                t.scenario_id for t in split.templates
-            }:
+            if split.kind not in {"split", "dataset_release"} or not set(
+                item.scenario_population
+            ) <= {t.scenario_id for t in split.templates}:
                 raise ValueError("preregistered population must belong to the frozen split")
             oracles = [self.get(ref) for ref in item.oracles]
             if any(o.kind != "oracle" for o in oracles) or not set(item.scenario_population) <= {
@@ -258,6 +262,8 @@ class ResearchStore:
                 raise ValueError(
                     "confirmatory execution requires explicit human/evaluator audit acceptance"
                 )
+            if self.get(study.split).kind != "dataset_release":
+                raise ValueError("confirmatory execution requires pinned composite partitions")
             for ref in study.oracles:
                 if self.review_status(ref)["status"] != "approved_declared_human_review":
                     raise ValueError("confirmatory oracle review is pending or disputed")

@@ -52,6 +52,7 @@ jobs:
           uv run --locked opsdesk-research --help
           uv run --locked opsdesk-research validate benchmarks/research/split-development.json
           uv run --locked opsdesk-research validate benchmarks/research/split-held_out.json
+          uv run --locked opsdesk-research validate benchmarks/research/dataset-release.json
       - name: Lint and formatting
         run: |
           uv run --locked ruff check .
@@ -76,3 +77,12 @@ jobs:
         run: |
           uv run --locked python -c "import agent_reliability_lab, fastapi, langgraph, mcp, psycopg, streamlit"
           uv build
+      - name: Install built wheel with locked dependencies in an isolated environment
+        run: |
+          uv venv --python python .local/ci-wheel
+          uv export --locked --no-dev --no-emit-project --no-hashes --output-file .local/runtime.txt > /dev/null
+          uv pip install --python .local/ci-wheel/bin/python -r .local/runtime.txt dist/*.whl
+          WHEEL_PYTHON="$PWD/.local/ci-wheel/bin/python"
+          pushd "$RUNNER_TEMP"
+          "$WHEEL_PYTHON" -I -c "import importlib.metadata as m; import agent_reliability_lab as p; import agent_reliability_lab.agent, agent_reliability_lab.mcp, agent_reliability_lab.evaluation, agent_reliability_lab.research; assert p.__version__ == m.version('agent-reliability-lab'); assert 'site-packages' in p.__file__; print(p.__version__, p.__file__)"
+          popd

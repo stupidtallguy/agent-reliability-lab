@@ -239,7 +239,7 @@ def test_explicit_modern_version_survives_error_paths(version, damage):
     assert result.evidence_hash == digest(evidence.model_dump(mode="json"))
 
 
-@pytest.mark.parametrize("version", ["", "invalid", "1.0.1", "1.6.0"])
+@pytest.mark.parametrize("version", ["", "invalid", "1.0.1", "1.7.0"])
 def test_unsupported_versions_raise_a_typed_selection_error_before_scoring(version):
     with pytest.raises(UnsupportedEvaluatorVersion) as error:
         score(None, OracleSpec(), None, {}, experimental_evaluator=version)

@@ -21,6 +21,10 @@ def paired_summary(rows, *, seed=0, resamples=2000, independent_units_justificat
     ids = [r["pair_id"] for r in rows]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate pair identity")
+    if any("baseline_trial_id" in row for row in rows):
+        from agent_reliability_lab.research.units import validate_units
+
+        validate_units(rows)
     complete = [
         r
         for r in rows

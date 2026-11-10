@@ -195,3 +195,11 @@ assurance, authorized live pilots, dashboard work and v1.0 release validation re
 separate gates. Hashes provide integrity evidence, not authentication of a database
 owner or executed-code attestation. Legacy response substring rules have limited
 semantic coverage. No v1.0 release, tag or public publication is authorized here.
+
+## Superseding 0.8.0 corrective increment
+
+The subsequent read-only audit did not approve 1.5.0. Its eight findings are addressed
+under a separate 1.6.0 candidate, with default selection still 1.1.0. This historical
+0.7.0 validation record is retained; see [remediation](audit-remediation-1.5.md) and
+[0.8.0 actual validation](checkpoint-8-validation.md). Passing engineering checks do
+not constitute independent evaluator approval.

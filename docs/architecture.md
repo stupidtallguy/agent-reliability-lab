@@ -146,3 +146,11 @@ pair/split/study/amendment records. Its CLI is trusted administration; `Research
 is a bounded, read-only query surface for a later UI. No dashboard is implemented.
 See [ADR 0007](decisions/0007-research-finalization.md) and
 [research workflow](research-readiness.md). Independent approval is pending.
+
+## 0.8.0 correction boundaries
+
+New 1.6 attribution/projection/population modules leave frozen 1.5 helpers intact.
+Canonical outcome resolution connects scoring and reporting. Composite dataset-release
+artifacts reuse append-only research storage; no persistence redesign or migration
+is required. Pair analysis checks oracle/revision identities and distinct underlying
+trial/execution units before statistics. See [audit remediation](audit-remediation-1.5.md).

@@ -105,7 +105,7 @@ def excluded(
         result.scoring_provenance["experimental_context_required"] = bool(
             isinstance(config, dict) and config.get("harnesses", {}).get(meta["scenario_id"])
         )
-        if experimental_evaluator in {"1.4.0", "1.5.0"}:
+        if experimental_evaluator in {"1.4.0", "1.5.0", "1.6.0"}:
             from agent_reliability_lab.evaluation.experimental_context import (
                 ExperimentalContextError,
                 attach_plan,
@@ -156,7 +156,7 @@ def score(
     )
     requires_context = (
         manifest_error is not None
-        or experimental_evaluator in {"1.4.0", "1.5.0"}
+        or experimental_evaluator in {"1.4.0", "1.5.0", "1.6.0"}
         or (
             evidence is not None
             and evidence.experimental is None
@@ -209,8 +209,8 @@ def score(
         experimental_context_required=bool(context_required),
         required_context="experimental_capture" if context_required else "nonexperimental",
     )
-    if experimental_evaluator in {"1.4.0", "1.5.0"}:
-        if experimental_evaluator == "1.5.0":
+    if experimental_evaluator in {"1.4.0", "1.5.0", "1.6.0"}:
+        if experimental_evaluator in {"1.5.0", "1.6.0"}:
             result.experimental["planned_trial"] = plan
         else:
             attach_plan(result, plan)
@@ -561,6 +561,10 @@ def _score(scenario, oracle, evidence, meta, prices=None, *, experimental_evalua
     }
     if evidence.experimental is not None:
         result.scoring_provenance["_effective_scorer"] = experimental_evaluator
+        if experimental_evaluator == "1.6.0":
+            from agent_reliability_lab.adversarial.attribution_v160 import apply
+
+            return apply(result, scenario, evidence, oracle)
         if experimental_evaluator == "1.5.0":
             from agent_reliability_lab.adversarial.attribution_v150 import apply
 

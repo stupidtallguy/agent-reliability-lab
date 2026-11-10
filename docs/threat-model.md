@@ -115,3 +115,13 @@ records cannot satisfy it. The read-only research view uses read-only transactio
 not migration/scoring commands. A future UI needs its own deployment/access policy.
 Cost-capped live execution is disabled when a safe reservation cannot be established.
 No live or paid provider request is part of this milestone.
+
+## 0.8.0 evidence consistency
+
+Candidate 1.6 validates read-carrier attempt status/error/effect and sealed response
+relationships as well as writes. Captured provider/model identity must match immutable
+request-start declarations. Neither declaration nor hash authenticates a provider.
+Original sealed model decisions remain evaluation evidence even before validation;
+unsupported raw arguments remain rejected and never enter services. The protected
+research database is not a test target; correction tests use separate disposable
+PostgreSQL resources. No new authentication or security-effectiveness claim is made.
