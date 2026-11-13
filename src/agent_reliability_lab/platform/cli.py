@@ -49,7 +49,9 @@ def launch_dashboard(port=8501, *, url=None, scope=None, browser=True):
         raise ValueError("dashboard port must be between 1024 and 65535")
     if importlib.util.find_spec("streamlit") is None:
         raise RuntimeError("Install the stack extra: uv sync --locked --extra stack")
-    environment = dict(os.environ)
+    from agent_reliability_lab.dashboard.design import streamlit_theme
+
+    environment = {**os.environ, **streamlit_theme()}
     if url:
         environment["OPSDESK_DASHBOARD_DATABASE_URL"] = url
     if scope:
