@@ -7,12 +7,14 @@ import streamlit as st
 from agent_reliability_lab.dashboard.design import (
     bar_chart,
     bounded,
+    exact_refs,
     fields,
     html,
     metric_cards,
     metric_text,
     plain,
     purpose,
+    short_ref,
     timestamp,
     title_case,
 )
@@ -79,6 +81,11 @@ def overview(document, counts):
         f'<div class="lab-cohort-label"><strong>{html(purpose(manifest))}</strong>'
         f"<span>Selected trial splits · {html(split_label)}</span></div>"
     )
+    if manifest.get("demonstration") is True:
+        st.caption(
+            f"{summary['trial_count']} scripted trials in this report. "
+            "These results demonstrate the evaluation workflow."
+        )
     attack = summary.get("security", {}).get("attack_outcome_coverage", {})
     metrics = summary["metrics"] | {"coverage": attack.get("coverage", {})}
     metric_cards(
@@ -199,8 +206,8 @@ def comparison(view, scope):
                 (
                     name,
                     [
-                        ("Baseline", left / n, f"{left / n:.0%} ({left}/{n})", "blue"),
-                        ("Guarded", right / n, f"{right / n:.0%} ({right}/{n})", "purple"),
+                        ("Baseline", left / n, f"{left / n:.1%} ({left}/{n})", "blue"),
+                        ("Guarded", right / n, f"{right / n:.1%} ({right}/{n})", "purple"),
                     ],
                 )
             )
@@ -229,11 +236,13 @@ def comparison(view, scope):
     else:
         st.info("No outcome has complete eligible pairs in this analysis.")
     if table:
-        st.dataframe(table, hide_index=True)
+        with st.expander("Pair counts and uncertainty"):
+            st.dataframe(table, hide_index=True)
     st.caption("Outcome denominators depend on eligibility. Scripted results are descriptive.")
     st.subheader("Pinned report metrics", anchor=False)
     st.caption("Side-by-side cohort summaries. These measures do not estimate paired effects.")
-    extra = []
+    extra = {}
+    report_refs = []
     for side, document in reports.items():
         if not document:
             continue
@@ -242,25 +251,35 @@ def comparison(view, scope):
         coverage = summary.get("security", {}).get("attack_outcome_coverage", {})
         latency = summary.get("latency", {})
         cost = summary["metrics"].get("cost_per_successful_task", {})
-        extra.append(
-            {
-                "Configuration": side.title(),
-                "Evaluator": version,
-                "Tool accuracy": " · ".join(metric_text(accuracy)[:2]),
-                "Evidence coverage": " · ".join(metric_text(coverage.get("coverage", {}))[:2]),
-                "Unknown outcomes": plain(coverage.get("unknown_trials")),
-                "Median latency": f"{latency['median_seconds']:.2f} s (n={latency['count']})"
-                if latency.get("median_seconds") is not None
-                else "Unavailable",
-                "Cost per successful task": f"{cost['value']} {cost.get('currency', 'USD')} "
-                f"(n={cost.get('successful_live_tasks')})"
-                if cost.get("value") is not None
-                else title_case(cost.get("status")),
-                "Report ID": document["report_id"],
-            }
-        )
+        report_refs.append((f"{side.title()} report ID", document["report_id"]))
+        extra[side.title()] = {
+            "Tool accuracy": " · ".join(metric_text(accuracy)[:2]),
+            "Evidence coverage": " · ".join(metric_text(coverage.get("coverage", {}))[:2]),
+            "Unknown outcomes": plain(coverage.get("unknown_trials")),
+            "Median latency": f"{latency['median_seconds']:.2f} s (n={latency['count']})"
+            if latency.get("median_seconds") is not None
+            else "Unavailable",
+            "Cost per successful task": f"{cost['value']} {cost.get('currency', 'USD')} "
+            f"(n={cost.get('successful_live_tasks')})"
+            if cost.get("value") is not None
+            else title_case(cost.get("status")),
+        }
     if extra:
-        st.dataframe(extra, hide_index=True)
+        metrics = next(iter(extra.values()))
+        st.dataframe(
+            [
+                {
+                    "Metric": name,
+                    **{
+                        side: extra.get(side, {}).get(name, "Unavailable")
+                        for side in ("Baseline", "Guarded")
+                    },
+                }
+                for name in metrics
+            ],
+            hide_index=True,
+        )
+        exact_refs(report_refs, label="Exact comparison report references")
     if len(extra) < 2:
         st.info("At least one side lacks a saved report with the exact selected score IDs.")
     with st.expander("Pair exclusions, uncertainty and exact score references"):
@@ -303,7 +322,7 @@ def experiments(view, inventory):
         bounded(
             [
                 {
-                    "Experiment": r["experiment_id"],
+                    "Experiment": short_ref(r["experiment_id"]),
                     "Status": "Report available" if r.get("has_report") else "No saved report",
                     "Configuration": title_case(r.get("configuration")),
                     "Scenarios": len(r.get("cases") or []),
@@ -323,6 +342,12 @@ def experiments(view, inventory):
             ("Purpose", purpose(selected)),
             ("Configuration", title_case(selected.get("configuration"))),
             ("Created", timestamp(selected.get("created_at"))),
+            ("Manifest SHA-256", short_ref(selected.get("manifest_hash"))),
+        ]
+    )
+    exact_refs(
+        [
+            ("Experiment ID", selected["experiment_id"]),
             ("Manifest SHA-256", selected.get("manifest_hash")),
         ]
     )
@@ -334,7 +359,7 @@ def experiments(view, inventory):
                     [
                         {
                             "Scenario": c.get("scenario_id"),
-                            "Scenario hash": c.get("scenario_hash"),
+                            "Scenario hash": short_ref(c.get("scenario_hash")),
                             "Validation error": c.get("validation_error"),
                         }
                         for c in cases
@@ -342,6 +367,8 @@ def experiments(view, inventory):
                 ),
                 hide_index=True,
             )
+            case = st.selectbox("Scenario reference", cases, format_func=lambda c: c["scenario_id"])
+            exact_refs([("Scenario hash", case.get("scenario_hash"))], label="Exact scenario hash")
         else:
             st.info("No scenario plan is available for this experiment.")
     with st.expander("Materialized trials · first 100"):
@@ -353,19 +380,28 @@ def experiments(view, inventory):
                         "Scenario": t.get("scenario_id"),
                         "Trial": t.get("trial_index"),
                         "State": title_case(t.get("state")),
-                        "Execution ID": t.get("execution_id"),
+                        "Execution ID": short_ref(t.get("execution_id")),
                     }
                     for t in trials
                 ]
             ),
             hide_index=True,
         )
+        if trials:
+            trial = st.selectbox(
+                "Trial reference",
+                trials,
+                format_func=lambda row: f"{row['scenario_id']} · {row['trial_index']}",
+            )
+            exact_refs(
+                [("Execution ID", trial.get("execution_id")), ("Trial ID", trial["trial_id"])]
+            )
     with st.expander("Frozen configuration and source metadata"):
         st.json(bounded(view.experiment(selected["experiment_id"])))
 
 
 def experiment_label(row):
-    return f"{title_case(row.get('configuration'))} · {row['experiment_id'][:10]}"
+    return f"{title_case(row.get('configuration'))} · {short_ref(row['experiment_id'])}"
 
 
 def reports(document, view):
@@ -374,8 +410,11 @@ def reports(document, view):
         [
             ("Selected score revisions", len(manifest.get("selected_scores", []))),
             ("Saved", timestamp(manifest.get("generated_at"))),
-            ("Manifest hash", manifest.get("experiment_manifest_hash")),
+            ("Manifest hash", short_ref(manifest.get("experiment_manifest_hash"))),
         ]
+    )
+    exact_refs(
+        [("Manifest hash", manifest.get("experiment_manifest_hash"))], label="Exact manifest hash"
     )
     st.subheader("Download this revision", anchor=False)
     formats = {
@@ -400,12 +439,12 @@ def reports(document, view):
             bounded(
                 [
                     {
-                        "Trial": r.get("trial_id"),
+                        "Trial": short_ref(r.get("trial_id")),
                         "Revision": r.get("revision"),
                         "Evaluator": r.get("result_evaluator"),
-                        "Score ID": r.get("scoring_id"),
-                        "Evidence hash": r.get("evidence_hash"),
-                        "Rules hash": r.get("rules_hash"),
+                        "Score ID": short_ref(r.get("scoring_id")),
+                        "Evidence hash": short_ref(r.get("evidence_hash")),
+                        "Rules hash": short_ref(r.get("rules_hash")),
                     }
                     for r in selected
                 ]
@@ -413,7 +452,19 @@ def reports(document, view):
             hide_index=True,
         )
         with st.expander("Historical score revisions for a trial"):
-            trial = st.selectbox("Trial ID", [r["trial_id"] for r in selected])
+            pinned = st.selectbox(
+                "Trial ID", selected, format_func=lambda r: short_ref(r["trial_id"])
+            )
+            trial = pinned["trial_id"]
+            exact_refs(
+                [
+                    ("Trial ID", trial),
+                    ("Pinned score ID", pinned.get("scoring_id")),
+                    ("Evidence hash", pinned.get("evidence_hash")),
+                    ("Rules hash", pinned.get("rules_hash")),
+                ],
+                label="Exact pinned score references",
+            )
             revisions = view.rows("scores", identifier=trial, limit=100)
             st.dataframe(
                 bounded(
@@ -421,15 +472,28 @@ def reports(document, view):
                         {
                             "Revision": r["revision"],
                             "Evaluator": r["evaluator_version"],
-                            "Score ID": r["scoring_id"],
+                            "Score ID": short_ref(r["scoring_id"]),
                             "Saved": timestamp(r.get("created_at")),
-                            "Result hash": r.get("result_hash"),
+                            "Result hash": short_ref(r.get("result_hash")),
                         }
                         for r in revisions
                     ]
                 ),
                 hide_index=True,
             )
+            if revisions:
+                revision = st.selectbox(
+                    "Revision reference",
+                    revisions,
+                    format_func=lambda r: f"{r['revision']} · {r['evaluator_version']}",
+                )
+                exact_refs(
+                    [
+                        ("Score ID", revision["scoring_id"]),
+                        ("Result hash", revision.get("result_hash")),
+                    ],
+                    label="Exact revision references",
+                )
     with st.expander("Exact report manifest and scoring references"):
         st.json(bounded(manifest))
 
@@ -452,9 +516,10 @@ def research(view, scope):
                 ("Development scenarios", sum(t["split"] == "development" for t in assignments)),
                 ("Held-out scenarios", sum(t["split"] == "held_out" for t in assignments)),
                 ("Template families", len({t["family_id"] for t in assignments})),
-                ("Dataset hash", release["content_hash"]),
+                ("Dataset hash", short_ref(release["content_hash"])),
             ]
         )
+        exact_refs([("Dataset hash", release["content_hash"])], label="Exact dataset hash")
         st.dataframe(
             bounded(
                 [

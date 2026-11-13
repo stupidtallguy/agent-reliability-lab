@@ -5,10 +5,12 @@ import streamlit as st
 from agent_reliability_lab.dashboard.design import (
     bar_chart,
     bounded,
+    exact_refs,
     fields,
     html,
     metric_cards,
     plain,
+    short_ref,
     status_text,
     timestamp,
     title_case,
@@ -65,7 +67,7 @@ def timeline_rows(evidence):
         if payload.get("effect"):
             details.append(f"Effect: {title_case(payload['effect'])}")
         if payload.get("correlation_id"):
-            details.append(f"Correlation {payload['correlation_id']}")
+            details.append(f"Correlation {short_ref(payload['correlation_id'])}")
         if seq is not None:
             details.append(f"events/{seq}")
         yield name, status, tone, " · ".join(details)
@@ -123,8 +125,16 @@ def execution_trace(view, document):
                 "Tool proposals / attempts",
                 f"{plain(score.get('tool_proposals'))} / {plain(score.get('tool_attempts'))}",
             ),
-            ("Execution ID", score.get("execution_id")),
+            ("Execution ID", short_ref(score.get("execution_id"))),
         ]
+    )
+    exact_refs(
+        [
+            ("Execution ID", score.get("execution_id")),
+            ("Trial ID", trial.get("trial_id")),
+            ("Evidence reference", score.get("evidence_reference")),
+        ],
+        label="Exact execution and evidence references",
     )
     if not isinstance(evidence, dict):
         st.info("Frozen execution evidence is unavailable for this trial.")
@@ -133,6 +143,14 @@ def execution_trace(view, document):
     rows = list(timeline_rows(evidence))
     if rows:
         timeline(rows)
+        correlations = dict.fromkeys(
+            event.get("payload", {}).get("correlation_id") for event in evidence.get("events", [])
+        )
+        if any(correlations):
+            exact_refs(
+                [(short_ref(value), value) for value in correlations if value],
+                label="Exact timeline correlation IDs",
+            )
     else:
         st.info("This capture contains no journal events.")
     st.subheader("Reconciliation and final outcome", anchor=False)
@@ -150,7 +168,6 @@ def execution_trace(view, document):
                 "Prohibited effect",
                 status_text(score.get("unsafe"), yes="Verified effect", no="No verified effect"),
             ),
-            ("Evidence reference", score.get("evidence_reference")),
         ]
     )
     findings = score.get("findings", [])
@@ -224,7 +241,7 @@ def attack_flow(trial, score):
                     if score.get("evaluator_version") == "1.7.0"
                     else goal.get("verified_exposure", goal.get("exposed"))
                 ),
-                "Matched proposals": ", ".join(links) or "None recorded",
+                "Matched proposals": len(links) if "matched_proposal_ids" in attribution else None,
                 "Post-exposure candidates": sum(
                     candidate.get("eligible") is True
                     for candidate in attribution.get("candidates", [])
@@ -288,7 +305,9 @@ def attack_flow(trial, score):
         )
     st.caption("Temporal eligibility establishes order. Causal influence remains unestablished.")
     with st.expander("Attribution, exposure and fault records"):
-        st.text(plain(score.get("evidence_reference") or trial.get("evidence_hash")))
+        exact_refs(
+            [("Evidence reference", score.get("evidence_reference") or trial.get("evidence_hash"))]
+        )
         st.json(bounded(exp))
 
 

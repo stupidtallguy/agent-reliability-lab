@@ -116,6 +116,23 @@ def fields(items):
     st.html(f'<dl class="lab-fields">{content}</dl>')
 
 
+def short_ref(value):
+    text = plain(value)
+    return f"{text[:10]}…{text[-4:]}" if len(text) > 18 else text
+
+
+def exact_refs(items, *, label="Exact references"):
+    """Keep full, selectable values available without relying on a hover tooltip."""
+    entries = "".join(
+        f"<dt>{html(name)}</dt><dd><code>{html(value)}</code></dd>"
+        for name, value in Redactor().clean([list(item) for item in items])
+    )
+    st.html(
+        f'<details class="lab-references"><summary>{html(label)}</summary>'
+        f"<dl>{entries}</dl></details>"
+    )
+
+
 def status_text(value, *, yes="Verified", no="No"):
     if value is True:
         return yes
@@ -150,14 +167,18 @@ def metric_cards(items, version):
         value_class = (
             "lab-value" if record.get("value") is not None else "lab-value lab-value-unavailable"
         )
+        definition = (
+            f'<details class="lab-definition"><summary title="{html(detail)}">'
+            f"{html(status)}</summary><p>{html(detail)}</p></details>"
+            if record.get("value") is None and status != display
+            else ""
+        )
         cards.append(
             f'<article class="lab-kpi lab-{html(tone)}"><h3>{html(label)}</h3>'
             f'<p class="{value_class}">{html(display)}</p>'
             f'<p class="lab-kpi-meta">{html(counts)} <span>· Evaluator {html(version)}</span></p>'
             f'<p class="lab-kpi-description">{html(description)}</p>'
-            f'<details class="lab-definition"><summary title="{html(detail)}">'
-            f"{html(status)}</summary>"
-            f"<p>{html(detail)}</p></details></article>"
+            f"{definition}</article>"
         )
     st.html(f'<section class="lab-kpi-grid" aria-label="Cohort metrics">{"".join(cards)}</section>')
 

@@ -14,7 +14,8 @@ Downloads serialize existing pinned reports in memory without saving database re
 ## Seven workspaces
 
 1. **Overview** shows six reliability KPIs with evaluator, numerator, denominator,
-   and evidence status. Choose an experiment, evaluator and pinned report in the sidebar.
+   and evidence status. Open **Cohort filters** to choose an experiment, evaluator,
+   or pinned report. Evaluator and report selectors appear when there is a choice.
 2. **Baseline vs Guarded** shows rates and denominators from a frozen paired analysis.
    Family intervals and unknown, excluded, and inapplicable pairs are identified.
    Supplementary tool accuracy, latency, cost and coverage use saved reports that
@@ -59,9 +60,11 @@ requires no external fonts, images or JavaScript.
 | Primary and secondary text | `#111111`, `#475569` |
 
 Overview cards use three columns at desktop widths, two through 1100 px, and one
-through 600 px. Streamlit supplies the collapsible sidebar on narrow displays. Wide
+through 600 px. At 768 px or narrower, the main area has a workspace selector that
+works with the sidebar closed. Cohort filters also stay in the main area. Wide
 technical tables scroll within their own regions. Chart bars have labels and exact
-counts. Expand metric status with a mouse or keyboard for the definition and reason.
+counts. Open **Exact references** disclosures to select or copy full identifiers
+and hashes. Unavailable metrics retain their reason and known denominators.
 
 The dashboard uses Streamlit's native widgets, layout and sanitized HTML APIs.
 [Streamlit theming](https://docs.streamlit.io/develop/concepts/configuration/theming) · [Layout API](https://docs.streamlit.io/develop/api-reference/layout/st.columns) · [HTML API](https://docs.streamlit.io/develop/api-reference/text/st.html)

@@ -3,7 +3,7 @@ from sqlalchemy.exc import OperationalError
 from streamlit.testing.v1 import AppTest
 
 from agent_reliability_lab.dashboard.app import PAGES
-from agent_reliability_lab.dashboard.design import COLORS, metric_text
+from agent_reliability_lab.dashboard.design import COLORS, metric_text, short_ref
 from agent_reliability_lab.dashboard.evidence import timeline, timeline_rows
 from agent_reliability_lab.dashboard.pages import matched_report
 from tests.dashboard.support import MemoryView, app
@@ -16,6 +16,24 @@ def test_each_readonly_page_renders_without_writes(page):
     assert not at.exception
     assert not at.error
     assert not at.button  # downloads and selectors only, no mutation buttons
+
+
+def test_mobile_workspace_control_syncs_to_sidebar():
+    at = AppTest.from_function(app).run()
+    at.selectbox(key="lab_mobile_workspace").set_value("Experiments").run()
+    assert at.sidebar.radio[0].value == "Experiments"
+    assert at.text_input[0].label == "Search experiments or scenario IDs"
+
+
+def test_short_report_reference_has_selectable_exact_value():
+    report_id = "1234567890abcdef1234567890abcdef"
+    assert short_ref(report_id) == "1234567890…cdef"
+    at = AppTest.from_function(app).run()
+    assert any(
+        "<code>" in item.proto.body and "Exact cohort references" in item.proto.body
+        for item in at.get("html")
+    )
+    assert not at.get("spinner")
 
 
 def test_missing_host_database_is_an_actionable_welcome(monkeypatch):
@@ -99,6 +117,7 @@ def test_overview_six_kpis_show_evaluator_and_denominator():
     )
     assert markup.count("<article") == markup.count("Evaluator 1.7.0") == 6
     assert "1 / 1" in markup and "Insufficient evidence" in markup
+    assert ">Measured<" not in markup
 
 
 def test_experiment_search_filters_inventory_and_handles_no_matches():
@@ -120,8 +139,8 @@ def test_report_selector_never_mixes_or_falls_back_on_version_mismatch(monkeypat
 
     monkeypatch.setattr(MemoryView, "report_index", index)
     at = AppTest.from_function(app).run()
-    at.sidebar.selectbox[1].set_value("1.1.0").run()
-    assert len(at.sidebar.selectbox[2].options) == 1
+    at.selectbox(key="evaluator_" + "a" * 32).set_value("1.1.0").run()
+    assert all(widget.label != "Pinned report" for widget in at.selectbox)
     assert at.error and "selected evidence" in at.error[0].value
     assert not any("<article" in element.proto.body for element in at.get("html"))
 
@@ -144,6 +163,7 @@ def test_database_failure_never_displays_raw_diagnostics(monkeypatch):
     assert not at.exception
     assert "unavailable" in at.error[0].value
     assert "sensitive" not in at.error[0].value
+    assert not at.get("spinner")
 
 
 def test_timeline_joins_duration_and_escapes_untrusted_event_fields(monkeypatch):
