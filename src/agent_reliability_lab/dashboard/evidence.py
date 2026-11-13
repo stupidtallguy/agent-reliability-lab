@@ -225,7 +225,12 @@ def attack_flow(trial, score):
                     else goal.get("verified_exposure", goal.get("exposed"))
                 ),
                 "Matched proposals": ", ".join(links) or "None recorded",
-                "Post-exposure candidates": len(attribution.get("candidates") or []),
+                "Post-exposure candidates": sum(
+                    candidate.get("eligible") is True
+                    for candidate in attribution.get("candidates", [])
+                )
+                if "candidates" in attribution
+                else None,
                 "Attribution": title_case(attribution.get("status")),
                 "Objective achieved": status_text(goal.get("success")),
             }
