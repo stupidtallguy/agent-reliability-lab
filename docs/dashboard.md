@@ -1,4 +1,4 @@
-# Read-only research dashboard
+# Agent Reliability Lab dashboard
 
 Launch the complete synthetic demonstration with `uv run --locked --extra stack
 opsdesk-lab demo`. It starts a separate temporary database on 127.0.0.1:55435 and
@@ -13,17 +13,26 @@ Downloads serialize existing pinned reports in memory without saving database re
 
 ## Seven workspaces
 
-1. Overview shows the frozen experiment purpose, observed trial splits, evaluator,
-   denominators, task/attack/recovery/coverage, unknown counts and separate inventory.
-2. Baseline vs Guarded: immutable analysis artifacts with selected score IDs, unique
-   paired n, exclusions, unknowns, not-applicable pairs, family intervals and sensitivity.
-3. Experiments: frozen configuration, scenario populations, conditions and manifests.
-4. Execution traces: original decisions/proposals, validation, dispatches, attempts,
-   responses, receipts, audits and initial/final state; unresolved diagnostics remain visible.
-5. Security: injection exposures, objective attribution and provenance.
-6. Evaluators & reports: exact report/score/renderer identities and JSON/CSV/Markdown downloads.
-7. Research readiness shows study prerequisites, held-out inventory, preregistration
-   and machine-readable authoring schemas. Oracle Review is optional for the software.
+1. **Overview** shows six reliability KPIs with evaluator, numerator, denominator,
+   and evidence status. Choose an experiment, evaluator and pinned report in the sidebar.
+2. **Baseline vs Guarded** shows rates and denominators from a frozen paired analysis.
+   Family intervals and unknown, excluded, and inapplicable pairs are identified.
+   Supplementary tool accuracy, latency, cost and coverage use saved reports that
+   match the selected score IDs and evaluator. These summaries are descriptive.
+3. **Experiments** searches scenario and experiment IDs and filters by configuration.
+   Search and sorting apply to the current inventory page of up to 100 experiments.
+   Expand a selected record to inspect the frozen configuration and materialized trials.
+4. **Execution Traces** follows the journal from model request to tool response.
+   The outcome panel distinguishes agent status, objective scoring and receipts/audits.
+   Technical evidence stays available in sanitized expandable panels.
+5. **Security & Attacks** separates configured payloads, activation, delivery, model
+   exposure, operation evidence and evaluated objectives. Select an individual attack
+   or fault trial for attribution and recovery details.
+6. **Reports & Evaluators** shows evaluator and renderer versions, selected score
+   revisions and exact report references. Download the pinned JSON, CSV and Markdown.
+7. **Research & Data** shows partitions, scenario families, pair inventory and saved
+   preregistrations. The synthetic demonstration has 38 development cases and zero
+   held-out cases.
 
 Metrics belong to one selected report or pinned paired analysis. Inventory counts
 are separate. Synthetic demonstrations and scripted experiments have explicit purpose
@@ -33,3 +42,26 @@ values appear as unavailable. Text previews are bounded and redacted JSON data.
 This is a local developer interface, not production authentication. It must not be
 exposed to a LAN/public address. Streamlit telemetry is disabled by the launcher.
 AppTest covers all workspaces. PostgreSQL integration tests exercise read-only mutation rejection.
+
+## Design and responsive behavior
+
+`dashboard/design.py` defines the palette and reusable display components.
+`dashboard/theme.css` applies the responsive layout and focus styles. The launcher
+applies the same light theme to Streamlit's native controls. The system font stack
+uses Inter when installed, then Segoe UI or the system sans-serif. Dashboard styling
+requires no external fonts, images or JavaScript.
+
+| Tokens | Values |
+|---|---|
+| Azure and Royal | `#007BFF`, `#1A5FED` |
+| Coral and Lavender | `#FF8B6A`, `#B58BE8` |
+| White, canvas and border | `#FFFFFF`, `#F0F0F0`, `#D0D0D0` |
+| Primary and secondary text | `#111111`, `#475569` |
+
+Overview cards use three columns at desktop widths, two through 1100 px, and one
+through 600 px. Streamlit supplies the collapsible sidebar on narrow displays. Wide
+technical tables scroll within their own regions. Chart bars have labels and exact
+counts. Expand metric status with a mouse or keyboard for the definition and reason.
+
+The dashboard uses Streamlit's native widgets, layout and sanitized HTML APIs.
+[Streamlit theming](https://docs.streamlit.io/develop/concepts/configuration/theming) · [Layout API](https://docs.streamlit.io/develop/api-reference/layout/st.columns) · [HTML API](https://docs.streamlit.io/develop/api-reference/text/st.html)

@@ -72,11 +72,72 @@ class ResearchView:
                 ).items()
             }
 
+    def experiment_inventory(self, *, limit=100, offset=0):
+        """Bounded experiment summaries with materialized counts and stored context."""
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("invalid read-only pagination bounds")
+        table = e.experiments
+        counts = (
+            sa.select(sa.func.count())
+            .select_from(e.trials)
+            .where(e.trials.c.experiment_id == table.c.experiment_id)
+            .scalar_subquery()
+        )
+        ready = sa.exists().where(e.reports.c.experiment_id == table.c.experiment_id)
+        manifest = table.c.manifest
+        query = (
+            sa.select(
+                table.c.experiment_id,
+                table.c.created_at,
+                table.c.manifest_hash,
+                manifest["purpose"].as_string().label("purpose"),
+                manifest["demonstration"].label("demonstration"),
+                manifest["config"]["defense"].as_string().label("configuration"),
+                manifest["provenance"]["evaluator_version"].as_string().label("evaluator"),
+                manifest["cases"].label("cases"),
+                counts.label("trial_count"),
+                ready.label("has_report"),
+            )
+            .order_by(table.c.created_at.desc(), table.c.experiment_id)
+            .limit(limit)
+            .offset(offset)
+        )
+        with self.engine.connect() as connection, connection.begin():
+            connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+            return [dict(row) for row in connection.execute(query).mappings()]
+
+    def report_index(self, experiment_id, *, limit=100):
+        """List pinned reports without loading summaries or selecting score cohorts."""
+        if not 1 <= limit <= 100:
+            raise ValueError("invalid read-only pagination bounds")
+        reports, manifests = e.reports, e.report_manifests
+        query = (
+            sa.select(
+                reports.c.report_id,
+                reports.c.created_at,
+                reports.c.score_ids,
+                manifests.c.manifest["metric_definition_version"].as_string().label("evaluator"),
+                manifests.c.manifest["renderer_version"].as_string().label("renderer"),
+            )
+            .select_from(reports.outerjoin(manifests, reports.c.report_id == manifests.c.report_id))
+            .where(reports.c.experiment_id == experiment_id)
+            .order_by(reports.c.created_at.desc(), reports.c.report_id)
+            .limit(limit)
+        )
+        with self.engine.connect() as connection, connection.begin():
+            connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+            return [dict(row) for row in connection.execute(query).mappings()]
+
     def report(self, report_id):
         from agent_reliability_lab.evaluation.persistence import EvaluationStore
         from agent_reliability_lab.evaluation.reporting import reproduce
 
         return reproduce(EvaluationStore(self.engine), report_id)
+
+    def experiment(self, experiment_id):
+        from agent_reliability_lab.evaluation.persistence import EvaluationStore
+
+        return EvaluationStore(self.engine).experiment(experiment_id)
 
     def trial(self, trial_id):
         from agent_reliability_lab.evaluation.persistence import EvaluationStore

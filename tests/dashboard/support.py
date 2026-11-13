@@ -5,8 +5,24 @@ from tests.remediation17.support import facts, store
 class MemoryView:
     def __init__(self):
         self.trial_value, result = facts()
+        self.trial_value["experiment_id"] = result.experiment_id
         self.store = store([(self.trial_value, result)])
         self.document = report(self.store, "a" * 32, evaluator_version="1.7.0")
+
+    def experiment_inventory(self, **kwargs):
+        return [
+            {
+                "experiment_id": "a" * 32,
+                "configuration": "baseline",
+                "evaluator": "1.7.0",
+                "cases": [{"scenario_id": "attack_hijack"}],
+                "trial_count": 1,
+                "has_report": True,
+            }
+        ]
+
+    def report_index(self, experiment_id):
+        return [{"report_id": self.document["report_id"], "evaluator": "1.7.0"}]
 
     def counts(self):
         return dict(experiments=1, trials=1, scores=1, reports=1)
@@ -21,11 +37,11 @@ class MemoryView:
     def report(self, _):
         return self.document
 
+    def experiment(self, _):
+        return self.store.record
+
     def trial(self, _):
         return self.trial_value
-
-    def readiness(self, _):
-        return dict(human_declared_attestations=0, held_out_count=0, approval="pending")
 
 
 def app():
