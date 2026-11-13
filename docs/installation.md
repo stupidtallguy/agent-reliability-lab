@@ -16,7 +16,8 @@ uv run --locked --extra stack opsdesk-lab demo
 Alternatively, from PowerShell run `./scripts/setup.ps1 -Test`; from a POSIX shell
 run `sh scripts/setup.sh --test`. Scripts install locked dependencies and check the
 environment. They never configure paid APIs, print secrets or migrate protected databases.
-Python must already be installed; setup disables automatic interpreter downloads.
+Python must already be installed. Setup disables automatic interpreter downloads.
+Use [Windows setup](windows-setup.md) for interpreter-specific PowerShell commands.
 
 ## Safe test workflow
 
@@ -27,7 +28,8 @@ uv run --locked --extra stack opsdesk-lab stop-tests
 ```
 
 Full tests use `compose.test.yaml`, project opsdesk-tests, a labeled tmpfs instance
-on 127.0.0.1:55436 with no volume. The host launcher replaces inherited database
+on 127.0.0.1:55436 with no volume. The launcher pins its Compose project and packaged
+configuration independently of the benchmark/test workspace. It replaces inherited database
 configuration with that dedicated test URL and explicit test ownership opt-in.
 All PostgreSQL/MCP tests execute; unavailable PostgreSQL fails instead of skipping.
 The instance remains available for inspection until explicitly stopped. Export needed
@@ -80,6 +82,9 @@ pointing to `.local/wheel/Scripts/python.exe` (Windows) or `.local/wheel/bin/pyt
 (POSIX). Import from outside the checkout using Python `-I`; verify the package is
 inside site-packages and its version matches installed metadata. Wheel resources
 include synthetic benchmark specifications, the dependency lock and standalone demo/test Compose files.
+Repeat the same installation in a fresh environment with the exact `.tar.gz` instead
+of the wheel to check the source distribution. Run the demo from an installed
+package with its `opsdesk-lab` executable and the `stack` requirements installed.
 From a wheel outside Git, pass `--source-commit` for reproducible demo provenance.
 No editable checkout import should be mistaken for an isolated installation check.
 

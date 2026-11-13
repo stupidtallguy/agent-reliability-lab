@@ -101,9 +101,12 @@ class ScenarioRunner:
         live=False,
         model_factory=None,
         execution_options: dict | None = None,
+        demonstration: bool = False,
     ) -> str:
         if not paths:
             raise ValueError("at least one scenario path is required")
+        if demonstration and (config.model.provider != "fake" or config.study is not None):
+            raise ValueError("a demonstration must use scripted infrastructure validation")
         if config.model.provider == "openai" and (
             not live or config.model.model_id == "scripted-v1"
         ):
@@ -182,6 +185,8 @@ class ScenarioRunner:
         }
         if study_validation is not None:
             manifest["study_validation"] = study_validation
+        if demonstration:
+            manifest["demonstration"] = True
         experiment_id = self.store.create_experiment(manifest)
         experiment = self.store.experiment(experiment_id)
         mode = "scripted" if config.model.provider == "fake" else "live"

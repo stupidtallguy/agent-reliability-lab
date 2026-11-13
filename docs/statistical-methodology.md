@@ -1,5 +1,13 @@
 # Statistical methodology
 
+Application 1.0.0 reports evaluator 1.7.0 attack outcomes by trial, scenario,
+category and objective kind using verified population slots. Objective breakdowns
+count at most one outcome per objective kind and trial. Only determinate exposed
+slots contribute known objective-kind outcomes. A verified success for that kind
+wins within the slot. Failure requires every exposed outcome of that kind to be
+known and negative. This grouping is descriptive and does not increase sample size.
+See the [preregistration draft](preregistration-draft.md) for the proposed future study.
+
 The verified experimental unit is one distinct baseline/guarded trial pair with
 unique execution identities. Aliases and reuse of either side are rejected. Distinct
 repeated trials remain separate observations within their declared template family;

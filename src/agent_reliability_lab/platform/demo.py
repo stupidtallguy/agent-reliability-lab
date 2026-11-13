@@ -69,7 +69,9 @@ async def prepare_demo(engine, root, output, *, source_commit=None):
     paths = [case_path(root, name) for name in SCENARIOS]
     experiments, reports = [], []
     for defense in ("baseline", "guarded"):
-        identifier = await runner.run(paths, config.model_copy(update={"defense": defense}))
+        identifier = await runner.run(
+            paths, config.model_copy(update={"defense": defense}), demonstration=True
+        )
         experiments.append(identifier)
         document = report(runner.store, identifier, evaluator_version="1.7.0")
         if any(

@@ -6,8 +6,32 @@ import json
 
 from agent_reliability_lab.evaluation.reporting import markdown
 
+ATTACK_COUNTS = (
+    "configured_attack_trials",
+    "exposed_trials",
+    "unexposed_controls",
+    "determinate_trials",
+    "unknown_trials",
+    "unverified_exposure_trials",
+    "measured_successes",
+    "measured_failures",
+    "unsupported_trials",
+    "trial_metadata_unavailable",
+)
+POPULATION_COUNTS = (
+    "planned_trials",
+    "materialized_trials",
+    "selected_scores",
+    "unmaterialized_trials",
+    "unscored_trials",
+    "completed_trials",
+    "eligible_trials",
+    "excluded_trials",
+)
+
 
 def render_files(document: dict) -> dict[str, bytes]:
+    candidate = document.get("renderer_version") == "2.2.0"
     output = io.StringIO(newline="")
     writer = csv.DictWriter(
         output,
@@ -23,7 +47,10 @@ def render_files(document: dict) -> dict[str, bytes]:
         ],
     )
     writer.writeheader()
-    groups = {"__all__": document["summary"], **document["summary"]["per_scenario"]}
+    by_scenario = document["summary"]["per_scenario"]
+    if candidate:
+        by_scenario = dict(sorted(by_scenario.items()))
+    groups = {"__all__": document["summary"], **by_scenario}
     for scope, summary in groups.items():
         for name, record in sorted(summary["metrics"].items()):
             row = {key: record.get(key) for key in writer.fieldnames}
@@ -54,13 +81,15 @@ def render_files(document: dict) -> dict[str, bytes]:
         security = document["summary"]["security"]
         coverage = security.get("attack_outcome_coverage", {})
         if "determinate_trials" in coverage:
+            coverage_keys = ATTACK_COUNTS if candidate else tuple(coverage)
             counts = {
                 "configured_trials": security["configured_trials"],
                 "trial_metadata_unavailable": security["trial_metadata_unavailable"],
                 **{
-                    k: v
-                    for k, v in coverage.items()
-                    if k not in {"coverage", "attack_success", "units", "schema_version"}
+                    k: coverage[k]
+                    for k in coverage_keys
+                    if k in coverage
+                    and k not in {"coverage", "attack_success", "units", "schema_version"}
                 },
             }
             for name, value in counts.items():
@@ -84,17 +113,11 @@ def render_files(document: dict) -> dict[str, bytes]:
                     )
                 )
         if "population" in security:
-            for name, value in security["population"].items():
-                if name in {
-                    "planned_trials",
-                    "materialized_trials",
-                    "selected_scores",
-                    "unmaterialized_trials",
-                    "unscored_trials",
-                    "completed_trials",
-                    "eligible_trials",
-                    "excluded_trials",
-                }:
+            population = security["population"]
+            names = POPULATION_COUNTS if candidate else population
+            for name in names:
+                if name in POPULATION_COUNTS and name in population:
+                    value = population[name]
                     writer.writerow(
                         dict(
                             scenario_id="__population__",
@@ -104,8 +127,11 @@ def render_files(document: dict) -> dict[str, bytes]:
                             units="trials",
                         )
                     )
+        objectives = security["per_objective"]
+        if candidate:
+            objectives = dict(sorted(objectives.items()))
         for name, metric in {
-            **security["per_objective"],
+            **objectives,
             "defensive_false_positive_rate": security["defensive_false_positive_rate"],
             "benign_task_success": security["benign_task_success"],
         }.items():

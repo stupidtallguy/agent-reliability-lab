@@ -12,7 +12,13 @@ def test_only_owned_loopback_tmpfs_resources_are_accepted(monkeypatch, target, d
     name = "opsdesk-" + target
     port = "55435" if target == "demo" else "55436"
     info = dict(
-        Config={"Labels": {"opsdesk.owner": name}},
+        Config={
+            "Labels": {
+                "opsdesk.owner": name,
+                "com.docker.compose.project": name,
+                "com.docker.compose.service": "postgres",
+            }
+        },
         Mounts=[{"Type": "tmpfs"}],
         HostConfig={
             "Tmpfs": {"/var/lib/postgresql": "size=1g"},
@@ -39,3 +45,13 @@ def test_only_owned_loopback_tmpfs_resources_are_accepted(monkeypatch, target, d
             check()
     else:
         assert check()
+
+
+def test_compose_project_is_explicit_even_with_inherited_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "opsdesk-lab")
+    monkeypatch.setattr(cli, "assets", lambda: tmp_path)
+    monkeypatch.setattr(cli, "inspect_demo", lambda **kwargs: None)
+    commands = []
+    monkeypatch.setattr(cli, "run_command", commands.append)
+    cli.start_demo()
+    assert all(command[2:4] == ["--project-name", "opsdesk-demo"] for command in commands)

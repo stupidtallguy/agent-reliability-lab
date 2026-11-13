@@ -63,3 +63,36 @@ async def test_sealed_request_relationships(lab, damage, code):
     result = evaluate(t, e, version="1.7.0")
     assert result.attacker_success is None
     assert result.experimental["objectives"][0]["attribution"]["errors"] == [code]
+
+
+@pytest.mark.parametrize(
+    "field,value,diagnostic",
+    [
+        ("arguments_hash", "f" * 64, "missing_or_contradictory_proposal_journal_arguments_hash"),
+        ("tool", "get_order", "missing_or_contradictory_proposal_journal_tool"),
+        (
+            "logical_operation_id",
+            "f" * 32,
+            "missing_or_contradictory_proposal_journal_logical_operation_id",
+        ),
+        ("turn", -1, "missing_or_contradictory_request_journal_turn"),
+    ],
+)
+async def test_consistently_resealed_journal_must_match_decision_and_proposal(
+    lab, field, value, diagnostic
+):
+    trial, evidence = await control(lab)
+    event_type = "model_request" if field == "turn" else "tool_call_proposed"
+    event = next(row for row in evidence.events if row["event_type"] == event_type)
+    record = next(
+        row
+        for row in evidence.provenance
+        if row["kind"] == "journal_event" and row["body"]["sequence"] == event["sequence"]
+    )
+    record["body"]["payload"][field] = value
+    if field != "turn":
+        event["payload"][field] = value
+    reseal(evidence)
+    result = evaluate(trial, evidence, version="1.7.0")
+    assert result.attacker_success is None
+    assert result.experimental["objectives"][0]["attribution"]["errors"] == [diagnostic]

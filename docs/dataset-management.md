@@ -20,9 +20,12 @@ uv run --locked opsdesk-research validate benchmarks/research/split-held_out.jso
 uv run --locked opsdesk-research validate benchmarks/research/dataset-release.json
 ```
 
-After authorized registration, `opsdesk-research --scope STUDY verify-release FILE`
-verifies referenced frozen partitions. Use templates/README.md for independently
-sourced held-out authorship. Copying or paraphrasing development scenarios cannot
-establish family independence. An empty held-out manifest is a legitimate missing
-research prerequisite, not evidence of generalization. Candidate pairing requires
-the exact registered dataset-release reference and compatible oracle/scenario hashes.
+## Author and validate an independent held-out release
+
+1. Assign an independent author and record the source of each workflow and family. Keep development templates out of the authoring material. A paraphrase or cosmetic fixture change stays in its original family.
+2. Validate each scenario against the existing schema, set its split to `held_out`, and pin its scenario ID, version and canonical content hash. `agent_reliability_lab.evaluation.runner.read_case` computes the same parsed-scenario hash used by the runner. Record the template and family IDs and check fixture and oracle dependencies for shared ancestry.
+3. Use the existing empty manifest as a format example. Create a new versioned held-out manifest with the new assignments. Keep the existing development manifest and its 38 assignments. Validate both files using `opsdesk-research validate FILE`.
+4. In an authorized study scope, register the partition manifests using `opsdesk-research --scope STUDY append FILE`. Use the returned identities, versions and hashes in a composite dataset release. Validate and verify that release with `opsdesk-research --scope STUDY verify-release FILE` before appending it. Record the resulting reference in the study draft. Scope setup and registration are write operations for a study-owned database.
+5. Keep the committed held-out manifest empty until independently authored families exist. The current runner supports development execution. Authoring and validating a partition do not enable held-out execution or imply held-out generalization.
+
+Verified pairing requires the exact registered dataset-release reference and compatible oracle and scenario hashes. See [the authoring templates](templates/README.md).

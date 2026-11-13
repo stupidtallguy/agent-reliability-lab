@@ -39,6 +39,8 @@ def verify_projection_v3(evidence):
             raise ValueError("missing_or_malformed_sealed_input_hash")
         if begin["payload"].get("input_hash") != value:
             raise ValueError("contradictory_sealed_request_input_hash")
+        if boundary["body"]["payload"].get("turn") != request["turn"]:
+            raise ValueError("missing_or_contradictory_request_journal_turn")
         for field in ("provider", "model"):
             if identity(begin["payload"].get(field), field) != identity(
                 sealed["body"].get(field), field
@@ -78,21 +80,33 @@ def verify_projection_v3(evidence):
             ):
                 raise ValueError("contradictory_sealed_observation_order")
 
+    proposal_boundaries = {}
     for op in evidence.operations:
         request = next(
             r for r in evidence.requests if r["turn"] == op["turn"] and r["status"] == "completed"
         )
-        _, proposed = event("tool_call_proposed", "tool_call_id", op["proposal_id"])
+        projected, proposed = event("tool_call_proposed", "tool_call_id", op["proposal_id"])
+        for key, expected in dict(
+            tool=op["tool"],
+            logical_operation_id=op["operation_id"],
+            arguments_hash=op["arguments_hash"],
+        ).items():
+            if key not in projected["payload"] or projected["payload"][key] != expected:
+                raise ValueError(f"missing_or_contradictory_proposal_journal_{key}")
         if (
             not ends[request["request_id"]]["sequence"]
             < proposals[op["proposal_id"]]["sequence"]
             < proposed["sequence"]
         ):
             raise ValueError("contradictory_sealed_proposal_order")
+        proposal_boundaries[op["proposal_id"]] = proposed["sequence"]
     for attempt in evidence.attempts:
+        _, dispatch = event("tool_call_started", "attempt_id", attempt["attempt_id"])
+        proposed = proposal_boundaries.get(attempt["proposal_id"])
+        if proposed is None or proposed >= dispatch["sequence"]:
+            raise ValueError("missing_or_contradictory_sealed_dispatch_order")
         if attempt["status"] == "started":
             continue
-        _, dispatch = event("tool_call_started", "attempt_id", attempt["attempt_id"])
         kind = "tool_call_succeeded" if attempt["status"] == "succeeded" else "tool_call_failed"
         _, completion = event(kind, "attempt_id", attempt["attempt_id"])
         if (

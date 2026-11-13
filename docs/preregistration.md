@@ -5,6 +5,8 @@ and secondary metrics, scenario population, conditions, split/oracle references,
 sample-size rationale, statistical methods, exclusions and missing-data handling.
 Use templates/README.md and statistical-methodology.md to author a real study before
 collecting confirmatory results. A generated JSON schema is not an approved study.
+The [OpsDesk preregistration draft](preregistration-draft.md) documents the proposed
+estimands and open study decisions without registering a study.
 
 Validate a completed authorized specification with `opsdesk-research validate FILE`.
 Register through the trusted scoped `append FILE` workflow. Registration preserves
@@ -17,4 +19,4 @@ preregistration approval. Confirmatory execution checks declared review status a
 requires explicit host acceptance of its unverified identity assurance. Genuine
 human approval, sample-size judgment and any paid/live-model authorization remain
 outside automated code. Optional live evaluations require their existing separate
-explicit opt-in; Checkpoint 9 ran none.
+explicit opt-in. The software release verification used scripted execution only.

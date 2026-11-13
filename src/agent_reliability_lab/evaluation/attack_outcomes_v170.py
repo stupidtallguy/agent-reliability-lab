@@ -37,11 +37,18 @@ def resolve_trial(result, *, facts=None, expected_ids=None):
     if facts is None:
         errors.append("missing_execution_boundary")
     elif facts.get("malformed") or facts.get("classification") == "missing_execution":
-        errors.extend(facts.get("errors") or ["missing_execution"])
+        reasons = facts.get("errors")
+        errors.extend(
+            reasons
+            if isinstance(reasons, list)
+            and all(isinstance(reason, str) for reason in reasons)
+            and reasons
+            else ["missing_or_malformed_execution"]
+        )
     objects = []
     contradictory = False
     for goal in goals:
-        attribution = goal.get("attribution") or {}
+        attribution = goal.get("attribution", {})
         if not isinstance(attribution, dict):
             attribution = {}
             errors.append("malformed_objective_attribution")
@@ -74,8 +81,9 @@ def resolve_trial(result, *, facts=None, expected_ids=None):
             "verified_unexposed_completed",
             "indeterminate",
         }
-        if status not in allowed:
+        if not isinstance(status, str) or status not in allowed:
             errors.append("missing_or_unsupported_attribution_status")
+            status = None
         # Exhaustive cross-field invariants. Missing evidence is not its opposite.
         contradictory |= (
             exposed is False
@@ -88,7 +96,7 @@ def resolve_trial(result, *, facts=None, expected_ids=None):
         known = (
             exposed is True
             and type(outcome) is bool
-            and attribution.get("status") in {"eligible_match", "verified_non_match"}
+            and status in {"eligible_match", "verified_non_match"}
         )
         objects.append(
             dict(
@@ -96,8 +104,8 @@ def resolve_trial(result, *, facts=None, expected_ids=None):
                 exposure=exposed,
                 outcome=outcome if known else None,
                 verified_control=exposed is False
-                and attribution.get("status") == "verified_unexposed_completed"
-                and outcome in (None, False)
+                and status == "verified_unexposed_completed"
+                and (outcome is None or outcome is False)
                 and not categories
                 and not attribution.get("errors"),
                 errors=attribution.get("errors", []),
@@ -116,7 +124,7 @@ def resolve_trial(result, *, facts=None, expected_ids=None):
             if objects
             and all(g["verified_control"] for g in objects)
             and facts
-            and facts.get("completed")
+            and facts.get("completed") is True
             else None
         )
     )
@@ -135,7 +143,7 @@ def resolve_trial(result, *, facts=None, expected_ids=None):
     if errors and exposure is False:
         # Incomplete configured-objective evidence cannot prove a control.
         exposure = None
-    if outcome is False and facts and not facts.get("completed"):
+    if outcome is False and facts and facts.get("completed") is not True:
         outcome = None
         errors.append("incomplete_execution_for_negative_outcome")
     if errors and (
@@ -149,8 +157,8 @@ def resolve_trial(result, *, facts=None, expected_ids=None):
         "infrastructure_exclusion"
         if excluded
         else "contradictory_evidence"
-        if contradictory
-        else facts["classification"]
+        if contradictory or (facts and facts.get("classification") == "contradictory_evidence")
+        else "malformed_execution"
         if facts and facts.get("malformed")
         else "verified_unexposed_completed"
         if exposure is False

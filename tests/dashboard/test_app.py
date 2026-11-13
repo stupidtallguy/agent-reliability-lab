@@ -34,3 +34,31 @@ def test_content_is_bounded_and_untrusted_text_remains_data():
     assert "<script>" in str(result)
     assert result["api_key"] != "synthetic-value"
     assert bounded("x" * 100_001)["preview_truncated"]
+
+
+@pytest.mark.parametrize(
+    "purpose,demo,split,label",
+    [
+        ("scripted_infrastructure_validation", True, "development", "Synthetic demonstration"),
+        (
+            "scripted_infrastructure_validation",
+            False,
+            "development",
+            "Scripted infrastructure validation",
+        ),
+        ("live_evaluation", False, "held_out", "Live-model evaluation"),
+    ],
+)
+def test_overview_identifies_purpose_and_split(monkeypatch, purpose, demo, split, label):
+    from tests.dashboard.support import MemoryView
+
+    def configure(self, _):
+        self.document["manifest"].update(purpose=purpose, demonstration=demo)
+        self.document["results"][0]["split"] = split
+        return self.document
+
+    monkeypatch.setattr(MemoryView, "report", configure)
+    at = AppTest.from_function(app).run()
+    assert not at.exception
+    assert any(label in row.value for row in at.markdown)
+    assert any(f"splits · {split.replace('_', '-')}" in row.value for row in at.caption)

@@ -1,42 +1,32 @@
 # v1.0.0 release gates
 
-Application 0.9.0 is an engineering candidate, not an independently approved research
-release. Do not create v1.0.0 until the exact delivered commit is reviewed.
+Application 1.0.0 is a local software release. Engineering verification of the
+release commit is recorded in [Checkpoint 10](checkpoint-10-verification.md).
 
-## Automated engineering gates
+## Software gates
 
-- [ ] Independent reproduction of candidate counterexamples and historical reports.
-- [ ] Both Python versions pass unit, real PostgreSQL/MCP, process restart and product tests.
-- [ ] Lock, lint, formatting, wheel/sdist, isolated install/import and hosted CI pass.
-- [x] Protected database fingerprints, all historical scores and original volume unchanged.
-- [x] Local read-only dashboard and seven-case no-paid-API demo verified.
-- [x] Windows/Linux setup, report exports, safe cleanup and documentation reviewed.
-- [ ] Exact commit independently audited; candidate explicitly selected, default unchanged.
-- [ ] Final release validation record and versioned distribution checksums preserved.
+- Reproduce the six AUD16 counterexamples and fix remaining high or critical engineering defects.
+- Verify both Python versions with real PostgreSQL/MCP, restart and product tests.
+- Verify lock, lint, formatting, distributions, isolated installation and hosted CI.
+- Verify the protected volume fingerprint and preserve historical evidence and renderers.
+- Verify the read-only dashboard, scripted seven-case demo, downloads and cleanup.
+- Verify Windows installation and execution or record the owner's acceptance of specific gaps.
+- Verify the exact private remote commit before creating the annotated software tag.
 
-Checkpoint-9-validation.md records actual engineering evidence; unchecked here means
-release approval is pending, not that unexecuted work is being represented as passed.
+The [engineering verification record](checkpoint-10-verification.md) describes local
+checks. Hosted evidence is the [CI run for the release commit](https://github.com/stupidtallguy/agent-reliability-lab/actions/workflows/ci.yml).
 
-## Human and research gates
+## Separate research-study requirements
 
-- [ ] Genuine independent oracle reviews with exact spec hashes and declared conflicts.
-- [ ] Adjudication of disagreements by an appropriate independent human.
 - [ ] Independently authored and reviewed held-out template families; currently 0.
-- [ ] Authorized preregistration, sample-size rationale and missing-data/analysis approval.
+- [ ] Approved study design and preregistration with sample-size rationale and missing-data rules.
 - [ ] Explicit authorization for any optional paid/live-model pilot.
 
-Software cannot complete human gates. Local identities/hashes do not verify reviewer
-independence. The current 38 development scenarios must not be relabeled held-out.
+Oracle Review is outside the software release scope. The optional workspace and
+historical oracle artifacts remain available. All 38 current scenarios are development data.
 
 ## Release boundary
 
-A software-only v1.0.0 can be considered after an independent audit and engineering
-gates, with human research prerequisites explicitly pending and no generalized
-research claims. A research-results release additionally requires the relevant human
-gates and real authorized data collection. Production deployment also needs reviewed
-authentication, least-privilege roles, operational hardening and external threat review.
-No public deployment or production authentication is included here.
-
-Recommended final milestone: audit the exact 0.9.0 commit, correct only reproduced
-blockers under new semantics if persisted, then approve a narrowly labeled software
-release. Do not manufacture held-out evidence, reviews or live-model findings.
+The software release validates local installation, execution and reproducibility.
+Research conclusions require an approved design and appropriate observations.
+Production deployment would need authentication, least-privilege roles and operational hardening.

@@ -13,9 +13,9 @@ from pathlib import Path
 
 from agent_reliability_lab import __version__
 from agent_reliability_lab.opsdesk.database import make_engine
+from agent_reliability_lab.platform.containers import compose, inspect_owned
 from agent_reliability_lab.platform.demo import assets, prepare_demo
 
-DEMO_CONTAINER = "opsdesk-demo-postgres-1"
 DEMO_URL = "postgresql+psycopg://opsdesk_demo@127.0.0.1:55435/opsdesk_lab_test"
 
 
@@ -30,27 +30,17 @@ def run_command(command, **options):
 
 
 def inspect_demo(required=False):
-    result = subprocess.run(["docker", "inspect", DEMO_CONTAINER], capture_output=True, text=True)
-    if result.returncode:
-        if required:
-            raise RuntimeError("Owned demo container is unavailable")
-        return None
-    info = json.loads(result.stdout)[0]
-    ports = info["HostConfig"]["PortBindings"].get("5432/tcp", [])
-    if (
-        info["Config"].get("Labels", {}).get("opsdesk.owner") != "opsdesk-demo"
-        or any(m["Type"] != "tmpfs" for m in info["Mounts"])
-        or "/var/lib/postgresql" not in info["HostConfig"].get("Tmpfs", {})
-        or ports != [{"HostIp": "127.0.0.1", "HostPort": "55435"}]
-    ):
-        raise RuntimeError("Refusing an unowned, persistent or differently bound demo container")
+    info = inspect_owned("opsdesk-demo", "55435")
+    if required and info is None:
+        raise RuntimeError("Owned demo container is unavailable")
     return info
 
 
-def start_demo(root):
+def start_demo():
     inspect_demo()
-    run_command(["docker", "compose", "-f", str(root / "compose.demo.yaml"), "config", "--quiet"])
-    run_command(["docker", "compose", "-f", str(root / "compose.demo.yaml"), "up", "-d", "--wait"])
+    command = compose(assets(), "opsdesk-demo", "compose.demo.yaml")
+    run_command(command + ["config", "--quiet"])
+    run_command(command + ["up", "-d", "--wait", "postgres"])
     inspect_demo(required=True)
 
 
@@ -195,7 +185,7 @@ def main():
 
             raise SystemExit(
                 run_tests(
-                    assets(getattr(args, "workspace", None)),
+                    getattr(args, "workspace", None) or Path.cwd(),
                     unit_only=getattr(args, "unit_only", False),
                     stop=args.command == "stop-tests",
                 )
@@ -209,18 +199,12 @@ def main():
         elif args.command == "stop-demo":
             inspect_demo(required=True)
             run_command(
-                [
-                    "docker",
-                    "compose",
-                    "-f",
-                    str(assets(args.workspace) / "compose.demo.yaml"),
-                    "down",
-                ]
+                compose(assets(), "opsdesk-demo", "compose.demo.yaml") + ["down", "postgres"]
             )
             print("Owned temporary demo stopped. Exported evidence reports remain on disk.")
         else:
             root = assets(args.workspace)
-            start_demo(root)
+            start_demo()
             engine = make_engine(DEMO_URL, allow_sandbox=True)
             try:
                 result = asyncio.run(
@@ -231,7 +215,7 @@ def main():
             print(json.dumps(result, indent=2))
             if not args.no_ui:
                 raise SystemExit(launch_dashboard(args.port, url=DEMO_URL, scope=result["scope"]))
-    except (ValueError, RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+    except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
         if hasattr(error, "errors"):
             print(
                 json.dumps(

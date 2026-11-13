@@ -5,14 +5,14 @@ right actions, recover safely, and leave enough evidence to justify an evaluatio
 OpsDesk, a fictional company, supplies policies, customers, orders, payments and
 support tasks. No real customer records or production integrations are used.
 
-**Application 0.9.0 | evaluator 1.7.0 candidate | renderer 2.2.0.**
-The default experimental selector remains **1.1.0**. Candidate results require
-explicit selection and independent audit. The repository remains private.
+**Application 1.0.0 | evaluator 1.7.0 candidate | renderer 2.2.0.**
+The default experimental selector remains **1.1.0**. Candidate scoring requires
+explicit selection. The repository remains private.
 
 ## Start the demonstration
 
 Use CPython **3.11 or 3.12**, Docker Desktop with Linux containers (Windows), or
-Docker Engine and Compose (Linux/macOS), and uv **0.13.7**:
+Docker Engine and Compose (Linux) or Docker Desktop (macOS), and uv **0.13.7**.
 
 ```console
 python -m pip install uv==0.13.7
@@ -24,7 +24,8 @@ This command starts a dedicated, loopback-only, temporary PostgreSQL instance,
 runs seven scenarios with both scripted baseline and guarded configurations,
 freezes scores, reports and paired analysis, then opens the read-only dashboard
 at [localhost:8501](http://127.0.0.1:8501). No API key or model request is needed.
-It does not use the persistent development database. Add `--no-ui` for automation.
+The demo uses its own tmpfs database. Add `--no-ui` for automation. After closing
+the dashboard, run `uv run --locked opsdesk-lab stop-demo` to remove the demo database.
 Each invocation appends a fresh set of trials; outcomes are deterministic while
 identifiers, timings and evidence hashes vary. See the [demo guide](docs/demo-guide.md).
 
@@ -92,10 +93,10 @@ eligibility does not establish causal influence. Local hashes do not authenticat
 an external provider. Declared human identities do not establish independent review.
 No defense-superiority or held-out generalization claim is made.
 
-Oracle reviews, disagreements, adjudication, composite dataset releases,
-preregistrations/amendments, pairing and family-aware analysis are implemented.
-Genuine independent review, new held-out families and approved preregistration
-remain human research activities. The demo creates pending specifications, not approvals.
+The research workflow includes composite dataset releases, preregistrations and
+amendments, pairing, and family-aware analysis. The optional Oracle Review workspace
+remains available. See the [preregistration draft](docs/preregistration-draft.md) and
+[held-out authoring workflow](docs/dataset-management.md).
 
 ## Test and reproduce
 
@@ -112,8 +113,8 @@ uv build
 `opsdesk-lab test` uses a separate owned tmpfs PostgreSQL instance on loopback
 port 55436, overriding inherited database configuration. Tests never need paid APIs.
 Keep the persistent database and `docker_probe_01` untouched. See
-[installation](docs/installation.md), [database management](docs/database.md) and
-[validation evidence](docs/checkpoint-9-validation.md).
+[installation](docs/installation.md), [Windows setup](docs/windows-setup.md),
+[database management](docs/database.md) and [engineering verification](docs/checkpoint-10-verification.md).
 
 For a developer-owned disposable database configured through `OPSDESK_DATABASE_URL`:
 
@@ -138,8 +139,8 @@ Exports go under ignored `artifacts/`. Dashboard downloads perform no database w
 - [Metrics](docs/metrics-definitions.md), [statistical methodology](docs/statistical-methodology.md)
 - [Research workflow](docs/research-readiness.md), [authoring templates](docs/templates/README.md)
 - [Security boundaries](docs/threat-model.md), [provenance](docs/agent-tracing.md)
-- [v1.0.0 gates](docs/release-readiness-v1.0.0.md), [changelog](CHANGELOG.md)
+- [v1.0.0 release gates](docs/release-readiness-v1.0.0.md), [release notes](docs/release-notes-v1.0.0.md), [changelog](CHANGELOG.md)
 
-The next release gate is an independent read-only audit of the exact delivered
-commit. No v1.0.0 tag, public deployment, production authentication service or
-live-model pilot is included in this milestone.
+The v1.0.0 scope is a local software release. Research-study approval, held-out
+generalization, live-model reliability, and production authentication remain outside
+the validated scope.

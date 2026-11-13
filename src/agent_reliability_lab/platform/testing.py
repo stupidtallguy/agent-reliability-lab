@@ -1,43 +1,35 @@
 """Owned, temporary PostgreSQL test workflow; no protected database fallback."""
 
-import json
 import os
 import subprocess
 import sys
 
+from agent_reliability_lab.platform.containers import compose
+from agent_reliability_lab.platform.containers import inspect_owned as inspect_container
+from agent_reliability_lab.platform.demo import assets
+
 URL = "postgresql+psycopg://opsdesk_ci@127.0.0.1:55436/opsdesk_lab_ci"
-CONTAINER = "opsdesk-tests-postgres-1"
 
 
 def inspect_owned():
-    result = subprocess.run(["docker", "inspect", CONTAINER], capture_output=True, text=True)
-    if result.returncode:
-        return False
-    info = json.loads(result.stdout)[0]
-    if (
-        info["Config"].get("Labels", {}).get("opsdesk.owner") != "opsdesk-tests"
-        or any(m["Type"] != "tmpfs" for m in info["Mounts"])
-        or "/var/lib/postgresql" not in info["HostConfig"].get("Tmpfs", {})
-        or info["HostConfig"]["PortBindings"].get("5432/tcp")
-        != [{"HostIp": "127.0.0.1", "HostPort": "55436"}]
-    ):
-        raise ValueError("Refusing an unowned or persistent test instance")
-    return True
+    return inspect_container("opsdesk-tests", "55436") is not None
 
 
 def run_tests(root, *, unit_only=False, stop=False):
+    if not stop and not (root / "tests").is_dir():
+        raise ValueError("Run tests from a source checkout or supply --workspace")
     environment = dict(os.environ)
     for name in ("OPSDESK_DATABASE_URL", "OPSDESK_ALLOW_SANDBOX", "OPSDESK_TEST_OWNED"):
         environment.pop(name, None)
     if not unit_only:
         inspect_owned()
-        command = ["docker", "compose", "-f", str(root / "compose.test.yaml")]
+        command = compose(assets(), "opsdesk-tests", "compose.test.yaml")
         subprocess.run(command + ["config", "--quiet"], check=True)
         if stop:
             if not inspect_owned():
                 raise ValueError("No owned test instance exists")
-            return subprocess.call(command + ["down"])
-        subprocess.run(command + ["up", "-d", "--wait"], check=True)
+            return subprocess.call(command + ["down", "postgres"])
+        subprocess.run(command + ["up", "-d", "--wait", "postgres"], check=True)
         if not inspect_owned():
             raise ValueError("Owned test instance did not start")
         environment.update(
@@ -46,4 +38,5 @@ def run_tests(root, *, unit_only=False, stop=False):
     return subprocess.call(
         [sys.executable, "-m", "pytest"] + (["-m", "not integration"] if unit_only else []),
         env=environment,
+        cwd=root,
     )

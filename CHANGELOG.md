@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0 — Local software release
+
+- Pin demo and test Compose operations to their owned disposable projects.
+- Join candidate model request, proposal and dispatch evidence across the sealed ledger.
+- Reject mismatched score/capture pairs and use verified population outcomes in attack breakdowns.
+- Label synthetic demonstrations, scripted evaluations, and observed trial splits in the dashboard.
+- Verify locked Windows and Linux installation paths, including wheel and source distributions.
+- Add a preregistration draft and separate software release gates from study prerequisites.
+
+Evaluator 1.7.0 remains explicit and experimental. Renderer 2.2.0 and default
+experimental evaluator 1.1.0 retain their version identifiers.
+
 ## 0.9.0 - Evaluator 1.7.0 and local research product
 
 - Correct AUD16-01 through AUD16-06 with candidate-only provenance, lifecycle,

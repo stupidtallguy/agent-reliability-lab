@@ -1,4 +1,4 @@
-# Research readiness at application 0.9.0
+# Research readiness at application 1.0.0
 
 ## Implemented engineering
 
@@ -19,25 +19,23 @@ The composite dataset release pins both partitions. Current coverage is **38 dev
 scenarios and 0 held-out**. Cross-partition template/family/scenario disjointness is
 validated at registration. Empty held-out data establishes no held-out performance.
 
-The 0.9 demo freezes seven matched scenario pairs with exact oracle/dataset/score
+The demo freezes seven matched scenario pairs with exact oracle/dataset/score
 references and an immutable analysis result. Not-applicable metric pairs are separate
 from in-scope unknowns. A pair alias or reused trial/execution cannot increase n.
 Analysis registration recomputes its selected-score result before append.
 
 ## Pending genuine research actions
 
-- Independent read-only audit of the exact delivered 0.9.0 commit/evaluator 1.7.0.
-- Real independent oracle reviewers, declared conflicts and preserved disagreements.
-- Human adjudication if needed; no automated approval or fabricated reviewers.
 - Independently authored and reviewed held-out template families.
 - Authorized preregistration with sample-size rationale, estimands, clustering,
   stopping/exclusion criteria, uncertainty and sensitivity methods.
 - Separate explicit authorization for any optional live/paid model pilot.
 
-A saved specification/template is not an approved preregistration. The dashboard
-shows these missing prerequisites. The no-key demo is scripted infrastructure
-validation; it cannot establish live-model reliability, defense superiority,
-external provider authenticity, causal attack influence or production readiness.
+The [preregistration draft](preregistration-draft.md) leaves study parameters open
+where the project has no approved values. The dashboard shows pending study
+prerequisites. The scripted demonstration measures infrastructure behavior only.
+Oracle Review is optional for the software release and outside this milestone's scope.
+Evaluator 1.7.0 has engineering verification and remains a research candidate.
 
 ## Trust and remaining limitations
 

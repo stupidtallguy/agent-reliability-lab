@@ -1,4 +1,5 @@
 import copy
+import json
 
 import pytest
 
@@ -61,9 +62,16 @@ def test_malformed_execution_retains_planned_population(damage):
 
 def test_downloads_equal_persisted_candidate_exports(tmp_path):
     document = report(store([facts()]), "a" * 32, evaluator_version="1.7.0")
+    summary = document["summary"]
+    scenario = next(iter(summary["per_scenario"].values()))
+    summary["per_scenario"] = {"zz_case": scenario, "aa_case": scenario}
+    objective = next(iter(summary["security"]["per_objective"].values()))
+    summary["security"]["per_objective"] = {"zz_objective": objective, "aa_objective": objective}
     destination = export(document, tmp_path)
     for name, content in render_files(document).items():
         assert (destination / name).read_bytes() == content
+    serialized = json.loads((destination / "results.json").read_bytes())
+    assert render_files(serialized) == render_files(document)
 
 
 @pytest.mark.parametrize("envelope", [None, [], {}])
@@ -92,3 +100,31 @@ def test_duplicate_materialized_slot_cannot_choose_a_successful_alias():
     assert census["determinate_trials"] == 0 and census["unknown_trials"] == 1
     slot = document["summary"]["security"]["population"]["slots"][0]
     assert slot["classification"] == "contradictory_materialized_trial_identity"
+
+
+@pytest.mark.parametrize("status", [[], {}])
+def test_unhashable_objective_status_is_indeterminate(status):
+    _, result = facts()
+    result.experimental["objectives"][0]["attribution"]["status"] = status
+    resolved = resolve_trial(result)
+    assert resolved["outcome"] is None
+    assert "missing_or_unsupported_attribution_status" in resolved["unknown_reasons"]
+
+
+def test_report_rejects_score_with_unrelated_capture_hash():
+    trial, result = facts()
+    result.evidence_hash = "f" * 64
+    with pytest.raises(ValueError, match="score/capture hash mismatch"):
+        report(store([(trial, result)]), "a" * 32, evaluator_version="1.7.0")
+
+
+@pytest.mark.parametrize("contradictory", [False, True])
+def test_candidate_attack_breakdowns_use_verified_population(contradictory):
+    trial, result = facts()
+    if contradictory:
+        result.experimental["objectives"][0]["attribution"]["status"] = "verified_non_match"
+    summary = report(store([(trial, result)]), "a" * 32, evaluator_version="1.7.0")["summary"]
+    expected = None if contradictory else 1.0
+    assert summary["security"]["per_objective"]["workflow_hijack"]["value"] == expected
+    for level in (summary, *summary["per_scenario"].values(), *summary["per_category"].values()):
+        assert level["metrics"]["prompt_injection_attack_success_rate"]["value"] == expected

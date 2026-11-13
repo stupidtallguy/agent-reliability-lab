@@ -10,14 +10,9 @@ def experimental_summary(
     if evaluator_version == "1.7.0" or any(
         getattr(r, "evaluator_version", None) == "1.7.0" for r in results
     ):
-        from agent_reliability_lab.evaluation.population_v170 import (
-            security_summary,
-            supplemental_summary,
-        )
+        from agent_reliability_lab.evaluation.population_v170 import security_summary
 
-        return security_summary(
-            results, supplemental_summary(results), experiment, trials, revisions
-        )
+        return security_summary(results, experiment, trials, revisions)
     if evaluator_version == "1.6.0" or any(
         getattr(r, "evaluator_version", None) == "1.6.0" for r in results
     ):

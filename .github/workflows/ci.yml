@@ -72,10 +72,9 @@ jobs:
         run: uv run --locked opsdesk-eval run --development --config benchmarks/evaluation/development.json
       - name: Paired fault, attack and benign control smoke (no paid API)
         run: uv run --locked opsdesk-eval run --suite all --paired --transport memory
-      - name: Complete local product demo and review authoring workspace
+      - name: Complete local product demo
         run: |
           uv run --locked opsdesk-lab --version
-          uv run --locked opsdesk-lab review-workspace .local/review
           uv run --locked opsdesk-lab demo --no-ui --output .local/product-demo
       - name: Validate Compose configuration without rendering credentials
         env:
@@ -93,4 +92,15 @@ jobs:
           WHEEL_PYTHON="$PWD/.local/ci-wheel/bin/python"
           pushd "$RUNNER_TEMP"
           "$WHEEL_PYTHON" -I -c "import importlib.metadata as m; import agent_reliability_lab as p; import agent_reliability_lab.agent, agent_reliability_lab.mcp, agent_reliability_lab.evaluation, agent_reliability_lab.research; import agent_reliability_lab.dashboard.app, streamlit; from agent_reliability_lab.platform.demo import assets; assert (assets() / 'compose.demo.yaml').is_file(); assert p.__version__ == m.version('agent-reliability-lab'); assert 'site-packages' in p.__file__; print(p.__version__, p.__file__)"
+          "$(dirname "$WHEEL_PYTHON")/opsdesk-lab" demo --no-ui --source-commit "$GITHUB_SHA" --output product-wheel-demo
+          "$(dirname "$WHEEL_PYTHON")/opsdesk-lab" stop-demo
+          popd
+      - name: Install source distribution outside the checkout
+        run: |
+          uv venv --python python .local/ci-sdist
+          uv pip install --python .local/ci-sdist/bin/python -r .local/runtime.txt dist/*.tar.gz
+          SDIST_PYTHON="$PWD/.local/ci-sdist/bin/python"
+          pushd "$RUNNER_TEMP"
+          "$SDIST_PYTHON" -I -c "import importlib.metadata as m; import agent_reliability_lab as p; from agent_reliability_lab.platform.demo import assets; assert (assets() / 'benchmarks/research/dataset-release.json').is_file(); assert p.__version__ == m.version('agent-reliability-lab'); assert 'site-packages' in p.__file__; print(p.__version__, p.__file__)"
+          "$(dirname "$SDIST_PYTHON")/opsdesk-eval" --help
           popd

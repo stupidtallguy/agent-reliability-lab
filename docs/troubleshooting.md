@@ -1,5 +1,12 @@
 # Troubleshooting
 
+For Windows, pin `UV_PYTHON` to the installed interpreter and use a separate
+`UV_PROJECT_ENVIRONMENT` per minor version. A Docker ownership error means the
+fixed project/container failed its label, storage or port checks. Inspect the
+container before retrying. Keep persistent data outside the demo/test projects.
+If a candidate report rejects a score/capture mismatch, inspect the exact selected
+revision and frozen capture. Preserve both records for diagnosis.
+
 - Docker unavailable: start Docker Desktop in Linux-container mode, or the Docker
   Engine/Compose plugin. `opsdesk-lab doctor` reports availability without credentials.
 - Port occupied: inspect the named owner; never remove an unrelated container. Demo

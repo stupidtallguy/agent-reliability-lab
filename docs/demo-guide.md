@@ -26,8 +26,9 @@ Seven cases execute under both baseline and guarded configurations:
 The demonstration deliberately includes unsuccessful cases. Inspect the trace and
 compare attempts, effects, task success and attack outcome. These scripts establish
 infrastructure behavior, not realistic model resistance or defense superiority.
-Actual final outputs are recorded in checkpoint-9-validation.md. Timing, random IDs
-and seals are not byte-deterministic; logical fixtures and scripted outcomes are.
+Actual release verification outputs are recorded in [Checkpoint 10](checkpoint-10-verification.md).
+Logical fixtures and scripted outcomes reproduce across runs. Timing, IDs and seals vary.
+The dashboard labels new runs **Synthetic demonstration** from their frozen manifests.
 
 The demo creates pending machine-authored oracle specifications, the 38/0 composite
 dataset release, verified equivalent-condition pairs and an immutable selected-score

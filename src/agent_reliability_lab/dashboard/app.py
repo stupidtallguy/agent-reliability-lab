@@ -59,7 +59,33 @@ def overview(document, counts):
     st.title("Agent Reliability Lab")
     st.caption("Observe actions. Reconcile effects. Measure uncertainty.")
     with st.container(border=True):
-        st.markdown("**Scripted infrastructure validation**")
+        manifest = document.get("manifest")
+        manifest = manifest if isinstance(manifest, dict) else {}
+        purpose = manifest.get("purpose")
+        label = (
+            {
+                "scripted_infrastructure_validation": "Scripted infrastructure validation",
+                "live_evaluation": "Live-model evaluation",
+            }.get(purpose, "Experiment purpose unavailable")
+            if isinstance(purpose, str)
+            else "Experiment purpose unavailable"
+        )
+        if (
+            purpose == "scripted_infrastructure_validation"
+            and manifest.get("demonstration") is True
+        ):
+            label = "Synthetic demonstration"
+        splits = {r.get("split") for r in document["results"]}
+        splits = {
+            "development"
+            if s == "development"
+            else "held-out"
+            if s == "held_out"
+            else "unavailable"
+            for s in splits
+        }
+        st.markdown(f"**{label}**")
+        st.caption("Selected trial splits · " + (", ".join(sorted(splits)) or "unavailable"))
         st.write(
             "Task completion, attack attribution and committed effects are "
             "separate observations. Candidate results have not received "
@@ -276,10 +302,9 @@ def render(view=None):
             st.warning("Software validation is not independent human approval.")
             st.json(view.readiness(scope))
             st.markdown(
-                "Outstanding: exact-commit audit, genuine oracle "
-                "review/adjudication, independently authored held-out families and"
-                " approved preregistration. Live pilots need separate "
-                "authorization."
+                "Research study preparation requires independently authored held-out "
+                "families and an approved preregistration. The optional review workspace "
+                "is separate from software release checks. Live pilots need separate authorization."
             )
             from agent_reliability_lab.research.contracts import (
                 Attestation,

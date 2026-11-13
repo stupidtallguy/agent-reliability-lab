@@ -76,6 +76,13 @@ IDs and revisions, never by silently choosing newer scores.
 
 ## Reproduce
 
+The application 1.0.0 implementation also checks the journal turn and proposal
+tool, operation ID and argument hash against sealed evidence, and requires a
+proposal to precede physical dispatch. Reports reject an eligible score with an
+unrelated capture hash. Scenario, category and objective attack summaries use the
+verified population. Historical results retain their original stored summaries and
+exact revisions. Source and lock fingerprints distinguish new scoring runs.
+
 Run `uv run --locked --extra stack opsdesk-lab test`, then `opsdesk-lab demo --no-ui`.
 Focused tests are under `tests/remediation17` and `tests/dashboard`. Full validation
 is recorded separately in checkpoint-9-validation.md. No API calls are necessary.

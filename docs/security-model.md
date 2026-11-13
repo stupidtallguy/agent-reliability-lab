@@ -1,5 +1,10 @@
 # Security model
 
+The v1.0.0 demo and test launchers pin the Compose project and packaged file. They
+verify owner, Compose project/service labels, tmpfs, and loopback port before
+operating on an existing container. The Docker daemon and CLI environment remain
+trusted local operator infrastructure. The dashboard never executes those commands.
+
 Trusted host configuration fixes actor, tenant, scenario/run binding, tool scopes,
 model configuration and budgets. Model prompts, retrieved documents, tool responses
 and final answers cannot grant permissions. MCP handlers call the existing validated

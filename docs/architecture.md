@@ -164,6 +164,12 @@ Candidate 1.7 uses projection v3, logical/physical lifecycle joins and canonical
 
 ### Product boundaries
 
+The 1.0.0 launchers use packaged Compose files, explicit project names and
+ownership, mount and loopback checks before starting or stopping a disposable
+PostgreSQL service. A workspace argument selects scenario or test inputs. It cannot
+redirect Docker operations. The dashboard exposes frozen report content through a
+read-only research view, with experiment purpose and trial split visible.
+
 The `platform` CLI is the trusted operator: it can start only named, ownership-checked
 standalone demo/test instances. The `dashboard` is a reader: it cannot provision,
 execute agents, alter artifacts or register reviews. `evaluation.downloads` is a pure
