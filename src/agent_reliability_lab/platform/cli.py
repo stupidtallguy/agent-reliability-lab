@@ -57,26 +57,27 @@ def launch_dashboard(port=8501, *, url=None, scope=None, browser=True):
     address = f"http://127.0.0.1:{port}"
     print("Read-only dashboard:", address, flush=True)
     target = Path(__file__).parents[1] / "dashboard/app.py"
-    return subprocess.call(
-        [
-            sys.executable,
-            "-m",
-            "streamlit",
-            "run",
-            str(target),
-            "--server.address",
-            "127.0.0.1",
-            "--server.port",
-            str(port),
-            "--server.headless",
-            "false" if browser else "true",
-            "--browser.serverAddress",
-            "127.0.0.1",
-            "--browser.gatherUsageStats",
-            "false",
-        ],
-        env=environment,
-    )
+    command = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(target),
+        "--server.address",
+        "127.0.0.1",
+        "--server.port",
+        str(port),
+        "--server.headless",
+        "false" if browser else "true",
+        "--browser.serverAddress",
+        "127.0.0.1",
+        "--browser.gatherUsageStats",
+        "false",
+    ]
+    try:
+        return subprocess.call(command, env=environment)
+    except KeyboardInterrupt:
+        return 130
 
 
 def doctor():

@@ -55,3 +55,11 @@ def test_compose_project_is_explicit_even_with_inherited_override(monkeypatch, t
     monkeypatch.setattr(cli, "run_command", commands.append)
     cli.start_demo()
     assert all(command[2:4] == ["--project-name", "opsdesk-demo"] for command in commands)
+
+
+def test_dashboard_ctrl_c_exits_without_a_traceback(monkeypatch):
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli.subprocess, "call", interrupted)
+    assert cli.launch_dashboard(browser=False) == 130

@@ -17,6 +17,7 @@ The pre-change Windows 3.11 run of `pytest tests/remediation17 tests/dashboard` 
 | ENG10-05 | Medium | Reseal a synthetic evidence copy with a mismatched request journal turn or proposal tool, operation ID or argument hash. Earlier joins verified the outer seal and event identity without checking these inner relationships. `agent/provenance_v3.py` joins them to the original request/proposal and checks proposal-before-dispatch order. `test_consistently_resealed_journal_must_match_decision_and_proposal` uses real MCP captures and asserts exact diagnostics. |
 | ENG10-06 | Low | Overview labeled all reports scripted regardless of the manifest. `dashboard/app.py` uses frozen purpose and trial splits. New product demos record a trusted demo marker in the experiment manifest. `test_overview_identifies_purpose_and_split` covers scripted, demo and held-out/live labels with synthetic fixtures. |
 | ENG10-07 | Medium | Re-render an archived 2.2.0 report from saved JSON or PostgreSQL. CSV content matched but row order followed JSON object key order. `evaluation/downloads.py` defines deterministic 2.2.0 row order, and candidate CLI exports use the same serializer. The serialized-report regression and archived export checks verify byte parity. |
+| ENG10-08 | Low | Press Ctrl+C in a Windows console running `opsdesk-lab dashboard`. Streamlit stopped, but the launcher printed a `KeyboardInterrupt` traceback. The launcher now returns interrupt status 130. `test_dashboard_ctrl_c_exits_without_a_traceback` exercises the interrupt boundary. |
 
 ## Scripted demo and UI
 
