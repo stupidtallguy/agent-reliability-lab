@@ -68,3 +68,10 @@ and hashes. Unavailable metrics retain their reason and known denominators.
 
 The dashboard uses Streamlit's native widgets, layout and sanitized HTML APIs.
 [Streamlit theming](https://docs.streamlit.io/develop/concepts/configuration/theming) · [Layout API](https://docs.streamlit.io/develop/api-reference/layout/st.columns) · [HTML API](https://docs.streamlit.io/develop/api-reference/text/st.html)
+
+## Reliability evidence
+
+Overview and Reports display evidence-quality measurements for a pinned cohort.
+Execution Traces includes a Retry Inspector for logical writes. The
+[reliability demo](reliability-demo.md) opens the same read-only dashboard on
+frozen revisions of a synthetic external effect.

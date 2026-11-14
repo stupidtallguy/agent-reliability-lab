@@ -25,3 +25,11 @@ The evaluator separates verified effects from uncertain attribution and preserve
 unknown/contradictory/incomplete states. Historical versions remain reproducible,
 including their known limitations. See threat-model.md, evaluator-1.7.md and
 release-readiness-v1.0.0.md for boundaries and pending independent review.
+
+## Synthetic notification boundary
+
+The optional simulator checks sandbox incarnation, actor role and tenant before
+it returns a receipt or writes. Its fixed templates have no destination address
+or network adapter. The synthetic provider runs in a separate transaction.
+Acknowledgment loss and delivery uncertainty remain separate from authorization
+and prompt-injection outcomes. The dashboard only reads persisted evidence.

@@ -237,3 +237,38 @@ def contrast(foreground, background):
 )
 def test_normal_text_color_pairs_meet_aa_contrast(foreground, background):
     assert contrast(foreground, background) >= 4.5
+
+
+def test_reliability_workspace_keeps_report_downloads_and_unknown_distinct(monkeypatch):
+    from agent_reliability_lab.reliability.metrics import metric
+
+    def reliability_reports(self, execution_id):
+        assert execution_id == "c" * 32
+        return [
+            {
+                "report_id": "d" * 64,
+                "execution_id": execution_id,
+                "revision": 1,
+                "provider": {
+                    "local_intent": "recorded",
+                    "provider": "accepted",
+                    "delivery": "unknown",
+                },
+                "physical_tool_attempts": 2,
+                "metrics": [metric("external_confirmation", 0, 1, "Synthetic notification")],
+            }
+        ]
+
+    monkeypatch.setenv("OPSDESK_DASHBOARD_SCOPE", "reliability_" + "c" * 32)
+    monkeypatch.setattr(MemoryView, "reliability_reports", reliability_reports, raising=False)
+    at = AppTest.from_function(app).run()
+    at.selectbox(key="lab_mobile_workspace").set_value("Reports & Evaluators").run()
+    assert not at.exception and not at.error
+    assert [item.proto.label for item in at.get("download_button")] == [
+        "Download reliability JSON",
+        "Download reliability CSV",
+        "Download reliability MD",
+    ]
+    assert any(
+        "Delivery" in item.proto.body and "Unknown" in item.proto.body for item in at.get("html")
+    )

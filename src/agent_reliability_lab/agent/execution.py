@@ -20,6 +20,7 @@ from agent_reliability_lab.agent.state import TERMINAL, AgentResult
 from agent_reliability_lab.agent.tool_adapter import ToolSession
 from agent_reliability_lab.mcp.context import BoundContext, LaunchConfig
 from agent_reliability_lab.opsdesk.fixtures import digest
+from agent_reliability_lab.reliability.notifications import TOOL as NOTIFICATION_TOOL
 
 
 class AgentExecution:
@@ -148,6 +149,8 @@ class AgentExecution:
                             after_dispatch=after_dispatch,
                         )
                         available = set(registry["tool_access"]["available"])
+                        if "notifications" in config.domains:
+                            available.add(NOTIFICATION_TOOL)
                         if config.allowed_tools is not None:
                             available.intersection_update(config.allowed_tools)
                         runtime.catalog = [

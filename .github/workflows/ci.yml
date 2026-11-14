@@ -76,6 +76,7 @@ jobs:
         run: |
           uv run --locked opsdesk-lab --version
           uv run --locked opsdesk-lab demo --no-ui --output .local/product-demo
+          uv run --locked opsdesk-lab reliability-demo --no-ui --output .local/reliability-demo
       - name: Validate Compose configuration without rendering credentials
         env:
           POSTGRES_PASSWORD: unused-config-validation-only

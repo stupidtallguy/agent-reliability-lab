@@ -57,6 +57,13 @@ class AgentConfig(Contract):
         schema_for(self.sandbox_run_id)
         if not self.domains or len(self.domains) != len(set(self.domains)):
             raise ValueError("domains must be nonempty and unique")
+        if "notifications" in self.domains and (
+            self.model.provider != "fake"
+            or self.defense is not None
+            or self.runtime_plan is not None
+            or not self.sandbox_run_id.startswith("rel_")
+        ):
+            raise ValueError("notifications are available only in the scripted reliability lab")
         if not self.model.model_id.strip():
             raise ValueError("an explicit model ID is required")
         if self.model.provider == "openai" and self.model.model_id == "scripted-v1":

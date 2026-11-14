@@ -108,6 +108,8 @@ def select_trial(view, document, *, security=False):
 
 
 def execution_trace(view, document):
+    from agent_reliability_lab.dashboard.reliability import retry_inspector
+
     trial, score = select_trial(view, document)
     if trial is None:
         return
@@ -153,6 +155,7 @@ def execution_trace(view, document):
             )
     else:
         st.info("This capture contains no journal events.")
+    retry_inspector(evidence, score)
     st.subheader("Reconciliation and final outcome", anchor=False)
     fields(
         [

@@ -15,10 +15,10 @@ from pydantic import SecretStr
 
 from agent_reliability_lab.mcp.client import connect_stdio
 from agent_reliability_lab.mcp.context import BoundContext, LaunchConfig, LogicalOperation
+from agent_reliability_lab.mcp.contracts import WRITE_TOOLS
 from agent_reliability_lab.mcp.servers import create_server
 from agent_reliability_lab.opsdesk.database import SandboxManager, engine_from_env, schema_for
 from agent_reliability_lab.opsdesk.fixtures import baseline_access, load_baseline
-from agent_reliability_lab.opsdesk.services import WRITES
 
 
 def display(label: str, result: types.CallToolResult) -> None:
@@ -151,7 +151,7 @@ async def client_command(args: argparse.Namespace) -> int:
         arguments = json.loads(args.arguments)
         if not isinstance(arguments, dict):
             raise ValueError("arguments must be a JSON object")
-        if args.tool in WRITES:
+        if args.tool in WRITE_TOOLS:
             if args.operation_id is None:
                 raise ValueError(
                     "writes require a host-chosen --operation-id; reuse it for retries"
@@ -172,7 +172,7 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("serve", "list", "call"):
         command = commands.add_parser(name)
-        command.add_argument("domain", choices=["documents", "business", "tasks"])
+        command.add_argument("domain", choices=["documents", "business", "tasks", "notifications"])
         if name == "list":
             command.add_argument("--full-schema", action="store_true")
         if name == "call":

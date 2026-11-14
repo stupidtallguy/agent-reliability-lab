@@ -89,3 +89,9 @@ From a wheel outside Git, pass `--source-commit` for reproducible demo provenanc
 No editable checkout import should be mistaken for an isolated installation check.
 
 See troubleshooting.md for network, ownership, port and missing-data diagnostics.
+
+## Reliability commands
+
+`opsdesk-lab reliability-demo` uses the existing standalone temporary Compose
+project. The stack extra supplies Streamlit. Use `--no-ui` for headless runs or
+`--port 8511` when port 8501 is occupied. See [the demo guide](reliability-demo.md).

@@ -18,6 +18,7 @@ from agent_reliability_lab.opsdesk import tables as t
 from agent_reliability_lab.opsdesk.contracts import ActorContext, ServiceError
 from agent_reliability_lab.opsdesk.database import Sandbox, SandboxManager, schema_for
 from agent_reliability_lab.opsdesk.services import OpsDeskService
+from agent_reliability_lab.reliability.notifications import TOOL, NotificationLab
 
 OPERATION_META = "opsdesk.lab/operation"
 
@@ -163,4 +164,12 @@ class BoundContext:
             if registry["marker"] != self.marker or registry["seed_hash"] != self.seed_hash:
                 raise ServiceError("unauthorized", "Bound sandbox context has changed.")
             actor = ActorContext(actor_id=self.config.actor_id, tenant_id=self.config.tenant_id)
+            if tool == TOOL:
+                try:
+                    lab = NotificationLab(self.sandbox)
+                except ValueError:
+                    raise ServiceError(
+                        "unauthorized", "Notification sandbox is unavailable."
+                    ) from None
+                return lab.queue(actor, request)
             return getattr(self.service, tool)(actor, request)

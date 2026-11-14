@@ -10,9 +10,8 @@ from sqlalchemy.engine import Engine
 from agent_reliability_lab.agent.config import AgentConfig
 from agent_reliability_lab.mcp.client import TrustedClient, connect_stdio
 from agent_reliability_lab.mcp.context import BoundContext, LaunchConfig, LogicalOperation
+from agent_reliability_lab.mcp.contracts import WRITE_TOOLS
 from agent_reliability_lab.mcp.servers import create_server
-
-WRITES = frozenset({"create_task", "update_task"})
 
 
 def provider_tools(catalog: list[dict]) -> list[dict]:
@@ -77,7 +76,7 @@ class ToolSession:
         self, tool: dict, arguments: dict, operation_id: str | None, *, transform=None
     ) -> dict:
         client = self.clients[tool["domain"]]
-        if tool["name"] in WRITES:
+        if tool["name"] in WRITE_TOOLS:
             result = await client.write(
                 tool["name"], arguments, LogicalOperation(operation_id=operation_id)
             )

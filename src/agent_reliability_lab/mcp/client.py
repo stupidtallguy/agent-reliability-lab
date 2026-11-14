@@ -7,8 +7,8 @@ from contextlib import asynccontextmanager
 from mcp import Client, StdioServerParameters, types
 
 from agent_reliability_lab.mcp.context import LaunchConfig, LogicalOperation, sign_operation
-from agent_reliability_lab.mcp.contracts import Domain
-from agent_reliability_lab.opsdesk.services import READS, WRITES
+from agent_reliability_lab.mcp.contracts import WRITE_TOOLS, Domain
+from agent_reliability_lab.opsdesk.services import READS
 
 
 class TrustedClient:
@@ -27,7 +27,7 @@ class TrustedClient:
     async def write(
         self, tool: str, arguments: dict, operation: LogicalOperation
     ) -> types.CallToolResult:
-        if tool not in WRITES:
+        if tool not in WRITE_TOOLS:
             raise ValueError("write accepts only known write tools")
         return await self._client.call_tool(
             tool, arguments, meta=sign_operation(self._config, tool, arguments, operation)

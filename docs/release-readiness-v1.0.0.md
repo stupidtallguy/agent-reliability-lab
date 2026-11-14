@@ -30,3 +30,10 @@ historical oracle artifacts remain available. All 38 current scenarios are devel
 The software release validates local installation, execution and reproducibility.
 Research conclusions require an approved design and appropriate observations.
 Production deployment would need authentication, least-privilege roles and operational hardening.
+
+## Post-release reliability engineering
+
+[Checkpoint 11](checkpoint-11-validation.md) verifies supported operations with
+scripted inputs and a local provider simulator. Its operational metrics do not
+establish live-model performance, causal attack influence, or production
+delivery reliability.

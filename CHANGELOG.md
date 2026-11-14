@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a reliability lab for transactional retries, sealed model context changes
+  and synthetic external-effect evidence.
+- Add a read-only Retry Inspector, operational evidence-quality measures and a
+  scripted notification demo with immutable report revisions.
+
 ## 1.0.0 — Local software release
 
 - Pin demo and test Compose operations to their owned disposable projects.

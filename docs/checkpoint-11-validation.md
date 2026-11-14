@@ -1,0 +1,40 @@
+# Checkpoint 11 validation
+
+The reliability branch starts from the merged Tech Modern dashboard commit
+`6fe567a61a7391b27166dbac0583bc0be833f8e7`. Application 1.0.0, experimental
+default 1.1.0, candidate evaluator 1.7.0 and renderer 2.2.0 retain their existing
+semantics. The reliability report has its own version, `reliability-1.0.0`.
+
+## Reproduction
+
+Use the [contract audit](reliability-contracts.md), [retry test matrix](retry-concurrency-lab.md)
+and [demo guide](reliability-demo.md). The PostgreSQL tests require an owned
+ephemeral instance. For Windows and Linux, the instructions are in
+[installation](installation.md).
+
+```text
+uv lock --check
+uv run --locked --extra stack opsdesk-lab test
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv build
+uv run --locked --extra stack opsdesk-lab reliability-demo --no-ui
+```
+
+The development demo observed one logical notification, two physical MCP
+attempts, one receipt, one committed intent and two synthetic provider
+submissions. Revision 1 retained unknown delivery after acceptance. Revision 2
+appended a delivery callback. The review inspected both revisions and the Retry
+Inspector in a live Streamlit session and checked that all three export controls
+were available. Package and benchmark scoring remain separate from the synthetic
+demonstration.
+
+The protected PostgreSQL container remained stopped throughout testing. The
+persistent volume was mounted read-only to hash its files. Before and after,
+the file-manifest digest was
+`26322a573fe0a3d3666784d745d67085186c08a822b8d39203ed24974108656f`.
+The logical database snapshot was not queried. The physical fingerprint is
+separate from a query-based sandbox digest.
+
+Engineering verification covers the local evidence chain and artificial fault
+boundaries. This checkpoint introduces no live-model research results.

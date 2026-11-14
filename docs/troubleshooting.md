@@ -28,3 +28,10 @@ revision and frozen capture. Preserve both records for diagnosis.
   The UI never initializes schemas or creates reports on your behalf.
 - Tmpfs full: export needed test/demo results, then stop only the verified owned
   temporary instance. Never delete a PostgreSQL volume as a shortcut.
+
+## Reliability demo
+
+If launch reports that port 8501 is in use, pass `--port 8511`. If the
+temporary PostgreSQL project is unavailable, run `opsdesk-lab doctor` and check
+Docker Desktop. Keep the disposable demo store running while viewing its
+dashboard. Exported reports remain available after `opsdesk-lab stop-demo`.

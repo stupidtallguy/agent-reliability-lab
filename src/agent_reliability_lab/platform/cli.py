@@ -168,12 +168,14 @@ def main():
     test.add_argument("--unit-only", action="store_true")
     test.add_argument("--workspace", type=Path)
     commands.add_parser("stop-tests")
-    demo = commands.add_parser("demo")
-    demo.add_argument("--workspace", type=Path)
-    demo.add_argument("--output", type=Path, default=Path("artifacts/evaluations"))
-    demo.add_argument("--source-commit")
-    demo.add_argument("--no-ui", action="store_true")
-    demo.add_argument("--port", type=int, default=8501)
+    for name in ("demo", "reliability-demo"):
+        demo = commands.add_parser(name)
+        demo.add_argument("--workspace", type=Path)
+        demo.add_argument("--output", type=Path, default=Path("artifacts/evaluations"))
+        demo.add_argument("--no-ui", action="store_true")
+        demo.add_argument("--port", type=int, default=8501)
+        if name == "demo":
+            demo.add_argument("--source-commit")
     dash = commands.add_parser("dashboard")
     dash.add_argument("--port", type=int, default=8501)
     dash.add_argument("--no-browser", action="store_true")
@@ -210,9 +212,14 @@ def main():
             start_demo()
             engine = make_engine(DEMO_URL, allow_sandbox=True)
             try:
-                result = asyncio.run(
-                    prepare_demo(engine, root, args.output, source_commit=args.source_commit)
-                )
+                if args.command == "reliability-demo":
+                    from agent_reliability_lab.reliability.demo import prepare_reliability_demo
+
+                    result = asyncio.run(prepare_reliability_demo(engine, args.output))
+                else:
+                    result = asyncio.run(
+                        prepare_demo(engine, root, args.output, source_commit=args.source_commit)
+                    )
             finally:
                 engine.dispose()
             print(json.dumps(result, indent=2))
