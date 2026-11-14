@@ -104,7 +104,12 @@ def canonical_metrics(document, snapshot, operation, records):
     if not successes:
         raise ValueError("missing verified receipt attempt")
     projected = retry_chain(
-        {"operations": [operation], "attempts": snapshot["attempts"], "provenance": records},
+        {
+            "operations": [operation],
+            "attempts": snapshot["attempts"],
+            "provenance": records,
+            "notification_intent": intent,
+        },
         operation["proposal_id"],
         {
             "committed": {

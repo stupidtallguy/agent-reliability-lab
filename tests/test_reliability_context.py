@@ -227,7 +227,7 @@ def test_retry_inspector_separates_observed_mutation_from_attribution(
         },
     )
     assert result["outcome"] == expected
-    assert result["mutation_evidence"] == ("observed" if mapped else "unresolved")
+    assert result["mutation_evidence"] == "unresolved"
 
 
 def test_missing_receipt_can_show_an_observed_target_mutation():
@@ -243,7 +243,15 @@ def test_missing_receipt_can_show_an_observed_target_mutation():
     }
     evidence = {
         "operations": [operation],
-        "audits": [{"operation": "update_task", "task_id": "target"}],
+        "execution": {"config": {"actor_id": "actor", "tenant_id": "tenant"}},
+        "audits": [
+            {
+                "operation": "update_task",
+                "task_id": "target",
+                "actor_id": "actor",
+                "tenant_id": "tenant",
+            },
+        ],
     }
     result = retry_chain(evidence, "p", {"complete": False, "committed": {}})
     assert (result["mutation_evidence"], result["outcome"]) == ("observed_on_target", "unknown")
@@ -306,4 +314,4 @@ def test_committed_flag_with_denied_and_unresolved_attempts_is_not_verification(
         {"complete": True, "committed": {"op": {"receipt_key": "key"}}},
     )
     assert result["outcome"] == "unknown"
-    assert result["mutation_evidence"] == "observed"
+    assert result["mutation_evidence"] == "unresolved"

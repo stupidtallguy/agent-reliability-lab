@@ -662,7 +662,12 @@ async def test_inspector_uses_sealed_attempt_receipt_and_audit(lab):
         },
     }
     got = retry_chain(evidence, operation["proposal_id"], reconciliation)
-    assert got["outcome"] == "committed"
+    assert (got["outcome"], got["mutation_evidence"]) == ("committed", "observed")
+    mismatched_audit = {**audits[0], "tenant_id": "other"}
+    conflict = retry_chain(
+        {**evidence, "audits": [mismatched_audit]}, operation["proposal_id"], reconciliation
+    )
+    assert (conflict["outcome"], conflict["mutation_evidence"]) == ("unknown", "unresolved")
     for field in ("receipts", "audits", "provenance"):
         broken = {**evidence, field: []}
         assert retry_chain(broken, operation["proposal_id"], reconciliation)["outcome"] == "unknown"

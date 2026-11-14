@@ -110,7 +110,9 @@ def demo_workspace(view, execution, page):
         "Frozen revision",
         list(reversed(documents)),
         format_func=lambda row: (
-            f"Revision {row['revision']} · Delivery {title_case(row['provider']['delivery'])}"
+            f"Revision {row['revision']} · Historical"
+            if getattr(row, "verification", None) == "legacy_unverified"
+            else f"Revision {row['revision']} · Delivery {title_case(row['provider']['delivery'])}"
         ),
     )
     if getattr(chosen, "verification", None) == "legacy_unverified":

@@ -204,8 +204,13 @@ def compare_requests(records, execution_id, previous, current):
         if a["input_hash"] == b["input_hash"]:
             if any(key in x and key in y and x[key] != y[key] for key in input_components):
                 raise ValueError("contradictory_input_components")
+        component_sets = {}
         for boundary, _ in boundaries:
-            _check_components(boundary["body"].get("context", {}))
+            ctx = boundary["body"].get("context", {})
+            _check_components(ctx)
+            components = [ctx[key] for key in input_components]
+            if component_sets.setdefault(boundary["body"]["input_hash"], components) != components:
+                raise ValueError("contradictory_input_components")
         result["relation"] = "identical" if a["input_hash"] == b["input_hash"] else "changed"
         result["boundary"] = (
             "same_request"

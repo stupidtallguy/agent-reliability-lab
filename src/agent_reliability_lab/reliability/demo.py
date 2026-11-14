@@ -143,6 +143,7 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
             "operations": [operation],
             "attempts": attempts,
             "provenance": provenance,
+            "notification_intent": local[0],
         },
         operation["proposal_id"],
         {

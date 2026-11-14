@@ -86,5 +86,6 @@ verification. The supported write path publishes only the current version.
 Context verification checks required fingerprint types and formats and follows
 the intervening sealed model requests and decisions. The task Retry Inspector
 requires a matching sealed successful attempt, receipt and independent mutation
-audit before displaying verified commitment. It can still display observed
-mutation evidence when attribution is unresolved.
+audit before displaying verified commitment. The observation label requires
+an audit row in the execution's actor and tenant scope. It can still show a
+mutation on the target when its attribution to the operation is unresolved.

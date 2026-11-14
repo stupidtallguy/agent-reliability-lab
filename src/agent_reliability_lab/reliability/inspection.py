@@ -63,6 +63,36 @@ def task_commitment(evidence, operation, attempts, committed):
         return False
 
 
+def mutation_observation(evidence, operation, committed):
+    tool = operation["tool"]
+    if tool == "queue_notification":
+        intent = evidence.get("notification_intent")
+        if intent and intent.get("payload_hash") == operation.get("arguments_hash"):
+            return "observed"
+        return "unresolved"
+    config = (evidence.get("execution") or {}).get("config") or {}
+    actor, tenant = config.get("actor_id"), config.get("tenant_id")
+    target = (operation.get("arguments") or {}).get("task_id")
+    target_observed = False
+    for audit in evidence.get("audits", []):
+        if (
+            not actor
+            or not tenant
+            or (audit.get("operation"), audit.get("actor_id"), audit.get("tenant_id"))
+            != (tool, actor, tenant)
+        ):
+            continue
+        if (
+            committed
+            and audit.get("sequence") is not None
+            and audit["sequence"] == committed.get("audit_sequence")
+            and (not target or audit.get("task_id") == target)
+        ):
+            return "observed"
+        target_observed |= bool(target and audit.get("task_id") == target)
+    return "observed_on_target" if target_observed else "unresolved"
+
+
 def retry_chain(evidence, proposal_id, reconciliation=None):
     operation = next(
         (row for row in evidence.get("operations", []) if row.get("proposal_id") == proposal_id),
@@ -113,11 +143,6 @@ def retry_chain(evidence, proposal_id, reconciliation=None):
                 )
             )
     committed = (reconciliation or {}).get("committed", {}).get(operation_id)
-    target = (operation.get("arguments") or {}).get("task_id")
-    audit_observed = bool(target) and any(
-        audit.get("task_id") == target and audit.get("operation") == operation["tool"]
-        for audit in evidence.get("audits", [])
-    )
     denied = bool(attempts) and all(row.get("effect") == "denied" for row in attempts)
     contradiction = "contradictory_records" in observed_trial_gaps(
         {"reconciliation": reconciliation or {}}
@@ -143,9 +168,7 @@ def retry_chain(evidence, proposal_id, reconciliation=None):
             for row in attempts
         ],
         "receipt": committed,
-        "mutation_evidence": "observed"
-        if committed
-        else ("observed_on_target" if audit_observed else "unresolved"),
+        "mutation_evidence": mutation_observation(evidence, operation, committed),
         "outcome": "contradictory"
         if contradiction
         else ("committed" if verified else "denied" if denied else "unknown"),
