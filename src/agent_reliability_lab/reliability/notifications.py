@@ -469,9 +469,20 @@ class NotificationLab:
                 .mappings()
                 .one_or_none()
             )
+            # A foreign-incarnation replay can taint the requested local
+            # notification but cannot write evidence into another sandbox.
+            related = authority
+            if authority and authority["notification_id"] != identifier:
+                origin = lookup(connection, intents, authority["notification_id"])
+                if (
+                    not origin
+                    or origin["run_id"] != self.sandbox.run_id
+                    or (origin["marker"] != registry["marker"])
+                ):
+                    related = None
             identifiers = {identifier}
-            if authority:
-                identifiers.add(authority["notification_id"])
+            if related:
+                identifiers.add(related["notification_id"])
             for affected in sorted(identifiers):
                 lock(connection, "notification:" + affected)
             try:
@@ -505,7 +516,7 @@ class NotificationLab:
                 if recorded and (len(recorded) != 1 or dict(recorded[0]) != event):
                     failure = "contradictory_recorded_callback"
             if failure:
-                self._record_conflict(connection, event, failure, authority)
+                self._record_conflict(connection, event, failure, related)
             else:
                 connection.execute(insert(delivery).values(**event).on_conflict_do_nothing())
         if failure:

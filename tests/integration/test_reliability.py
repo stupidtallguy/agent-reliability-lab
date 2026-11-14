@@ -408,3 +408,27 @@ async def test_revision_ancestry_rejects_forged_or_concurrent_successors(manager
         )
     with pytest.raises(ValueError, match="ancestry"):
         view.reliability_reports(identifier, limit=1)
+
+
+def test_cross_sandbox_callback_cannot_taint_the_source(lab, manager):
+    source = queue(lab)
+    lab.dispatch(source)
+    event = deliver(lab, source, 1, "delivered")
+    run = "rel_" + uuid.uuid4().hex[:18]
+    box = manager.provision(run, load_baseline(), baseline_access())
+    with box.transaction() as (_, registry):
+        marker = registry["marker"]
+    try:
+        foreign = NotificationLab(box)
+        foreign.register(ACTOR)
+        target = queue(foreign)
+        foreign.dispatch(target)
+        with pytest.raises(ValueError, match="contradictory_callback_identity"):
+            foreign.callback(target, event, 1, "delivered")
+        assert foreign.evidence(target)["delivery"] == "contradictory"
+        assert lab.evidence(source)["delivery"] == "delivered"
+        assert not lab.evidence(source)["callback_conflicts"]
+        with pytest.raises(ValueError, match="sandbox incarnation"):
+            foreign.evidence(source)
+    finally:
+        manager.cleanup(run, expected_marker=marker)
