@@ -57,6 +57,16 @@ async def prepare_reliability_demo(engine, output, *, transport="memory"):
     manager.initialize()
     run = "rel_" + uuid.uuid4().hex[:18]
     sandbox = manager.provision(run, load_baseline(), baseline_access())
+    with sandbox.transaction() as (_, registry):
+        marker = registry["marker"]
+    try:
+        return await run_reliability_demo(engine, sandbox, output, transport=transport)
+    finally:
+        manager.cleanup(run, expected_marker=marker)
+
+
+async def run_reliability_demo(engine, sandbox, output, *, transport):
+    run = sandbox.run_id
     actor = ActorContext(actor_id="support_001", tenant_id="opsdesk")
     lab = NotificationLab(sandbox)
     lab.register(actor)

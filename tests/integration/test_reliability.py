@@ -166,31 +166,35 @@ async def test_real_agent_retries_and_later_evidence_appends(manager, tmp_path, 
     from agent_reliability_lab.research.views import ResearchView
 
     summary = await prepare_reliability_demo(manager.engine, tmp_path, transport=transport)
-    try:
-        assert summary["physical_tool_attempts"] == 2
-        assert summary["local_mutations"] == summary["receipt_count"] == 1
-        assert summary["revisions"][0]["delivery"] == "unknown"
-        assert summary["revisions"][1]["delivery"] == "delivered"
-        first, second = ResearchView(manager.engine).reliability_reports(summary["execution_id"])
-        assert first["report_id"] == second["previous_report_id"]
-        assert [a["status"] for a in first["retry"]["attempts"]] == ["failed", "succeeded"]
-        assert first["retry"]["context_comparisons"][0]["relation"] == "changed"
-        assert first["provider"]["delivery_events"] == []
-        assert second["provider"]["delivery_events"][0]["status"] == "delivered"
-        for revision in (first, second):
-            exported = tmp_path / revision["report_id"] / "reliability.json"
-            assert json.loads(exported.read_bytes()) == revision
-        with (
-            pytest.raises(sa.exc.ProgrammingError, match="append-only"),
-            manager.engine.begin() as connection,
-        ):
-            connection.execute(
-                reports.update()
-                .where(reports.c.report_id == first["report_id"])
-                .values(document=second)
+    assert summary["physical_tool_attempts"] == 2
+    assert summary["local_mutations"] == summary["receipt_count"] == 1
+    assert summary["revisions"][0]["delivery"] == "unknown"
+    assert summary["revisions"][1]["delivery"] == "delivered"
+    first, second = ResearchView(manager.engine).reliability_reports(summary["execution_id"])
+    assert first["report_id"] == second["previous_report_id"]
+    assert [a["status"] for a in first["retry"]["attempts"]] == ["failed", "succeeded"]
+    assert first["retry"]["context_comparisons"][0]["relation"] == "changed"
+    assert first["provider"]["delivery_events"] == []
+    assert second["provider"]["delivery_events"][0]["status"] == "delivered"
+    for revision in (first, second):
+        exported = tmp_path / revision["report_id"] / "reliability.json"
+        assert json.loads(exported.read_bytes()) == revision
+    with (
+        pytest.raises(sa.exc.ProgrammingError, match="append-only"),
+        manager.engine.begin() as connection,
+    ):
+        connection.execute(
+            reports.update()
+            .where(reports.c.report_id == first["report_id"])
+            .values(document=second)
+        )
+    with manager.engine.connect() as connection:
+        assert (
+            connection.scalar(
+                sa.select(sa.func.to_regnamespace("opsdesk_run_" + summary["sandbox_run_id"]))
             )
-    finally:
-        manager.cleanup(summary["sandbox_run_id"])
+            is None
+        )
 
 
 @pytest.mark.anyio
