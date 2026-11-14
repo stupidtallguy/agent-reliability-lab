@@ -90,6 +90,50 @@ delivery = table(
     sa.CheckConstraint("status IN ('pending', 'delivered', 'failed')"),
     sa.UniqueConstraint("notification_id", "sequence"),
 )
+# Additive storage. Legacy provider/callback rows are retained without invented bindings.
+provider_bindings = table(
+    "provider_bindings",
+    notification_key("provider"),
+    field("provider_operation_id"),
+    field("status"),
+    sa.UniqueConstraint("provider_operation_id"),
+)
+issued_events = table(
+    "issued_events",
+    key("event_id"),
+    sa.Column(
+        "provider_operation_id",
+        text,
+        sa.ForeignKey(f"{SCHEMA}.provider_bindings.provider_operation_id"),
+        nullable=False,
+    ),
+    sa.Column(
+        "notification_id", text, sa.ForeignKey(f"{SCHEMA}.provider.notification_id"), nullable=False
+    ),
+    field("sequence", sa.Integer),
+    field("status"),
+    field("payload_hash"),
+    sa.UniqueConstraint("notification_id", "sequence"),
+    sa.CheckConstraint("sequence > 0"),
+    sa.CheckConstraint("status IN ('pending', 'delivered', 'failed')"),
+)
+callback_conflicts = table(
+    "callback_conflicts",
+    key("conflict_id"),
+    field("notification_id"),
+    field("event_id"),
+    field("sequence", sa.Integer),
+    field("status"),
+    field("reason"),
+)
+intent_conflicts = table(
+    "intent_conflicts",
+    key("conflict_id"),
+    sa.Column(
+        "notification_id", text, sa.ForeignKey(f"{SCHEMA}.intents.notification_id"), nullable=False
+    ),
+    field("payload_hash"),
+)
 dispatches = table(
     "dispatches",
     notification_key("outbox"),
@@ -142,6 +186,12 @@ class NotificationLab:
                 BEFORE UPDATE OR DELETE ON opsdesk_reliability.reports
                 FOR EACH ROW EXECUTE FUNCTION opsdesk_reliability.reject_report_change()
             """)
+            for source in (issued_events, callback_conflicts, delivery, intent_conflicts):
+                connection.exec_driver_sql(f"""
+                    CREATE OR REPLACE TRIGGER frozen_reliability_evidence
+                    BEFORE UPDATE OR DELETE ON {source.fullname}
+                    FOR EACH ROW EXECUTE FUNCTION opsdesk_reliability.reject_report_change()
+                """)
             connection.execute(
                 insert(admissions)
                 .values(
@@ -188,27 +238,38 @@ class NotificationLab:
             fingerprint = digest(clean)
             previous = lookup(connection, intents, identifier)
             if previous:
-                if previous["payload_hash"] != fingerprint:
-                    raise ServiceError("idempotency_conflict", "Notification intent has changed.")
-                return LocalReceipt.model_validate(previous["receipt"])
-            receipt = LocalReceipt(notification_id=identifier, **clean)
-            connection.execute(
-                intents.insert().values(
-                    **identity,
-                    notification_id=identifier,
-                    payload_hash=fingerprint,
-                    run_id=self.sandbox.run_id,
-                    operation_key=request.idempotency_key,
-                    receipt=receipt.model_dump(mode="json"),
+                self._chain(connection, registry, identifier)
+                if previous["payload_hash"] == fingerprint:
+                    return LocalReceipt.model_validate(previous["receipt"])
+                connection.execute(
+                    insert(intent_conflicts)
+                    .values(
+                        conflict_id=digest([identifier, fingerprint]),
+                        notification_id=identifier,
+                        payload_hash=fingerprint,
+                    )
+                    .on_conflict_do_nothing()
                 )
-            )
-            connection.execute(
-                outbox.insert().values(
-                    notification_id=identifier,
-                    payload_hash=fingerprint,
+            else:
+                receipt = LocalReceipt(notification_id=identifier, **clean)
+                connection.execute(
+                    intents.insert().values(
+                        **identity,
+                        notification_id=identifier,
+                        payload_hash=fingerprint,
+                        run_id=self.sandbox.run_id,
+                        operation_key=request.idempotency_key,
+                        receipt=receipt.model_dump(mode="json"),
+                    )
                 )
-            )
-            return receipt
+                connection.execute(
+                    outbox.insert().values(
+                        notification_id=identifier,
+                        payload_hash=fingerprint,
+                    )
+                )
+                return receipt
+        raise ServiceError("idempotency_conflict", "Notification intent has changed.")
 
     def _owned(self, connection, registry, identifier):
         intent = lookup(connection, intents, identifier)
@@ -218,6 +279,57 @@ class NotificationLab:
         ):
             raise ValueError("notification does not belong to this sandbox incarnation")
         return intent
+
+    def _chain(self, connection, registry, identifier):
+        """Validate the committed identity and all available provider-side joins."""
+        intent = self._owned(connection, registry, identifier)
+        identity = {key: intent[key] for key in ("marker", "actor_id", "tenant_id")}
+        try:
+            receipt = LocalReceipt.model_validate(intent["receipt"])
+        except ValueError:
+            raise ValueError("invalid_intent_receipt") from None
+        payload = receipt.model_dump(include={"customer_id", "template"})
+        operation_key = intent["operation_key"]
+        if (
+            receipt.notification_id != identifier
+            or digest([identity, operation_key]) != identifier
+            or digest(payload) != intent["payload_hash"]
+            or connection.scalar(sa.select(admissions.c.run_id).filter_by(**identity))
+            != self.sandbox.run_id
+        ):
+            raise ValueError("contradictory_intent_identity")
+        message = lookup(connection, outbox, identifier)
+        if not message:
+            raise ValueError("missing_outbox")
+        if message["payload_hash"] != intent["payload_hash"]:
+            raise ValueError("contradictory_outbox_payload")
+        effect = lookup(connection, provider, identifier)
+        binding = lookup(connection, provider_bindings, identifier)
+        operation = digest(
+            ["synthetic-provider", identifier, operation_key, intent["payload_hash"]]
+        )
+        if effect:
+            if effect["payload_hash"] != intent["payload_hash"]:
+                raise ValueError("contradictory_provider_payload")
+            if not binding:
+                raise ValueError("missing_authoritative_provider_binding")
+            if (
+                binding["provider_operation_id"] != operation
+                or binding["status"] != effect["status"]
+            ):
+                raise ValueError("contradictory_provider_operation")
+        elif binding:
+            raise ValueError("missing_provider_record")
+        elif connection.scalar(
+            sa.select(
+                sa.exists().where(
+                    dispatches.c.notification_id == identifier,
+                    dispatches.c.fault != "timeout_before_accept",
+                )
+            )
+        ):
+            raise ValueError("missing_provider_record")
+        return intent, effect, operation
 
     def dispatch(
         self,
@@ -232,10 +344,9 @@ class NotificationLab:
         # A separate transaction intentionally leaves a durable provider record if
         # the dispatcher dies before writing its local acknowledgment.
         with self.sandbox.transaction() as (connection, registry):
-            self._owned(connection, registry, identifier)
             lock(connection, "notification:" + identifier)
-            message = lookup(connection, outbox, identifier)
-            if payload_hash is not None and payload_hash != message["payload_hash"]:
+            intent, prior, operation = self._chain(connection, registry, identifier)
+            if payload_hash is not None and payload_hash != intent["payload_hash"]:
                 raise ServiceError("idempotency_conflict", "Provider payload has changed.")
             sequence = (
                 connection.scalar(
@@ -252,7 +363,6 @@ class NotificationLab:
                     fault=fault,
                 )
             )
-            prior = lookup(connection, provider, identifier)
             if fault == "timeout_before_accept" and not prior:
                 return "timed_out"
             status = prior["status"] if prior else ("rejected" if fault == "reject" else "accepted")
@@ -260,7 +370,14 @@ class NotificationLab:
                 connection.execute(
                     provider.insert().values(
                         notification_id=identifier,
-                        payload_hash=message["payload_hash"],
+                        payload_hash=intent["payload_hash"],
+                        status=status,
+                    )
+                )
+                connection.execute(
+                    provider_bindings.insert().values(
+                        notification_id=identifier,
+                        provider_operation_id=operation,
                         status=status,
                     )
                 )
@@ -269,7 +386,8 @@ class NotificationLab:
         if fault == "lose_ack":
             return "acknowledgment_lost"
         with self.sandbox.transaction() as (connection, registry):
-            self._owned(connection, registry, identifier)
+            lock(connection, "notification:" + identifier)
+            self._chain(connection, registry, identifier)
             connection.execute(
                 insert(acknowledgments)
                 .values(
@@ -279,50 +397,135 @@ class NotificationLab:
             )
         return status
 
-    def callback(self, identifier: str, event_id: str, sequence: int, status: Delivery) -> None:
+    @staticmethod
+    def _event_input(event_id, sequence, status):
         if not 1 <= sequence <= 2147483647 or not 1 <= len(event_id) <= 128:
             raise ValueError("invalid provider event identity")
         if status not in {"pending", "delivered", "failed"}:
             raise ValueError("invalid provider delivery state")
+
+    @staticmethod
+    def _record_conflict(connection, event, reason, authority=None):
+        affected = {event["notification_id"]}
+        if authority:
+            affected.add(authority["notification_id"])
+        for identifier in sorted(affected):
+            connection.execute(
+                insert(callback_conflicts)
+                .values(
+                    **{**event, "notification_id": identifier},
+                    conflict_id=digest([identifier, event, reason]),
+                    reason=reason,
+                )
+                .on_conflict_do_nothing()
+            )
+
+    def issue_event(self, identifier: str, sequence: int, status: Delivery) -> str:
+        """Trusted provider simulator only. The consumer cannot mint an event."""
         with self.sandbox.transaction() as (connection, registry):
-            self._owned(connection, registry, identifier)
             lock(connection, "notification:" + identifier)
-            effect = lookup(connection, provider, identifier)
+            intent, effect, operation = self._chain(connection, registry, identifier)
             if not effect or effect["status"] != "accepted":
-                raise ValueError("delivery callback requires provider acceptance")
+                raise ValueError("delivery event requires provider acceptance")
+            event_id = digest([operation, sequence, status])
+            self._event_input(event_id, sequence, status)
+            event = dict(
+                notification_id=identifier, event_id=event_id, sequence=sequence, status=status
+            )
             existing = (
                 connection.execute(
-                    sa.select(delivery).where(
-                        delivery.c.notification_id == identifier,
-                        sa.or_(delivery.c.event_id == event_id, delivery.c.sequence == sequence),
+                    sa.select(issued_events).filter_by(
+                        notification_id=identifier, sequence=sequence
                     )
                 )
                 .mappings()
-                .all()
+                .one_or_none()
             )
-            if existing:
-                if len(existing) == 1 and dict(existing[0]) == dict(
-                    notification_id=identifier,
-                    event_id=event_id,
-                    sequence=sequence,
-                    status=status,
-                ):
-                    return
-                raise ValueError("conflicting delivery callback identity")
-            connection.execute(
-                delivery.insert().values(
-                    notification_id=identifier,
-                    event_id=event_id,
-                    sequence=sequence,
-                    status=status,
+            collision = existing is not None and existing["event_id"] != event_id
+            if collision:
+                self._record_conflict(connection, event, "conflicting_provider_sequence", existing)
+            elif not existing:
+                connection.execute(
+                    issued_events.insert().values(
+                        **event,
+                        provider_operation_id=operation,
+                        payload_hash=intent["payload_hash"],
+                    )
                 )
+        if collision:
+            raise ValueError("conflicting provider event sequence")
+        return event_id
+
+    def callback(self, identifier: str, event_id: str, sequence: int, status: Delivery) -> None:
+        self._event_input(event_id, sequence, status)
+        event = dict(
+            notification_id=identifier, event_id=event_id, sequence=sequence, status=status
+        )
+        failure = None
+        with self.sandbox.transaction() as (connection, registry):
+            self._owned(connection, registry, identifier)
+            authority = (
+                connection.execute(sa.select(issued_events).filter_by(event_id=event_id))
+                .mappings()
+                .one_or_none()
             )
+            identifiers = {identifier}
+            if authority:
+                identifiers.add(authority["notification_id"])
+            for affected in sorted(identifiers):
+                lock(connection, "notification:" + affected)
+            try:
+                intent, effect, operation = self._chain(connection, registry, identifier)
+                if not effect or effect["status"] != "accepted":
+                    failure = "missing_provider_acceptance"
+                elif not authority:
+                    failure = "missing_authoritative_callback"
+                elif (
+                    any(authority[k] != v for k, v in event.items())
+                    or authority["provider_operation_id"] != operation
+                    or authority["payload_hash"] != intent["payload_hash"]
+                    or digest([operation, sequence, status]) != event_id
+                ):
+                    failure = "contradictory_callback_identity"
+            except ValueError as error:
+                failure = str(error)
+            if not failure:
+                recorded = (
+                    connection.execute(
+                        sa.select(delivery).where(
+                            delivery.c.notification_id == identifier,
+                            sa.or_(
+                                delivery.c.event_id == event_id, delivery.c.sequence == sequence
+                            ),
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                if recorded and (len(recorded) != 1 or dict(recorded[0]) != event):
+                    failure = "contradictory_recorded_callback"
+            if failure:
+                self._record_conflict(connection, event, failure, authority)
+            else:
+                connection.execute(insert(delivery).values(**event).on_conflict_do_nothing())
+        if failure:
+            raise ValueError(f"conflicting delivery callback: {failure}")
 
     def evidence(self, identifier: str) -> dict:
         with self.sandbox.transaction() as (connection, registry):
-            self._owned(connection, registry, identifier)
             lock(connection, "notification:" + identifier)
-            effect = lookup(connection, provider, identifier)
+            owner = lookup(connection, intents, identifier)
+            if owner and (owner["run_id"], owner["marker"]) != (
+                self.sandbox.run_id,
+                registry["marker"],
+            ):
+                raise ValueError("notification does not belong to this sandbox incarnation")
+            issue = None
+            try:
+                intent, effect, operation = self._chain(connection, registry, identifier)
+            except ValueError as error:
+                issue = str(error)
+                intent = effect = operation = None
             ack = lookup(connection, acknowledgments, identifier)
             events = (
                 connection.execute(
@@ -346,9 +549,44 @@ class NotificationLab:
                 .mappings()
                 .all()
             )
+            rejected_intents = [
+                dict(row)
+                for row in connection.execute(
+                    sa.select(intent_conflicts)
+                    .filter_by(notification_id=identifier)
+                    .order_by(intent_conflicts.c.conflict_id)
+                ).mappings()
+            ]
+            authoritative = {
+                row["event_id"]: row
+                for row in connection.execute(
+                    sa.select(issued_events).filter_by(notification_id=identifier)
+                ).mappings()
+            }
+            conflicts = [
+                dict(row)
+                for row in connection.execute(
+                    sa.select(callback_conflicts)
+                    .filter_by(notification_id=identifier)
+                    .order_by(callback_conflicts.c.conflict_id)
+                ).mappings()
+            ]
+            if intent and any(
+                (authority := authoritative.get(event["event_id"])) is None
+                or any(authority[k] != v for k, v in event.items())
+                or authority["provider_operation_id"] != operation
+                or authority["payload_hash"] != intent["payload_hash"]
+                or digest([operation, event["sequence"], event["status"]]) != event["event_id"]
+                for event in events
+            ):
+                issue = "contradictory_delivery_provenance"
         terminal = {event["status"] for event in events if event["status"] != "pending"}
         outcome = "unknown"
-        if effect and effect["status"] == "rejected":
+        if conflicts or (issue and issue.startswith("contradictory")):
+            outcome = "contradictory"
+        elif issue or (events and (not effect or effect["status"] != "accepted")):
+            outcome = "unknown"
+        elif effect and effect["status"] == "rejected":
             outcome = "provider_rejected"
         elif len(terminal) == 1:
             outcome = terminal.pop()
@@ -356,7 +594,12 @@ class NotificationLab:
             outcome = "contradictory"
         return {
             "notification_id": identifier,
-            "local_intent": "recorded",
+            "local_intent": "recorded" if intent else "unverified",
+            "provider_operation_id": operation if effect else None,
+            "payload_hash": intent["payload_hash"] if intent else None,
+            "integrity_issue": issue,
+            "callback_conflicts": conflicts,
+            "rejected_conflicting_intents": rejected_intents,
             "outbox": "acknowledged" if ack else "pending",
             "provider_attempts": [dict(row) for row in attempts],
             "provider": effect["status"] if effect else ("submitted" if attempts else None),

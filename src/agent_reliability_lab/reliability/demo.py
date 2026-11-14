@@ -3,7 +3,6 @@
 import uuid
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import insert
 
 from agent_reliability_lab.agent import tables as agent
 from agent_reliability_lab.agent.config import AgentConfig, ModelConfig
@@ -16,40 +15,14 @@ from agent_reliability_lab.opsdesk.database import SandboxManager
 from agent_reliability_lab.opsdesk.fixtures import baseline_access, digest, load_baseline
 from agent_reliability_lab.reliability.diagnostics import provider_gaps
 from agent_reliability_lab.reliability.inspection import retry_chain
-from agent_reliability_lab.reliability.metrics import VERSION, export, revised_metrics
+from agent_reliability_lab.reliability.metrics import Observation, export, notification_metrics
 from agent_reliability_lab.reliability.notifications import (
     TOOL,
     NotificationLab,
     intents,
     outbox,
-    reports,
 )
-
-
-def freeze(engine, document, revision):
-    document = {**document, "version": VERSION, "revision": revision}
-    document["report_id"] = digest(document)
-    with engine.begin() as connection:
-        written = connection.execute(
-            insert(reports)
-            .values(
-                report_id=document["report_id"],
-                execution_id=document["execution_id"],
-                revision=revision,
-                document=document,
-            )
-            .on_conflict_do_nothing()
-            .returning(reports.c.report_id)
-        ).scalar_one_or_none()
-        if written is None:
-            existing = connection.scalar(
-                sa.select(reports.c.document).where(
-                    reports.c.report_id == document["report_id"],
-                )
-            )
-            if existing != document:
-                raise ValueError("reliability report revision conflict")
-    return document
+from agent_reliability_lab.reliability.revisions import freeze
 
 
 async def prepare_reliability_demo(engine, output, *, transport="memory"):
@@ -85,11 +58,20 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
     execution = AgentExecution(engine)
     execution_id = await execution.create("Queue a synthetic order update.", config)
     receipts = []
+    committed_before_retry = []
 
     def lose_first_ack(operation, response):
         if operation["tool"] == TOOL and response.get("error") is None:
             receipts.append(response["data"])
             if len(receipts) == 1:
+                with engine.connect() as connection:
+                    committed_before_retry.append(
+                        connection.scalar(
+                            sa.select(intents.c.receipt).where(
+                                intents.c.notification_id == response["data"]["notification_id"]
+                            )
+                        )
+                    )
                 return observation_error("transport_unavailable", retryable=True)
         return None
 
@@ -146,32 +128,47 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
         or local[0]["payload_hash"] != operation["arguments_hash"]
     ):
         raise RuntimeError("Notification receipt does not match the signed logical operation")
+    provenance = execution.store.provenance(execution_id)
     chain = retry_chain(
         {
             "operations": [operation],
             "attempts": attempts,
-            "provenance": execution.store.provenance(execution_id),
+            "provenance": provenance,
         },
         operation["proposal_id"],
         {
+            "complete": True,
             "committed": {
                 operation["operation_id"]: {
                     "notification_id": identifier,
                     "receipt_hash": digest(receipts[0]),
                     "outbox_payload_hash": queued,
                 }
-            }
+            },
         },
     )
-    chain["attempts"][0]["receipt_reused"] = None
-    chain["attempts"][1]["receipt_reused"] = True
-    chain["receipt_reuse"] = "verified for attempt 2 in the controlled demonstration"
+    first, second = chain["attempts"]
+    fault_observed = first["status"] == "failed" and first["error"] == "transport_unavailable"
+    reused = committed_before_retry == [receipts[1]] and second["status"] == "succeeded"
+    chain["receipt_reuse"] = "verified for attempt 2" if reused else "unresolved"
+    retry_observations = [Observation(second["attempt_id"], reused if fault_observed else None)]
+    faults = (
+        [Observation(first["attempt_id"], reused if reused else None)] if fault_observed else []
+    )
+
     lab.dispatch(identifier, "lose_ack")
     lab.dispatch(identifier)
     common = dict(
         purpose="scripted_infrastructure_validation",
         categories=["retry_concurrency", "synthetic_external_effect"],
         execution_id=execution_id,
+        execution_evidence=dict(
+            execution_id=execution_id,
+            logical_operation_id=operation["operation_id"],
+            ledger_head=provenance[-1]["record_hash"],
+            receipt_hash=digest(receipts[0]),
+            operation_key=expected_key,
+        ),
         sandbox_run_id=run,
         retry=chain,
         local_mutations=len(local),
@@ -184,7 +181,8 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
     revisions = []
     for revision in (1, 2):
         if revision == 2:
-            lab.callback(identifier, "delayed_confirmation", 1, "delivered")
+            event_id = lab.issue_event(identifier, 1, "delivered")
+            lab.callback(identifier, event_id, 1, "delivered")
         evidence = lab.evidence(identifier)
         evidence["unknown_reasons"] = provider_gaps(evidence)
         document = freeze(
@@ -192,7 +190,20 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
             dict(
                 **common,
                 provider=evidence,
-                metrics=revised_metrics(evidence, chain["attempts"], receipt_verified=True),
+                provider_evidence_hash=digest(evidence),
+                metrics=notification_metrics(
+                    evidence,
+                    operation_id=operation["operation_id"],
+                    mutation_count=len(local),
+                    receipt_reconciled=True,
+                    attempt_observations=retry_observations,
+                    faults=faults,
+                    conflicts=[
+                        Observation(row["conflict_id"], True)
+                        for row in evidence["rejected_conflicting_intents"]
+                    ],
+                    dispatched=bool(attempts),
+                ),
                 previous_report_id=revisions[-1]["report_id"] if revisions else None,
             ),
             revision,

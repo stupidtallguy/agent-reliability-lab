@@ -30,3 +30,10 @@ contradictory. The simulation uses explicit calls and no networks or messaging A
 The test suite covers timeout before acceptance, rejection, lost acknowledgment,
 late confirmation, concurrent duplicate submissions, callback replay and a
 dispatcher interruption between provider commit and acknowledgment.
+
+The provider now issues a durable event bound to its accepted operation,
+notification, payload digest, sequence, and status. The callback consumes that
+authority. A conflicting callback is durably recorded before the caller
+receives an error. Cross-notification replay affects the verification status of
+both identifiable notifications. Exact replay remains idempotent. The trusted
+database and simulator host establish the local authority boundary.

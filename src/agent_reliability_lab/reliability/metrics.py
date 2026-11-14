@@ -3,11 +3,12 @@
 import csv
 import io
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from agent_reliability_lab.reliability.diagnostics import observed_trial_gaps
 
-VERSION = "reliability-1.0.0"
+VERSION = "reliability-1.1.0"
 
 DEFINITIONS = {
     "outcome_ascertainment": "Determinate outcomes / applicable observations",
@@ -55,13 +56,15 @@ def evidence_quality(document):
     )
     if not isinstance(evidence, list) or any(not isinstance(row, dict) for row in evidence):
         return [metric(name, None, None, scope) for name in QUALITY_NAMES]
+    inspected_chains = 0
     completed_chains = 0
     determinate = 0
     contradictions = 0
     for row in evidence:
         result = row.get("reconciliation")
-        if isinstance(result, dict) and result.get("complete") is True:
-            completed_chains += 1
+        if isinstance(result, dict) and isinstance(result.get("complete"), bool):
+            inspected_chains += 1
+            completed_chains += result["complete"]
         if row.get("eligible") is True and isinstance(row.get("objective_success"), bool):
             determinate += 1
         if isinstance(result, dict) and isinstance(result.get("errors"), list):
@@ -70,7 +73,6 @@ def evidence_quality(document):
     groups = [
         ("outcome_ascertainment", determinate),
         ("unknown_outcome", population - determinate),
-        ("chain_completeness", completed_chains),
     ]
     # Older evidence does not expose a uniform contradiction assessment for each row.
     inspectable = all(
@@ -78,58 +80,122 @@ def evidence_quality(document):
         and isinstance(row["reconciliation"].get("errors"), list)
         for row in evidence
     )
+    chain = (
+        metric("chain_completeness", completed_chains, inspected_chains, scope)
+        if (inspected_chains or not population)
+        else metric("chain_completeness", None, None, scope)
+    )
     return [metric(name, count, population, scope) for name, count in groups] + [
+        chain,
         metric("contradiction", contradictions, population, scope)
         if inspectable
-        else metric("contradiction", None, None, scope)
+        else metric("contradiction", None, None, scope),
     ]
 
 
-def revised_metrics(provider, attempts, receipt_verified):
+@dataclass(frozen=True)
+class Observation:
+    """One distinct eligible observation. None means its outcome remains unresolved."""
+
+    identity: str
+    outcome: bool | None
+
+
+def revised_metrics(populations: dict[str, list[Observation] | None], *, scope: str):
+    records = []
+    for name in DEFINITIONS:
+        population = populations.get(name)
+        if population is None:
+            records.append(metric(name, None, None, scope))
+            continue
+        if len({row.identity for row in population}) != len(population):
+            raise ValueError("duplicate operational observation")
+        known = [row for row in population if row.outcome is not None]
+        if not known and population:
+            record = metric(name, None, None, scope)
+            record["reason"] = "outcomes_unresolved"
+        else:
+            record = metric(name, sum(row.outcome is True for row in known), len(known), scope)
+        record["unresolved"] = len(population) - len(known)
+        records.append(record)
+    return records
+
+
+def notification_metrics(
+    provider,
+    *,
+    operation_id,
+    mutation_count,
+    receipt_reconciled,
+    attempt_observations,
+    faults,
+    conflicts,
+    dispatched,
+):
+    identity = provider["notification_id"]
     terminal = provider["delivery"]
     determinate = terminal in {"provider_rejected", "delivered", "failed"}
-    consistent = terminal != "contradictory"
-    scope = "One scripted, synthetic notification intent"
-    chain = receipt_verified and provider["acknowledged"] and determinate
-    return [
-        metric("outcome_ascertainment", int(determinate), 1, scope),
-        metric("unknown_outcome", int(not determinate), 1, scope),
-        metric("chain_completeness", int(chain), 1, scope),
-        metric("contradiction", int(not consistent), 1, scope),
-        metric("external_confirmation", int(determinate), 1, scope),
-        metric(
-            "duplicate_effect",
-            0 if receipt_verified else None,
-            1 if receipt_verified else None,
-            scope,
-        ),
-        metric(
-            "retry_deduplication",
-            sum(a["receipt_reused"] is True for a in attempts),
-            sum(a["receipt_reused"] is not None for a in attempts),
-            scope,
-        ),
-        metric("conflicting_intent_rejection", 0, 0, scope),
-        metric("verified_recovery", int(receipt_verified), 1, scope),
-        metric("unknown_commitment", int(not receipt_verified), 1, scope),
-        metric("receipt_reconciliation", int(receipt_verified), 1, scope),
-    ]
+    contradictory = terminal == "contradictory"
+    inspected = provider.get("local_intent") == "recorded" or contradictory
+    complete = (
+        None
+        if not inspected
+        else bool(
+            not contradictory and receipt_reconciled and provider["acknowledged"] and determinate
+        )
+    )
+
+    def row(value):
+        return [Observation(identity, value)]
+
+    return revised_metrics(
+        {
+            "outcome_ascertainment": row(determinate),
+            "unknown_outcome": row(not determinate),
+            "chain_completeness": row(complete),
+            "contradiction": row(contradictory if inspected else None),
+            "external_confirmation": row(determinate),
+            "duplicate_effect": [
+                Observation(operation_id, None if mutation_count is None else mutation_count > 1)
+            ],
+            "retry_deduplication": attempt_observations,
+            "conflicting_intent_rejection": conflicts,
+            "verified_recovery": faults,
+            "unknown_commitment": [Observation(operation_id, mutation_count is None)]
+            if dispatched
+            else [],
+            "receipt_reconciliation": [Observation(operation_id, receipt_reconciled)],
+        },
+        scope="One scripted, synthetic notification intent",
+    )
 
 
 def render(document, format_name):
     if format_name == "json":
         return json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     columns = ["name", "numerator", "denominator", "value", "reason", "scope", "version"]
+    current = document.get("version") == VERSION
+    if current:
+        columns += ["unresolved"]
     if format_name == "csv":
         stream = io.StringIO(newline="")
         writer = csv.DictWriter(
-            stream, fieldnames=["report_id", "delivery", *columns], extrasaction="ignore"
+            stream,
+            fieldnames=[
+                "report_id",
+                "delivery",
+                *(["revision", "previous_report_id"] if current else []),
+                *columns,
+            ],
+            extrasaction="ignore",
         )
         writer.writeheader()
         writer.writerows(
             {
                 "report_id": document["report_id"],
                 "delivery": document["provider"]["delivery"],
+                "revision": document["revision"],
+                "previous_report_id": document.get("previous_report_id"),
                 **row,
             }
             for row in document["metrics"]
@@ -150,9 +216,11 @@ def render(document, format_name):
         "| " + " | ".join(columns) + " |",
         "| " + " | ".join(["---"] * len(columns)) + " |",
     ]
+    if current:
+        lines.insert(7, f"- Predecessor `{document.get('previous_report_id') or 'None'}`")
     lines.extend(
         "| "
-        + " | ".join("Unavailable" if row[key] is None else str(row[key]) for key in columns)
+        + " | ".join("Unavailable" if row.get(key) is None else str(row[key]) for key in columns)
         + " |"
         for row in document["metrics"]
     )

@@ -76,6 +76,11 @@ def compare_requests(records, execution_id, previous, current):
             start, entry = starts[0], journal[0]
             body, event = start["body"], entry["body"]
             boundary = event["payload"]
+            turn = body.get("turn")
+            if turn is None:
+                raise ValueError("missing_model_turn")
+            if type(turn) is not int or turn < 0:
+                raise ValueError("contradictory_model_turn")
             fingerprint = body.get("input_hash")
             if not isinstance(fingerprint, str) or not HASH.fullmatch(fingerprint):
                 raise ValueError("missing_or_invalid_input_hash")
@@ -83,7 +88,8 @@ def compare_requests(records, execution_id, previous, current):
                 body.get("execution_id") != execution_id
                 or event.get("execution_id") != execution_id
                 or body.get("request_id") != identity
-                or not isinstance(event.get("sequence"), int)
+                or type(event.get("sequence")) is not int
+                or event["sequence"] < 1
                 or start["sequence"] >= entry["sequence"]
                 or any(
                     body.get(k) != boundary.get(k)
@@ -138,13 +144,33 @@ def compare_requests(records, execution_id, previous, current):
         ):
             raise ValueError("contradictory_request_order")
         a, b = left["body"], right["body"]
+        if b["turn"] < a["turn"]:
+            raise ValueError("contradictory_model_turn")
+        if (
+            previous != current
+            and b["turn"] == a["turn"]
+            and (result["references"][0]["decision_ledger"] is not None)
+        ):
+            raise ValueError("contradictory_completed_model_retry")
+        if b["turn"] > a["turn"]:
+            decision = result["references"][0]["decision_ledger"]
+            if decision is None:
+                raise ValueError("missing_originating_decision")
+            if decision >= right["sequence"]:
+                raise ValueError("contradictory_decision_order")
+        x, y = a.get("context", {}), b.get("context", {})
+        input_components = ("instructions_hash", "tool_schema_hash", "observations")
+        if a["input_hash"] == b["input_hash"]:
+            if any(key in x and key in y and x[key] != y[key] for key in input_components):
+                raise ValueError("contradictory_input_components")
+            if any(key not in x or key not in y for key in input_components):
+                raise ValueError("missing_input_components")
         result["relation"] = "identical" if a["input_hash"] == b["input_hash"] else "changed"
         result["boundary"] = (
             "same_request"
             if previous == current
             else ("same_turn_model_retry" if a["turn"] == b["turn"] else "new_decision")
         )
-        x, y = a.get("context", {}), b.get("context", {})
         for key in (
             "system_template_hash",
             "instructions_hash",

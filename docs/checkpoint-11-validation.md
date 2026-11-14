@@ -38,3 +38,23 @@ separate from a query-based sandbox digest.
 
 Engineering verification covers the local evidence chain and artificial fault
 boundaries. This checkpoint introduces no live-model research results.
+
+## Checkpoint 11.1
+
+Operational metric version `reliability-1.1.0` uses distinct, explicitly
+eligible observations. For recovery, deduplication, and conflict rejection,
+the denominator includes only resolved eligible faults, replays, or conflicts.
+Missing or contradictory resolutions remain visible as unresolved. Mutation
+counts are based on the observed write inventory. Zero is a valid mutation
+count when the inventory establishes non-commitment. An absent inventory leaves
+commitment unknown and prevents a duplicate-effect measurement. For pinned
+trials, chain completeness measures inspected chains, while outcome coverage
+continues to include all materialized rows.
+
+The disposable reliability schema adds provider bindings, issued events, and
+append-only callback conflicts during explicit simulator registration. Older
+provider rows lack this authority and cannot establish new verified delivery.
+Existing reports retain their stored bytes and use their original formatter.
+New reports pin the agent ledger, local receipt, provider evidence, and the
+consecutive predecessor. The reader validates ancestry even when limiting
+the number of returned revisions.

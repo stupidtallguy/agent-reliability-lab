@@ -34,6 +34,7 @@ def retry_panel(chain):
             ("Tool", chain.get("tool")),
             ("Logical operation", short_ref(chain["logical_operation_id"])),
             ("Commitment", title_case(chain["outcome"])),
+            ("Underlying mutation", title_case(chain.get("mutation_evidence"))),
             ("Receipt reuse", chain["receipt_reuse"]),
         ]
     )
@@ -117,7 +118,10 @@ def demo_workspace(view, execution, page):
             ("Local intent", title_case(chosen["provider"]["local_intent"])),
             ("Provider", title_case(chosen["provider"]["provider"])),
             ("Delivery", title_case(chosen["provider"]["delivery"])),
-            ("Physical attempts", chosen["physical_tool_attempts"]),
+            ("Logical operations", chosen.get("logical_operation_count")),
+            ("Physical tool attempts", chosen["physical_tool_attempts"]),
+            ("Receipts", chosen.get("receipt_count")),
+            ("Committed local mutations", chosen.get("local_mutations")),
         ]
     )
     exact_refs(

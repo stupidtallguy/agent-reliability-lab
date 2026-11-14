@@ -2,6 +2,7 @@
 
 from agent_reliability_lab.agent.provenance import verify
 from agent_reliability_lab.reliability.context import compare_requests
+from agent_reliability_lab.reliability.diagnostics import observed_trial_gaps
 
 
 def retry_chain(evidence, proposal_id, reconciliation=None):
@@ -54,6 +55,16 @@ def retry_chain(evidence, proposal_id, reconciliation=None):
                 )
             )
     committed = (reconciliation or {}).get("committed", {}).get(operation_id)
+    target = (operation.get("arguments") or {}).get("task_id")
+    audit_observed = bool(target) and any(
+        audit.get("task_id") == target and audit.get("operation") == operation["tool"]
+        for audit in evidence.get("audits", [])
+    )
+    denied = bool(attempts) and all(row.get("effect") == "denied" for row in attempts)
+    contradiction = "contradictory_records" in observed_trial_gaps(
+        {"reconciliation": reconciliation or {}}
+    ) or bool(committed and denied)
+    verified = bool(committed and attempts and (reconciliation or {}).get("complete") is True)
     return {
         "proposal_id": proposal_id,
         "logical_operation_id": operation_id,
@@ -72,13 +83,12 @@ def retry_chain(evidence, proposal_id, reconciliation=None):
             for row in attempts
         ],
         "receipt": committed,
-        "outcome": "committed"
+        "mutation_evidence": "observed"
         if committed
-        else (
-            "denied"
-            if attempts and all(row.get("effect") == "denied" for row in attempts)
-            else "unknown"
-        ),
+        else ("observed_on_target" if audit_observed else "unresolved"),
+        "outcome": "contradictory"
+        if contradiction
+        else ("committed" if verified else "denied" if denied else "unknown"),
         # Returned task receipts do not tell the host which physical attempt originally committed.
         "receipt_reuse": "not independently observable" if len(attempts) > 1 else "not applicable",
     }

@@ -45,6 +45,12 @@ def queue(lab):
     ).notification_id
 
 
+def deliver(lab, identifier, sequence, status):
+    event = lab.issue_event(identifier, sequence, status)
+    lab.callback(identifier, event, sequence, status)
+    return event
+
+
 @pytest.mark.parametrize(
     ("fault", "callback", "expected_provider", "outcome"),
     [
@@ -61,7 +67,7 @@ def test_provider_outcomes(lab, fault, callback, expected_provider, outcome):
     assert lab.evidence(identity)["outbox"] == "pending"
     lab.dispatch(identity, fault)
     if callback:
-        lab.callback(identity, "terminal", 2, callback)
+        deliver(lab, identity, 2, callback)
     evidence = lab.evidence(identity)
     assert (evidence["provider"], evidence["delivery"]) == (expected_provider, outcome)
     assert evidence["acknowledged"] is (fault in {"normal", "reject"})
@@ -89,15 +95,16 @@ def test_duplicate_provider_requests_and_conflicting_payload(lab):
 def test_duplicate_and_out_of_order_callbacks_never_undo_delivery(lab):
     identity = queue(lab)
     lab.dispatch(identity)
-    lab.callback(identity, "terminal", 2, "delivered")
-    lab.callback(identity, "terminal", 2, "delivered")
-    lab.callback(identity, "older", 1, "pending")
+    terminal = deliver(lab, identity, 2, "delivered")
+    lab.callback(identity, terminal, 2, "delivered")
+    older = deliver(lab, identity, 1, "pending")
     result = lab.evidence(identity)
     assert result["delivery"] == "delivered"
-    assert [r["event_id"] for r in result["delivery_events"]] == ["older", "terminal"]
+    assert [r["event_id"] for r in result["delivery_events"]] == [older, terminal]
     with pytest.raises(ValueError, match="conflicting delivery callback"):
-        lab.callback(identity, "terminal", 2, "failed")
-    lab.callback(identity, "contradictory", 3, "failed")
+        lab.callback(identity, terminal, 2, "failed")
+    assert NotificationLab(lab.sandbox).evidence(identity)["delivery"] == "contradictory"
+    deliver(lab, identity, 3, "failed")
     assert lab.evidence(identity)["delivery"] == "contradictory"
 
 
@@ -114,7 +121,7 @@ def test_dispatcher_restart_recovers_lost_ack_and_delayed_delivery(lab):
     assert restarted.evidence(identity)["provider"] == "accepted"
     assert restarted.dispatch(identity) == "accepted"
     assert restarted.evidence(identity)["delivery"] == "unknown"
-    restarted.callback(identity, "later", 1, "delivered")
+    deliver(restarted, identity, 1, "delivered")
     assert restarted.evidence(identity)["delivery"] == "delivered"
 
 
@@ -144,6 +151,7 @@ async def test_mcp_signed_retry_and_authorization(lab, manager):
         denied = await TrustedClient(sdk, viewer).write(TOOL, PAYLOAD, operation)
         assert denied.structured_content["error"]["code"] == "permission_denied"
     identifier = first["data"]["notification_id"]
+    assert len(lab.evidence(identifier)["rejected_conflicting_intents"]) == 1
     with lab.sandbox.transaction() as (connection, _):
         for table in (intents, outbox):
             assert (
@@ -248,3 +256,155 @@ async def test_changed_model_input_does_not_change_signed_write_intent(lab, mana
         assert replay.structured_content["data"] == original["response"]["data"]
         conflict = await client.write(TOOL, {**PAYLOAD, "template": "support_update"}, operation)
         assert conflict.structured_content["error"]["code"] == "idempotency_conflict"
+
+
+def test_authoritative_callback_cross_notification_and_conflicting_sequence(lab):
+    first = queue(lab)
+    second = lab.queue(
+        ACTOR, NotificationRequest(**PAYLOAD, idempotency_key="mcp_" + "b" * 64)
+    ).notification_id
+    for identifier in (first, second):
+        lab.dispatch(identifier)
+    event = lab.issue_event(first, 1, "delivered")
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(lambda _: lab.callback(first, event, 1, "delivered"), range(6)))
+    assert len(lab.evidence(first)["delivery_events"]) == 1
+    with pytest.raises(ValueError, match="conflicting provider event sequence"):
+        lab.issue_event(first, 1, "failed")
+    with pytest.raises(ValueError, match="contradictory_callback_identity"):
+        lab.callback(second, event, 1, "delivered")
+    for identifier in (first, second):
+        evidence = NotificationLab(lab.sandbox).evidence(identifier)
+        assert evidence["delivery"] == "contradictory"
+        assert evidence["callback_conflicts"]
+    assert not lab.evidence(second)["delivery_events"]
+
+
+def test_unknown_event_cannot_establish_delivery(lab):
+    identifier = queue(lab)
+    lab.dispatch(identifier)
+    with pytest.raises(ValueError, match="missing_authoritative_callback"):
+        lab.callback(identifier, "invented", 1, "delivered")
+    assert lab.evidence(identifier)["delivery"] == "contradictory"
+
+
+@pytest.mark.parametrize(
+    ("name", "field", "reason"),
+    [
+        ("outbox", "payload_hash", "contradictory_outbox_payload"),
+        ("provider", "payload_hash", "contradictory_provider_payload"),
+        ("provider_bindings", "provider_operation_id", "contradictory_provider_operation"),
+        ("intents", "operation_key", "contradictory_intent_identity"),
+    ],
+)
+def test_persisted_tampering_blocks_dispatch_and_delivery(lab, name, field, reason):
+    from agent_reliability_lab.reliability import notifications
+
+    identifier = queue(lab)
+    lab.dispatch(identifier)
+    if name != "provider_bindings":
+        deliver(lab, identifier, 1, "delivered")
+    table = getattr(notifications, name)
+    with lab.sandbox.transaction() as (connection, _):
+        connection.execute(
+            table.update()
+            .where(table.c.notification_id == identifier)
+            .values({field: uuid.uuid4().hex})
+        )
+    with pytest.raises(ValueError, match=reason):
+        lab.dispatch(identifier)
+    evidence = lab.evidence(identifier)
+    assert (evidence["delivery"], evidence["integrity_issue"]) == ("contradictory", reason)
+
+
+def test_missing_intent_outbox_or_provider_does_not_confirm_delivery(lab):
+    identifier = queue(lab)
+    with pytest.raises(ValueError, match="provider acceptance"):
+        lab.issue_event(identifier, 1, "delivered")
+    assert lab.evidence(identifier)["delivery"] == "unknown"
+    with lab.sandbox.transaction() as (connection, _):
+        connection.execute(outbox.delete().where(outbox.c.notification_id == identifier))
+    with pytest.raises(ValueError, match="missing_outbox"):
+        lab.dispatch(identifier)
+    assert lab.evidence(identifier)["delivery"] == "unknown"
+    assert lab.evidence("unknown-notification")["delivery"] == "unknown"
+
+
+def test_callback_conflict_survives_a_fresh_process(lab):
+    import subprocess
+    import sys
+
+    identifier = queue(lab)
+    lab.dispatch(identifier)
+    event = deliver(lab, identifier, 1, "delivered")
+    with pytest.raises(ValueError, match="contradictory_callback_identity"):
+        lab.callback(identifier, event, 1, "failed")
+    probe = """
+import sys
+from agent_reliability_lab.opsdesk.database import SandboxManager, engine_from_env
+from agent_reliability_lab.reliability.notifications import NotificationLab
+box = SandboxManager(engine_from_env()).open(sys.argv[1])
+evidence = NotificationLab(box).evidence(sys.argv[2])
+assert evidence["delivery"] == "contradictory"
+assert evidence["callback_conflicts"] and evidence["delivery_events"][0]["status"] == "delivered"
+"""
+    subprocess.run(
+        [sys.executable, "-c", probe, lab.sandbox.run_id, identifier], check=True, timeout=30
+    )
+
+
+@pytest.mark.anyio
+async def test_revision_ancestry_rejects_forged_or_concurrent_successors(manager, tmp_path):
+    from agent_reliability_lab.opsdesk.fixtures import digest
+    from agent_reliability_lab.reliability.demo import prepare_reliability_demo
+    from agent_reliability_lab.reliability.notifications import reports
+    from agent_reliability_lab.reliability.revisions import freeze
+    from agent_reliability_lab.research.views import ResearchView
+
+    result = await prepare_reliability_demo(manager.engine, tmp_path)
+    view = ResearchView(manager.engine)
+    identifier = result["execution_id"]
+    first, second = view.reliability_reports(identifier)
+    keep = (tmp_path / first["report_id"] / "reliability.json").read_bytes()
+    assert freeze(manager.engine, second, 2) == second
+    with pytest.raises(ValueError, match="revision conflict"):
+        freeze(manager.engine, {**second, "purpose": "different"}, 2)
+    for bad, revision in [
+        ({**second, "previous_report_id": second["report_id"]}, 99),
+        ({**second, "previous_report_id": "a" * 64}, 3),
+        ({**second, "previous_report_id": first["report_id"]}, 3),
+        ({**second, "execution_id": "e" * 32, "previous_report_id": None}, 1),
+    ]:
+        with pytest.raises(ValueError):
+            freeze(manager.engine, bad, revision)
+
+    def candidate(label):
+        document = {**second, "previous_report_id": second["report_id"], "purpose": label}
+        try:
+            return freeze(manager.engine, document, 3)
+        except ValueError as error:
+            assert "revision conflict" in str(error)
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        winners = [r for r in pool.map(candidate, ["one", "two"]) if r]
+    assert len(winners) == 1
+    assert view.reliability_reports(identifier, limit=1) == [first]
+    assert view.reliability_reports(identifier)[-1] == winners[0]
+    from agent_reliability_lab.reliability.metrics import render
+
+    assert render(first, "json").encode() == keep
+    forged = {**winners[0], "revision": 4, "previous_report_id": "unrelated"}
+    del forged["report_id"]
+    forged["report_id"] = digest(forged)
+    with manager.engine.begin() as connection:
+        connection.execute(
+            reports.insert().values(
+                report_id=forged["report_id"],
+                execution_id=identifier,
+                revision=4,
+                document=forged,
+            )
+        )
+    with pytest.raises(ValueError, match="ancestry"):
+        view.reliability_reports(identifier, limit=1)

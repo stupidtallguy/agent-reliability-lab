@@ -49,13 +49,15 @@ def ledger(*, changed=False, bad=None, resumed=False):
             model,
             max_output_tokens=10,
         )
+        context["tool_schema_hash"] = "d" * 64
         add("model_started", request, {**body, "context": context})
         if bad == "input" and request == "after":
             body["input_hash"] = "c" * 64
         event("model_request", **body)
         if bad == "exposure" and request == "after":
             event("injection_model_exposure", request_id=request, input_hash="c" * 64)
-        add("model_completed", request, body)
+        if changed or request == "after":
+            add("model_completed", request, body)
     return records
 
 
@@ -113,3 +115,135 @@ def test_missing_input_hash_is_unverifiable():
         "unverifiable",
         "missing_or_invalid_input_hash",
     )
+
+
+def reseal(records):
+    rebuilt = []
+    for row in records:
+        rebuilt.append(
+            seal(
+                "run",
+                len(rebuilt) + 1,
+                row["kind"],
+                row["reference"],
+                row["body"],
+                rebuilt[-1]["record_hash"] if rebuilt else None,
+            )
+        )
+    return rebuilt
+
+
+@pytest.mark.parametrize(("first", "second"), [(0, -1), (3, 1)])
+def test_invalid_turn_does_not_verify_context(first, second):
+    records = ledger(changed=True)
+    for row in records:
+        body = row["body"]
+        target = body.get("payload", body)
+        if "turn" in target:
+            target["turn"] = first if target["request_id"] == "before" else second
+    assert compare_requests(reseal(records), "run", "before", "after")["reason"] == (
+        "contradictory_model_turn"
+    )
+
+
+@pytest.mark.parametrize("component", ["instructions_hash", "observations", "tool_schema_hash"])
+def test_identical_hash_cannot_disagree_on_input_component(component):
+    records = ledger()
+    start = next(row for row in records if row["reference"] == "after")
+    start["body"]["context"][component] = [] if component == "observations" else "e" * 64
+    result = compare_requests(reseal(records), "run", "before", "after")
+    assert (result["relation"], result["reason"]) == (
+        "contradictory",
+        "contradictory_input_components",
+    )
+
+
+def test_independent_configuration_is_outside_input_hash():
+    records = ledger()
+    next(row for row in records if row["reference"] == "after")["body"]["context"][
+        "model_config_hash"
+    ] = "e" * 64
+    result = compare_requests(reseal(records), "run", "before", "after")
+    assert (result["relation"], result["changes"]) == ("identical", ["model_config_hash"])
+
+
+def test_incomplete_components_and_duplicate_request_identity():
+    records = ledger()
+    start = next(row for row in records if row["reference"] == "after")
+    del start["body"]["context"]["observations"]
+    assert compare_requests(reseal(records), "run", "before", "after")["relation"] == "unverifiable"
+    records.append(start)
+    assert compare_requests(reseal(records), "run", "before", "after")["reason"] == (
+        "contradictory_request_identity"
+    )
+
+
+@pytest.mark.parametrize(
+    ("complete", "errors", "effects", "mapped", "expected"),
+    [
+        (True, [], ["receipt_confirmed"], True, "committed"),
+        (True, [], ["unknown", "receipt_confirmed"], True, "committed"),
+        (False, [{"code": "receipt_response_conflict"}], ["denied"], True, "contradictory"),
+        (False, [], ["receipt_confirmed"], True, "unknown"),
+        (True, [], ["denied"], True, "contradictory"),
+        (False, [{"code": "successful_write_missing_receipt"}], ["unknown"], False, "unknown"),
+        (True, [], [], True, "unknown"),
+        (True, [], ["denied"], False, "denied"),
+    ],
+)
+def test_retry_inspector_separates_observed_mutation_from_attribution(
+    complete, errors, effects, mapped, expected
+):
+    from agent_reliability_lab.reliability.inspection import retry_chain
+
+    evidence = {
+        "operations": [
+            {
+                "proposal_id": "p",
+                "operation_id": "w",
+                "execution_id": "run",
+                "turn": 0,
+                "tool": "create_task",
+            }
+        ],
+        "attempts": [
+            {
+                "proposal_id": "p",
+                "attempt_id": str(i),
+                "ordinal": i,
+                "status": "succeeded",
+                "effect": effect,
+            }
+            for i, effect in enumerate(effects, 1)
+        ],
+    }
+    result = retry_chain(
+        evidence,
+        "p",
+        {
+            "complete": complete,
+            "errors": errors,
+            "committed": {"w": {"receipt_key": "r"}} if mapped else {},
+        },
+    )
+    assert result["outcome"] == expected
+    assert result["mutation_evidence"] == ("observed" if mapped else "unresolved")
+
+
+def test_missing_receipt_can_show_an_observed_target_mutation():
+    from agent_reliability_lab.reliability.inspection import retry_chain
+
+    operation = {
+        "proposal_id": "p",
+        "operation_id": "w",
+        "execution_id": "run",
+        "turn": 0,
+        "tool": "update_task",
+        "arguments": {"task_id": "target"},
+    }
+    evidence = {
+        "operations": [operation],
+        "audits": [{"operation": "update_task", "task_id": "target"}],
+    }
+    result = retry_chain(evidence, "p", {"complete": False, "committed": {}})
+    assert (result["mutation_evidence"], result["outcome"]) == ("observed_on_target", "unknown")
