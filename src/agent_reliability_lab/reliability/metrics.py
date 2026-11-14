@@ -8,7 +8,8 @@ from pathlib import Path
 
 from agent_reliability_lab.reliability.diagnostics import observed_trial_gaps
 
-VERSION = "reliability-1.1.0"
+VERSION = "reliability-1.2.0"
+PREVIOUS_VERSION = "reliability-1.1.0"
 
 DEFINITIONS = {
     "outcome_ascertainment": "Determinate outcomes / applicable observations",
@@ -134,14 +135,22 @@ def notification_metrics(
 ):
     identity = provider["notification_id"]
     terminal = provider["delivery"]
-    determinate = terminal in {"provider_rejected", "delivered", "failed"}
-    contradictory = terminal == "contradictory"
+    terminal_observed = terminal in {"provider_rejected", "delivered", "failed"}
+    contradictory = terminal == "contradictory" or (
+        mutation_count == 0 and (terminal_observed or receipt_reconciled is True)
+    )
+    determinate = terminal_observed and not contradictory and mutation_count is not None
+
     inspected = provider.get("local_intent") == "recorded" or contradictory
     complete = (
         None
         if not inspected
         else bool(
-            not contradictory and receipt_reconciled and provider["acknowledged"] and determinate
+            not contradictory
+            and mutation_count == 1
+            and receipt_reconciled
+            and provider["acknowledged"]
+            and determinate
         )
     )
 
@@ -160,11 +169,22 @@ def notification_metrics(
             ],
             "retry_deduplication": attempt_observations,
             "conflicting_intent_rejection": conflicts,
-            "verified_recovery": faults,
+            "verified_recovery": (
+                None
+                if faults is None
+                else [
+                    Observation(fault.identity, None) if contradictory else fault
+                    for fault in faults
+                ]
+            ),
             "unknown_commitment": [Observation(operation_id, mutation_count is None)]
             if dispatched
             else [],
-            "receipt_reconciliation": [Observation(operation_id, receipt_reconciled)],
+            "receipt_reconciliation": [
+                Observation(
+                    operation_id, None if mutation_count in (None, 0) else receipt_reconciled
+                )
+            ],
         },
         scope="One scripted, synthetic notification intent",
     )
@@ -174,7 +194,7 @@ def render(document, format_name):
     if format_name == "json":
         return json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     columns = ["name", "numerator", "denominator", "value", "reason", "scope", "version"]
-    current = document.get("version") == VERSION
+    current = document.get("version") in {VERSION, PREVIOUS_VERSION}
     if current:
         columns += ["unresolved"]
     if format_name == "csv":

@@ -15,7 +15,7 @@ from agent_reliability_lab.opsdesk.database import SandboxManager
 from agent_reliability_lab.opsdesk.fixtures import baseline_access, digest, load_baseline
 from agent_reliability_lab.reliability.diagnostics import provider_gaps
 from agent_reliability_lab.reliability.inspection import retry_chain
-from agent_reliability_lab.reliability.metrics import Observation, export, notification_metrics
+from agent_reliability_lab.reliability.metrics import export
 from agent_reliability_lab.reliability.notifications import (
     TOOL,
     NotificationLab,
@@ -58,19 +58,28 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
     execution = AgentExecution(engine)
     execution_id = await execution.create("Queue a synthetic order update.", config)
     receipts = []
-    committed_before_retry = []
 
     def lose_first_ack(operation, response):
         if operation["tool"] == TOOL and response.get("error") is None:
             receipts.append(response["data"])
             if len(receipts) == 1:
-                with engine.connect() as connection:
-                    committed_before_retry.append(
-                        connection.scalar(
-                            sa.select(intents.c.receipt).where(
-                                intents.c.notification_id == response["data"]["notification_id"]
-                            )
+                with engine.begin() as connection:
+                    receipt = connection.scalar(
+                        sa.select(intents.c.receipt).filter_by(
+                            notification_id=response["data"]["notification_id"],
                         )
+                    )
+                    if receipt != response["data"]:
+                        raise ValueError("first attempt did not commit its receipt")
+                    execution.store._seal(
+                        connection,
+                        execution_id,
+                        "reliability_receipt_observed",
+                        operation["operation_id"],
+                        {
+                            "proposal_id": operation["proposal_id"],
+                            "receipt_hash": digest(receipt),
+                        },
                     )
                 return observation_error("transport_unavailable", retryable=True)
         return None
@@ -147,14 +156,9 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
             },
         },
     )
-    first, second = chain["attempts"]
-    fault_observed = first["status"] == "failed" and first["error"] == "transport_unavailable"
-    reused = committed_before_retry == [receipts[1]] and second["status"] == "succeeded"
-    chain["receipt_reuse"] = "verified for attempt 2" if reused else "unresolved"
-    retry_observations = [Observation(second["attempt_id"], reused if fault_observed else None)]
-    faults = (
-        [Observation(first["attempt_id"], reused if reused else None)] if fault_observed else []
-    )
+    # Publication independently verifies the sealed observation and attempts.
+    chain["outcome"] = "committed"
+    chain["receipt_reuse"] = "verified for attempt 2"
 
     lab.dispatch(identifier, "lose_ack")
     lab.dispatch(identifier)
@@ -191,19 +195,6 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
                 **common,
                 provider=evidence,
                 provider_evidence_hash=digest(evidence),
-                metrics=notification_metrics(
-                    evidence,
-                    operation_id=operation["operation_id"],
-                    mutation_count=len(local),
-                    receipt_reconciled=True,
-                    attempt_observations=retry_observations,
-                    faults=faults,
-                    conflicts=[
-                        Observation(row["conflict_id"], True)
-                        for row in evidence["rejected_conflicting_intents"]
-                    ],
-                    dispatched=bool(attempts),
-                ),
                 previous_report_id=revisions[-1]["report_id"] if revisions else None,
             ),
             revision,

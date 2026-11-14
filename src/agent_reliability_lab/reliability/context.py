@@ -2,6 +2,7 @@
 
 import json
 import re
+from itertools import pairwise
 
 from agent_reliability_lab.agent.provenance import verify
 from agent_reliability_lab.opsdesk.fixtures import digest
@@ -45,6 +46,35 @@ def fingerprints(messages, model, *, max_output_tokens):
     }
 
 
+def _check_components(context):
+    if not isinstance(context, dict):
+        raise ValueError("malformed_input_components")
+    for key in ("instructions_hash", "tool_schema_hash"):
+        value = context.get(key)
+        if value is None:
+            raise ValueError("missing_input_components")
+        if not isinstance(value, str) or not HASH.fullmatch(value):
+            raise ValueError("malformed_input_components")
+    observations = context.get("observations")
+    if observations is None:
+        raise ValueError("missing_input_components")
+    if not isinstance(observations, list) or any(
+        not isinstance(row, dict)
+        or row.get("position") != position
+        or not isinstance(row.get("hash"), str)
+        or not HASH.fullmatch(row["hash"])
+        or not isinstance(row.get("documents"), list)
+        or any(
+            not isinstance(doc, dict)
+            or not isinstance(doc.get("document_id"), str)
+            or type(doc.get("version")) not in (str, int, type(None))
+            for doc in row["documents"]
+        )
+        for position, row in enumerate(observations)
+    ):
+        raise ValueError("malformed_input_components")
+
+
 def compare_requests(records, execution_id, previous, current):
     """Join the original ledger boundaries before interpreting hash equality."""
     result = {
@@ -58,7 +88,17 @@ def compare_requests(records, execution_id, previous, current):
     try:
         verify(records, execution_id)
         boundaries = []
-        for identity in (previous, current):
+        between = [row["reference"] for row in records if row["kind"] == "model_started"]
+        if previous in between and current in between and previous != current:
+            start_index, end_index = between.index(previous), between.index(current)
+            identities = (
+                between[start_index : end_index + 1]
+                if start_index < end_index
+                else (previous, current)
+            )
+        else:
+            identities = [previous] if previous == current else [previous, current]
+        for identity in identities:
             starts = [
                 r for r in records if r["kind"] == "model_started" and r["reference"] == identity
             ]
@@ -137,34 +177,35 @@ def compare_requests(records, execution_id, previous, current):
                 }
             )
             boundaries.append((start, entry))
-        (left, first), (right, second) = boundaries
+        (left, first), (right, second) = boundaries[0], boundaries[-1]
         if previous != current and (
             first["sequence"] >= right["sequence"]
             or first["body"]["sequence"] >= second["body"]["sequence"]
         ):
             raise ValueError("contradictory_request_order")
         a, b = left["body"], right["body"]
-        if b["turn"] < a["turn"]:
-            raise ValueError("contradictory_model_turn")
-        if (
-            previous != current
-            and b["turn"] == a["turn"]
-            and (result["references"][0]["decision_ledger"] is not None)
-        ):
-            raise ValueError("contradictory_completed_model_retry")
-        if b["turn"] > a["turn"]:
-            decision = result["references"][0]["decision_ledger"]
-            if decision is None:
-                raise ValueError("missing_originating_decision")
-            if decision >= right["sequence"]:
+        for index, ((older, earlier), (newer, later)) in enumerate(pairwise(boundaries)):
+            before, after = older["body"]["turn"], newer["body"]["turn"]
+            decision = result["references"][index]["decision_ledger"]
+            if earlier["sequence"] >= newer["sequence"] or (
+                earlier["body"]["sequence"] >= later["body"]["sequence"]
+            ):
+                raise ValueError("contradictory_request_order")
+            if after < before:
+                raise ValueError("contradictory_model_turn")
+            if after > before + 1 or (after > before and decision is None):
+                raise ValueError("missing_intervening_decision")
+            if after == before and decision is not None:
+                raise ValueError("contradictory_completed_model_retry")
+            if decision is not None and decision >= newer["sequence"]:
                 raise ValueError("contradictory_decision_order")
         x, y = a.get("context", {}), b.get("context", {})
         input_components = ("instructions_hash", "tool_schema_hash", "observations")
         if a["input_hash"] == b["input_hash"]:
             if any(key in x and key in y and x[key] != y[key] for key in input_components):
                 raise ValueError("contradictory_input_components")
-            if any(key not in x or key not in y for key in input_components):
-                raise ValueError("missing_input_components")
+        for boundary, _ in boundaries:
+            _check_components(boundary["body"].get("context", {}))
         result["relation"] = "identical" if a["input_hash"] == b["input_hash"] else "changed"
         result["boundary"] = (
             "same_request"

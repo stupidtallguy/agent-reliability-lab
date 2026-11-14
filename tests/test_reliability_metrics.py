@@ -150,3 +150,40 @@ def test_current_exports_include_revision_and_predecessor_and_keep_legacy_csv():
     assert "- Revision 2" in render(document, "md")
     assert "- Predecessor `before`" in render(document, "md")
     assert "previous_report_id" not in render({**document, "version": "reliability-1.0.0"}, "csv")
+
+
+@pytest.mark.parametrize(
+    ("mutations", "delivery", "complete", "contradiction", "duplicate"),
+    [
+        (1, "delivered", 1, 0, 0),
+        (1, "unknown", 0, 0, 0),
+        (0, "failed", 0, 1, 0),
+        (None, "delivered", 0, 0, None),
+        (2, "delivered", 0, 0, 1),
+        (1, "contradictory", 0, 1, 0),
+    ],
+)
+def test_local_inventory_constrains_terminal_chain(
+    mutations, delivery, complete, contradiction, duplicate
+):
+    rows = notification_metrics(
+        {
+            "notification_id": "n",
+            "delivery": delivery,
+            "local_intent": "recorded",
+            "acknowledged": True,
+        },
+        operation_id="op",
+        mutation_count=mutations,
+        receipt_reconciled=True,
+        attempt_observations=None,
+        faults=[],
+        conflicts=[],
+        dispatched=True,
+    )
+    metrics = {row["name"]: row for row in rows}
+    assert metrics["chain_completeness"]["value"] == complete
+    assert metrics["contradiction"]["value"] == contradiction
+    assert metrics["duplicate_effect"]["value"] == duplicate
+    if mutations in (0, None):
+        assert metrics["external_confirmation"]["value"] == 0

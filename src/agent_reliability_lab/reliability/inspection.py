@@ -1,8 +1,66 @@
 """Read-only retry inspection over persisted operations and sealed model requests."""
 
 from agent_reliability_lab.agent.provenance import verify
+from agent_reliability_lab.evaluation.evidence import normalized_task
+from agent_reliability_lab.mcp.context import receipt_key
+from agent_reliability_lab.mcp.contracts import CreateTaskInput, UpdateTaskInput
+from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.reliability.context import compare_requests
 from agent_reliability_lab.reliability.diagnostics import observed_trial_gaps
+from agent_reliability_lab.reliability.verification import operation_attempts
+
+
+def task_commitment(evidence, operation, attempts, committed):
+    if not committed or operation.get("tool") not in {"create_task", "update_task"}:
+        return False
+    config = (evidence.get("execution") or {}).get("config") or {}
+    try:
+        tool = operation["tool"]
+        key = receipt_key(
+            dict(
+                run=config["sandbox_run_id"],
+                actor=config["actor_id"],
+                tenant=config["tenant_id"],
+                tool=tool,
+                operation=operation["operation_id"],
+            )
+        )
+        model = CreateTaskInput if tool == "create_task" else UpdateTaskInput
+        fingerprint = digest(model.model_validate(operation["arguments"]).model_dump(mode="json"))
+        receipts = [
+            r
+            for r in evidence.get("receipts", [])
+            if (
+                r["idempotency_key"],
+                r["actor_id"],
+                r["tenant_id"],
+                r["operation"],
+                r["request_hash"],
+            )
+            == (key, config["actor_id"], config["tenant_id"], tool, fingerprint)
+        ]
+        if len(receipts) != 1 or (committed.get("receipt_key"), committed.get("proposal_id")) != (
+            key,
+            operation["proposal_id"],
+        ):
+            return False
+        payload = normalized_task(receipts[0]["response"])
+        audits = [
+            r
+            for r in evidence.get("audits", [])
+            if (r["actor_id"], r["tenant_id"], r["operation"], r["sequence"])
+            == (config["actor_id"], config["tenant_id"], tool, committed.get("audit_sequence"))
+            and normalized_task(r["after"]) == payload
+        ]
+        proofs = operation_attempts(operation, attempts, evidence.get("provenance") or [])
+        return len(audits) == 1 and any(
+            proof.attempt["status"] == "succeeded"
+            and isinstance(proof.response.get("data"), dict)
+            and normalized_task(proof.response["data"]) == payload
+            for proof in proofs
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def retry_chain(evidence, proposal_id, reconciliation=None):
@@ -64,7 +122,9 @@ def retry_chain(evidence, proposal_id, reconciliation=None):
     contradiction = "contradictory_records" in observed_trial_gaps(
         {"reconciliation": reconciliation or {}}
     ) or bool(committed and denied)
-    verified = bool(committed and attempts and (reconciliation or {}).get("complete") is True)
+    verified = (reconciliation or {}).get("complete") is True and task_commitment(
+        evidence, operation, attempts, committed
+    )
     return {
         "proposal_id": proposal_id,
         "logical_operation_id": operation_id,

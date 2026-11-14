@@ -181,8 +181,8 @@ def test_incomplete_components_and_duplicate_request_identity():
 @pytest.mark.parametrize(
     ("complete", "errors", "effects", "mapped", "expected"),
     [
-        (True, [], ["receipt_confirmed"], True, "committed"),
-        (True, [], ["unknown", "receipt_confirmed"], True, "committed"),
+        (True, [], ["receipt_confirmed"], True, "unknown"),
+        (True, [], ["unknown", "receipt_confirmed"], True, "unknown"),
         (False, [{"code": "receipt_response_conflict"}], ["denied"], True, "contradictory"),
         (False, [], ["receipt_confirmed"], True, "unknown"),
         (True, [], ["denied"], True, "contradictory"),
@@ -247,3 +247,63 @@ def test_missing_receipt_can_show_an_observed_target_mutation():
     }
     result = retry_chain(evidence, "p", {"complete": False, "committed": {}})
     assert (result["mutation_evidence"], result["outcome"]) == ("observed_on_target", "unknown")
+
+
+@pytest.mark.parametrize("value", [None, "", "not-sha256", 123])
+def test_malformed_required_input_hash_cannot_verify_equality(value):
+    rows = ledger()
+    for row in rows:
+        if row["kind"] == "model_started":
+            row["body"]["context"]["instructions_hash"] = value
+    result = compare_requests(reseal(rows), "run", "before", "after")
+    assert result["relation"] == "unverifiable"
+
+
+def test_nonadjacent_turn_needs_intervening_sealed_decisions():
+    initial = ledger(changed=True)
+    start, request, decision = initial[-3:]
+    for row in initial[-3:]:
+        row["body"].get("payload", row["body"])["turn"] = 17
+    missing = compare_requests(reseal(initial), "run", "before", "after")
+    assert missing["reason"] == "missing_intervening_decision"
+
+    from copy import deepcopy
+
+    rows = initial[:-3]
+    for turn in range(1, 17):
+        for template in (start, request, decision):
+            row = deepcopy(template)
+            body = row["body"].get("payload", row["body"])
+            body.update(request_id=f"model_{turn}", turn=turn)
+            if row["kind"] == "journal_event":
+                row["body"]["sequence"] = turn + 4
+            else:
+                row["reference"] = f"model_{turn}"
+            rows.append(row)
+    request["body"]["sequence"] = 21
+    result = compare_requests(reseal(rows + [start, request, decision]), "run", "before", "after")
+    assert result["relation"] == "changed"
+    assert len(result["references"]) == 18
+
+
+def test_committed_flag_with_denied_and_unresolved_attempts_is_not_verification():
+    from agent_reliability_lab.reliability.inspection import retry_chain
+
+    operation = {
+        "proposal_id": "p",
+        "execution_id": "e",
+        "operation_id": "op",
+        "tool": "create_task",
+        "turn": 0,
+    }
+    attempts = [
+        dict(proposal_id="p", attempt_id=str(i), ordinal=i, status="failed", effect=effect)
+        for i, effect in enumerate(("denied", "unknown"), 1)
+    ]
+    result = retry_chain(
+        {"operations": [operation], "attempts": attempts},
+        "p",
+        {"complete": True, "committed": {"op": {"receipt_key": "key"}}},
+    )
+    assert result["outcome"] == "unknown"
+    assert result["mutation_evidence"] == "observed"

@@ -149,6 +149,13 @@ reports = table(
     sa.UniqueConstraint("execution_id", "revision"),
 )
 
+report_evidence = table(
+    "report_evidence",
+    key("report_id"),
+    field("snapshot", JSONB),
+    sa.ForeignKeyConstraint(["report_id"], [f"{SCHEMA}.reports.report_id"]),
+)
+
 
 def lookup(connection, source, notification_id):
     return (
@@ -186,7 +193,13 @@ class NotificationLab:
                 BEFORE UPDATE OR DELETE ON opsdesk_reliability.reports
                 FOR EACH ROW EXECUTE FUNCTION opsdesk_reliability.reject_report_change()
             """)
-            for source in (issued_events, callback_conflicts, delivery, intent_conflicts):
+            for source in (
+                issued_events,
+                callback_conflicts,
+                delivery,
+                intent_conflicts,
+                report_evidence,
+            ):
                 connection.exec_driver_sql(f"""
                     CREATE OR REPLACE TRIGGER frozen_reliability_evidence
                     BEFORE UPDATE OR DELETE ON {source.fullname}

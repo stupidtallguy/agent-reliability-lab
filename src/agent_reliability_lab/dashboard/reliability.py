@@ -113,6 +113,22 @@ def demo_workspace(view, execution, page):
             f"Revision {row['revision']} · Delivery {title_case(row['provider']['delivery'])}"
         ),
     )
+    if getattr(chosen, "verification", None) == "legacy_unverified":
+        st.warning("Historical observation. Current evidence verification is unavailable.")
+        exact_refs([("Historical report", chosen["report_id"]), ("Execution", execution)])
+        if page == "Reports & Evaluators":
+            for format_name, mime in (
+                ("json", "application/json"),
+                ("csv", "text/csv"),
+                ("md", "text/markdown"),
+            ):
+                st.download_button(
+                    f"Download historical {format_name.upper()}",
+                    render(chosen, format_name).encode(),
+                    f"reliability-{chosen['revision']}.{format_name}",
+                    mime,
+                )
+        return
     fields(
         [
             ("Local intent", title_case(chosen["provider"]["local_intent"])),

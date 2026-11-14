@@ -58,3 +58,33 @@ Existing reports retain their stored bytes and use their original formatter.
 New reports pin the agent ledger, local receipt, provider evidence, and the
 consecutive predecessor. The reader validates ancestry even when limiting
 the number of returned revisions.
+
+## Checkpoint 11.2 evidence publication
+
+Current reports use operational metric version `reliability-1.2.0`.
+Publication takes the per-execution revision lock and the notification lock
+before checking the source tables. PostgreSQL SHARE locks acquired with NOWAIT
+protect the checks from concurrent direct SQL writes until the report and its
+append-only evidence snapshot commit. Writers holding incompatible locks cause
+publication to fail with a retryable PostgreSQL lock error.
+
+The publisher independently verifies the committed intent, outbox and provider
+records. It pins the mutation inventory and attempt projection. Retry outcomes
+join the original proposal, dispatch and completion journal entries, sealed
+responses and the demo's sealed pre-retry receipt observation. Metrics are
+generated from that evidence. If a caller supplies metrics, canonical equality
+is required. Readers recompute the metrics and verify the evidence digest,
+execution binding and full revision ancestry. An exact replay returns the
+prior frozen observation.
+
+Prior metric versions retain their original renderers and bytes. Database
+records require a matching execution and owned notification receipt even for
+historical access. Historical records carry an out-of-band unverified label and
+remain available for download. The version string does not confer current
+verification. The supported write path publishes only the current version.
+
+Context verification checks required fingerprint types and formats and follows
+the intervening sealed model requests and decisions. The task Retry Inspector
+requires a matching sealed successful attempt, receipt and independent mutation
+audit before displaying verified commitment. It can still display observed
+mutation evidence when attribution is unresolved.

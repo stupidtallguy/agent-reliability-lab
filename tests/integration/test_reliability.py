@@ -432,3 +432,240 @@ def test_cross_sandbox_callback_cannot_taint_the_source(lab, manager):
             foreign.evidence(source)
     finally:
         manager.cleanup(run, expected_marker=marker)
+
+
+@pytest.mark.anyio
+async def test_publication_recomputes_metrics_and_rejects_rehashed_storage(manager, tmp_path):
+    import copy
+
+    from agent_reliability_lab.opsdesk.fixtures import digest
+    from agent_reliability_lab.reliability.demo import prepare_reliability_demo
+    from agent_reliability_lab.reliability.notifications import report_evidence, reports
+    from agent_reliability_lab.reliability.revisions import freeze, report_rows, validated_reports
+    from agent_reliability_lab.research.views import ResearchView
+
+    result = await prepare_reliability_demo(manager.engine, tmp_path)
+    end = ResearchView(manager.engine).reliability_reports(result["execution_id"])[-1]
+    for corruption in (
+        "100/1",
+        "negative",
+        "denominator",
+        "value",
+        "missing",
+        "duplicate",
+        "name",
+        "version",
+        "plausible",
+        "nan",
+        "extra",
+    ):
+        next_report = copy.deepcopy(end)
+        next_report["previous_report_id"] = end["report_id"]
+        rows = next_report["metrics"]
+        row = next(r for r in rows if r["name"] == "duplicate_effect")
+        if corruption == "100/1":
+            row.update(numerator=100, denominator=1, value=100)
+        elif corruption == "negative":
+            row["numerator"] = -1
+        elif corruption == "denominator":
+            row["denominator"] = -1
+        elif corruption == "value":
+            row["value"] = 0.5
+        elif corruption == "missing":
+            rows.remove(row)
+        elif corruption == "duplicate":
+            rows.append(row)
+        elif corruption == "name":
+            row["name"] = "invented"
+        elif corruption == "version":
+            row["version"] = "reliability-9.0.0"
+        elif corruption == "plausible":
+            row.update(numerator=1, value=1.0)
+        elif corruption == "nan":
+            row["value"] = float("nan")
+        else:
+            row["custom"] = "unsupported"
+        with pytest.raises(ValueError, match="reliability metrics"):
+            freeze(manager.engine, next_report, 3)
+
+    forged = {**next_report, "revision": 3}
+    del forged["report_id"]
+    forged["report_id"] = digest(forged)
+    with manager.engine.connect() as connection, connection.begin() as transaction:
+        snapshot = connection.scalar(
+            sa.select(report_evidence.c.snapshot).filter_by(report_id=end["report_id"])
+        )
+        connection.execute(
+            reports.insert().values(
+                report_id=forged["report_id"],
+                execution_id=result["execution_id"],
+                revision=3,
+                document=forged,
+            )
+        )
+        connection.execute(
+            report_evidence.insert().values(report_id=forged["report_id"], snapshot=snapshot)
+        )
+        with pytest.raises(ValueError, match="reliability metrics"):
+            list(
+                validated_reports(
+                    report_rows(connection, result["execution_id"]),
+                    result["execution_id"],
+                    connection,
+                )
+            )
+        transaction.rollback()
+
+    valid = freeze(manager.engine, {**end, "previous_report_id": end["report_id"]}, 3)
+    assert valid["metrics"] == end["metrics"]
+
+
+@pytest.mark.anyio
+async def test_publication_locks_live_outbox_and_historical_bytes_survive(manager, tmp_path):
+    from agent_reliability_lab.reliability.demo import prepare_reliability_demo
+    from agent_reliability_lab.reliability.metrics import render
+    from agent_reliability_lab.reliability.revisions import freeze
+    from agent_reliability_lab.research.views import ResearchView
+
+    result = await prepare_reliability_demo(manager.engine, tmp_path)
+    view = ResearchView(manager.engine)
+    first, end = view.reliability_reports(result["execution_id"])
+    request = {**end, "previous_report_id": end["report_id"]}
+    with manager.engine.begin() as writer:
+        writer.execute(
+            outbox.update()
+            .where(outbox.c.notification_id == end["provider"]["notification_id"])
+            .values(payload_hash="0" * 64)
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(freeze, manager.engine, request, 3)
+            with pytest.raises(sa.exc.OperationalError) as failure:
+                future.result(timeout=10)
+            assert failure.value.orig.sqlstate == "55P03"
+    with pytest.raises(ValueError, match="intent or outbox"):
+        freeze(manager.engine, request, 3)
+    assert view.reliability_reports(result["execution_id"]) == [first, end]
+    assert (
+        render(first, "json").encode()
+        == (tmp_path / first["report_id"] / "reliability.json").read_bytes()
+    )
+
+
+@pytest.mark.anyio
+async def test_legacy_label_cannot_verify_unbound_reports(manager, tmp_path):
+    from agent_reliability_lab.opsdesk.fixtures import digest
+    from agent_reliability_lab.reliability.demo import prepare_reliability_demo
+    from agent_reliability_lab.reliability.metrics import render
+    from agent_reliability_lab.reliability.notifications import reports
+    from agent_reliability_lab.reliability.revisions import freeze, validated_reports
+    from agent_reliability_lab.research.views import ResearchView
+
+    run = await prepare_reliability_demo(manager.engine, tmp_path)
+    first = ResearchView(manager.engine).reliability_reports(run["execution_id"])[0]
+    legacy = {k: v for k, v in first.items() if k != "report_id"}
+    legacy["version"] = "reliability-1.0.0"
+    legacy["report_id"] = digest(legacy)
+
+    def row(doc):
+        return {k: doc[k] for k in ("report_id", "execution_id", "revision")} | {"document": doc}
+
+    with manager.engine.connect() as connection:
+        offline = list(validated_reports([row(legacy)], run["execution_id"], connection))[0]
+        assert offline.verification == "legacy_unverified"
+        for ext in ("json", "csv", "md"):
+            assert render(offline, ext) == render(legacy, ext)
+    with pytest.raises(ValueError, match="legacy reliability reports cannot be published"):
+        freeze(manager.engine, legacy, 1)
+    for execution, notification, predecessor in (
+        (uuid.uuid4().hex, first["provider"]["notification_id"], None),
+        (run["execution_id"], "nonexistent", None),
+        (run["execution_id"], first["provider"]["notification_id"], "f" * 64),
+    ):
+        forged = {
+            **legacy,
+            "execution_id": execution,
+            "previous_report_id": predecessor,
+            "provider": {**legacy["provider"], "notification_id": notification},
+        }
+        del forged["report_id"]
+        forged["report_id"] = digest(forged)
+        with manager.engine.connect() as connection:
+            with pytest.raises(ValueError):
+                list(validated_reports([row(forged)], execution, connection))
+        if execution != run["execution_id"]:
+            with manager.engine.begin() as connection:
+                connection.execute(reports.insert().values(**row(forged)))
+            with pytest.raises(ValueError, match="missing reliability execution"):
+                ResearchView(manager.engine).reliability_reports(execution)
+
+
+@pytest.mark.anyio
+async def test_inspector_uses_sealed_attempt_receipt_and_audit(lab):
+    from copy import deepcopy
+
+    from agent_reliability_lab.agent import tables as agent
+    from agent_reliability_lab.agent.config import AgentConfig, ModelConfig
+    from agent_reliability_lab.agent.demo import call
+    from agent_reliability_lab.agent.execution import AgentExecution
+    from agent_reliability_lab.mcp.context import operation_identity, receipt_key
+    from agent_reliability_lab.opsdesk import tables as business
+    from agent_reliability_lab.reliability.inspection import retry_chain
+
+    config = AgentConfig(
+        sandbox_run_id=lab.sandbox.run_id,
+        **ACTOR.model_dump(),
+        domains=["tasks"],
+        transport="memory",
+        model=ModelConfig(
+            script=[
+                call("create_task", customer_id="customer_001", title="Audit task"),
+                {"answer": "Task created."},
+            ]
+        ),
+    )
+    run = AgentExecution(lab.sandbox.engine)
+    eid = await run.create("Create a task.", config)
+    assert (await run.run(eid, config)).status == "completed"
+    with lab.sandbox.transaction() as (connection, _):
+        operation = dict(
+            connection.execute(sa.select(agent.operations).filter_by(execution_id=eid))
+            .mappings()
+            .one()
+        )
+        attempts = [
+            dict(r)
+            for r in connection.execute(
+                sa.select(agent.attempts).filter_by(proposal_id=operation["proposal_id"])
+            ).mappings()
+        ]
+        receipts = [dict(r) for r in connection.execute(sa.select(business.receipts)).mappings()]
+        audits = [dict(r) for r in connection.execute(sa.select(business.audit)).mappings()]
+    key = receipt_key(
+        operation_identity(run.launch(config), "create_task", operation["operation_id"])
+    )
+    evidence = {
+        "execution": {"config": config.model_dump()},
+        "operations": [operation],
+        "attempts": attempts,
+        "provenance": run.store.provenance(eid),
+        "receipts": receipts,
+        "audits": audits,
+    }
+    reconciliation = {
+        "complete": True,
+        "committed": {
+            operation["operation_id"]: {
+                "receipt_key": key,
+                "proposal_id": operation["proposal_id"],
+                "audit_sequence": audits[0]["sequence"],
+            }
+        },
+    }
+    got = retry_chain(evidence, operation["proposal_id"], reconciliation)
+    assert got["outcome"] == "committed"
+    for field in ("receipts", "audits", "provenance"):
+        broken = {**evidence, field: []}
+        assert retry_chain(broken, operation["proposal_id"], reconciliation)["outcome"] == "unknown"
+    broken = deepcopy(evidence)
+    broken["attempts"][0]["effect"] = "unknown"
+    assert retry_chain(broken, operation["proposal_id"], reconciliation)["outcome"] == "unknown"
