@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add CP13 private catalog commitments, redacted leakage audits, and frozen
+  confirmatory design and cluster power planning. Held-out execution stays disabled.
+
 - Add the CP12 benchmark catalog and versioned preregistration, with template and
   attack-family leakage checks, counterbalanced synthetic pairs, pinned result
   reconstruction, and template-clustered exploratory analysis.

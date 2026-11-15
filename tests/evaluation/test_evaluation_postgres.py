@@ -488,6 +488,7 @@ async def test_held_out_and_sensitive_scenarios_are_not_executed(eval_env, tmp_p
     eid = await run([held])
     trial, result = latest(runner, eid)[0]
     assert result.status == "not_executed" and trial["sandbox_run_id"] is None
+    assert trial["scenario"] is None and result.exclusion_reason == "held_out_access_not_enabled"
     value["metadata"]["split"] = "development"
     value["user_request"] = "sensitive-evaluation-input-token"
     monkeypatch.setenv("EVAL_INPUT_SECRET", value["user_request"])
