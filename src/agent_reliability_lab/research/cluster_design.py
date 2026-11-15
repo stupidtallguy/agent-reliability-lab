@@ -8,7 +8,8 @@ from functools import lru_cache
 from agent_reliability_lab.evaluation.statistics import wilson
 from agent_reliability_lab.opsdesk.fixtures import digest
 
-METHOD = "paired_discordance_beta_cluster_t_v1"
+METHOD = "paired_discordance_beta_cluster_t_v2"
+LEGACY_METHOD = "paired_discordance_beta_cluster_t_v1"
 MIN_COMPLETE_CLUSTERS = 20
 POWER_TARGETS = (0.8, 0.9)
 
@@ -40,13 +41,37 @@ def critical_t(df, alpha):
     return (lo + hi) / 2
 
 
-def _precision(n, total, squares, alpha):
+def _standard_error(n, total, squares):
     if n < MIN_COMPLETE_CLUSTERS:
         return None
     residual = squares - total * total / n
     if residual <= 1e-12:
         return None
-    return critical_t(n - 1, alpha) * math.sqrt(residual / ((n - 1) * n))
+    return math.sqrt(residual / ((n - 1) * n))
+
+
+def _precision(n, total, squares, alpha):
+    error = _standard_error(n, total, squares)
+    return critical_t(n - 1, alpha) * error if error is not None else None
+
+
+def two_sided_t(t_statistic, df):
+    """Integrate the upper tail with the transformation x = sqrt(df) tan(theta)."""
+    if df < 1 or math.isnan(t_statistic):
+        raise ValueError("invalid Student t arguments")
+    if t_statistic == 0:
+        return 1.0
+    start = math.atan(abs(t_statistic) / math.sqrt(df))
+    step = (math.pi / 2 - start) / 512
+    log_factor = math.lgamma((df + 1) / 2) - math.lgamma(df / 2) - math.log(math.pi) / 2
+
+    def density(i):
+        return math.cos(start + step * i) ** (df - 1)
+
+    integral = density(0) + density(512)
+    integral += 4 * sum(density(i) for i in range(1, 512, 2))
+    integral += 2 * sum(density(i) for i in range(2, 512, 2))
+    return min(1.0, 2 * math.exp(log_factor) * integral * step / 3)
 
 
 def _order_means(groups):
@@ -55,7 +80,7 @@ def _order_means(groups):
     return sum(sum(values) / len(values) for values in groups) / 2
 
 
-def cluster_contrast(clusters, *, alpha):
+def cluster_contrast(clusters, *, alpha, include_inference=False):
     """Versioned analysis arithmetic on planned pair differences, grouped by cluster/order.
 
     A null value is an unresolved or excluded planned pair. Every cluster has the
@@ -86,9 +111,10 @@ def cluster_contrast(clusters, *, alpha):
         lower.append(_order_means([[x if x is not None else -1 for x in o] for o in orders]))
         upper.append(_order_means([[x if x is not None else 1 for x in o] for o in orders]))
     n, total = len(values), sum(values)
-    margin = _precision(n, total, sum(x * x for x in values), alpha)
+    squares = sum(x * x for x in values)
+    margin = _precision(n, total, squares, alpha)
     estimate = total / n if n else None
-    return dict(
+    report = dict(
         planned_clusters=len(clusters),
         complete_clusters=n,
         missing_or_excluded_pairs=missing,
@@ -97,9 +123,27 @@ def cluster_contrast(clusters, *, alpha):
         interval_reason=None if margin is not None else "too_few_clusters_or_zero_variance",
         sensitivity_bounds=[sum(lower) / len(lower), sum(upper) / len(upper)] if lower else None,
     )
+    if include_inference:
+        error = _standard_error(n, total, squares)
+        statistic = estimate / error if error is not None else None
+        confidence95 = critical_t(n - 1, 0.05) * error if error is not None else None
+        report.update(
+            standard_error=error,
+            degrees_of_freedom=n - 1 if error is not None else None,
+            t_statistic=statistic,
+            p_value=two_sided_t(statistic, n - 1) if statistic is not None else None,
+            confidence_interval_95=[estimate - confidence95, estimate + confidence95]
+            if confidence95 is not None
+            else None,
+        )
+    return report
 
 
-def _simulated_cluster(rng, scenario, effect):
+def pair_loss_probability(scenario):
+    return 1 - (1 - scenario.pair_missing) * (1 - scenario.pair_excluded)
+
+
+def _simulated_cluster(rng, scenario, effect, pair_loss):
     if rng.random() < scenario.cluster_dropout:
         return None, 0
     mean_sign = (1 + effect / scenario.discordance) / 2
@@ -110,7 +154,6 @@ def _simulated_cluster(rng, scenario, effect):
     else:
         positive = mean_sign
     order_values = ([], [])
-    pair_loss = scenario.pair_missing + scenario.pair_excluded
     for order in order_values:
         for _ in range(scenario.repetitions_per_cluster // 2):
             if rng.random() >= pair_loss:
@@ -125,17 +168,24 @@ def _simulated_cluster(rng, scenario, effect):
     return _order_means(order_values), sum(map(len, order_values))
 
 
-def _simulate(design, scenario, effect):
+def _simulate(design, scenario, effect, *, legacy=False):
     seed = int(digest([design.seed, scenario.identity, effect])[:16], 16)
     rng = random.Random(seed)
     counts = [[0, 0, 0, 0] for _ in design.cluster_grid]
+    pair_loss = (
+        scenario.pair_missing + scenario.pair_excluded
+        if legacy
+        else pair_loss_probability(scenario)
+    )
+    if pair_loss >= 1 and legacy:
+        raise ValueError("CP13 additive-loss reports require a total loss below one")
     for _ in range(design.simulations):
         usable = pairs = 0
         total = squares = 0.0
         start = 0
         for end, row in zip(design.cluster_grid, counts, strict=True):
             for _ in range(start, end):
-                value, observed = _simulated_cluster(rng, scenario, effect)
+                value, observed = _simulated_cluster(rng, scenario, effect, pair_loss)
                 pairs += observed
                 if value is not None:
                     usable += 1
@@ -150,10 +200,10 @@ def _simulate(design, scenario, effect):
     return seed, counts
 
 
-def plan_power(design):
+def plan_power(design, *, legacy=False):
     """Report conditional designs; do not promote illustrative assumptions to a study size."""
     report = dict(
-        method=METHOD,
+        method=LEGACY_METHOD if legacy else METHOD,
         python_version=platform.python_version(),
         inputs=design.model_dump(mode="json"),
         targets=list(POWER_TARGETS),
@@ -164,6 +214,9 @@ def plan_power(design):
         simulations_are_observations=False,
         results=[],
     )
+    if not legacy:
+        report["pair_loss_model"] = "independent_union"
+        report["feasible_designs"] = []
     minimum = design.minimum_meaningful_difference
     if minimum is None or not design.scenarios:
         return dict(
@@ -174,8 +227,10 @@ def plan_power(design):
     justified = design.planning_basis == "externally_justified" and bool(design.justification)
     at_minimum = any(math.isclose(row.expected_difference, minimum) for row in design.scenarios)
     for scenario in design.scenarios:
-        alt_seed, alternative = _simulate(design, scenario, scenario.expected_difference)
-        null_seed, null = _simulate(design, scenario, 0.0)
+        alt_seed, alternative = _simulate(
+            design, scenario, scenario.expected_difference, legacy=legacy
+        )
+        null_seed, null = _simulate(design, scenario, 0.0, legacy=legacy)
         rows = []
         for planned, alt, calibration in zip(design.cluster_grid, alternative, null, strict=True):
             n = design.simulations
@@ -220,22 +275,41 @@ def plan_power(design):
                 rows=rows,
             )
         )
+        if not legacy:
+            report["results"][-1].update(
+                repetitions_per_cluster=scenario.repetitions_per_cluster,
+                combined_pair_loss=pair_loss_probability(scenario),
+            )
     minimum_rows = [r for r in report["results"] if r["minimum_effect_scenario"]]
-    robust = {}
-    for target in POWER_TARGETS:
-        robust[str(target)] = next(
+
+    def common_design(rows, target):
+        return next(
             (
                 count
                 for index, count in enumerate(design.cluster_grid)
-                if minimum_rows
+                if rows
                 and all(
                     item["rows"][index]["null_calibrated"]
                     and item["rows"][index]["power_monte_carlo_interval"][0] >= target
-                    for item in minimum_rows
+                    for item in rows
                 )
             ),
             None,
         )
+
+    if legacy:
+        robust = {str(target): common_design(minimum_rows, target) for target in POWER_TARGETS}
+    elif justified and at_minimum:
+        schedules = sorted({row["repetitions_per_cluster"] for row in minimum_rows})
+        for repetitions in schedules:
+            rows = [row for row in minimum_rows if row["repetitions_per_cluster"] == repetitions]
+            report["feasible_designs"].append(
+                dict(
+                    repetitions_per_cluster=repetitions,
+                    scenario_ids=[row["scenario"] for row in rows],
+                    targets={str(target): common_design(rows, target) for target in POWER_TARGETS},
+                )
+            )
     return dict(
         **report,
         status="conditional_design_only"
@@ -244,5 +318,5 @@ def plan_power(design):
         reason=None
         if justified and at_minimum
         else "externally_justified_minimum_effect_scenario_required",
-        planning_clusters=robust if justified and at_minimum else None,
+        planning_clusters=robust if legacy and justified and at_minimum else None,
     )

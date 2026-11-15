@@ -37,13 +37,13 @@ async def execute(args):
         raw = args.file.read_bytes()
         if json.loads(raw).get("kind") == "benchmark_confirmatory_protocol":
             protocol = ConfirmatoryProtocol.model_validate_json(raw)
-            report = plan_power(protocol.power)
+            report = plan_power(protocol.power, legacy=args.historical_cp13)
             from agent_reliability_lab.opsdesk.fixtures import digest
 
             report["protocol_hash"] = digest(protocol.model_dump(mode="json"))
             report["catalog"] = protocol.catalog.model_dump(mode="json")
         else:
-            report = plan_power(PowerDesign.model_validate_json(raw))
+            report = plan_power(PowerDesign.model_validate_json(raw), legacy=args.historical_cp13)
         print(json.dumps(report, indent=2, sort_keys=True))
         return
     if args.command == "benchmark-heldout-audit" and not args.authorize_private_read:
@@ -68,9 +68,11 @@ async def execute(args):
             result = {"initialized": True, "scope": args.scope}
         elif args.command == "append":
             artifact = parse_artifact(json.loads(args.file.read_text(encoding="utf-8")))
-            result = store.append(artifact, human_attestation=args.human_attestation).model_dump(
-                mode="json"
-            )
+            result = store.append(
+                artifact,
+                human_attestation=args.human_attestation,
+                authorized_private_read=args.authorize_private_read,
+            ).model_dump(mode="json")
         elif args.command == "list":
             result = store.list(args.kind, args.identity)
         elif args.command == "review-status":
@@ -99,7 +101,12 @@ async def execute(args):
 
             ref = Reference.model_validate_json(args.file.read_text(encoding="utf-8"))
             if args.command == "benchmark-run":
-                frozen, _ = await execute_benchmark(store, ref)
+                allocation = (
+                    Reference.model_validate_json(args.synthetic_allocation.read_bytes())
+                    if args.synthetic_allocation
+                    else None
+                )
+                frozen, _ = await execute_benchmark(store, ref, allocation_ref=allocation)
                 result = frozen.model_dump(mode="json")
             else:
                 store = ResearchStore(
@@ -129,6 +136,13 @@ async def execute(args):
             result = audit_registered(store, ref, authorized=args.authorize_private_read)
             print(json.dumps(result, indent=2, sort_keys=True))
             return 0 if result["passed"] else 2
+        elif args.command in {
+            "benchmark-allocation-draft",
+            "benchmark-preflight",
+            "benchmark-confirmatory-analyze",
+        }:
+            store = ResearchStore(engine.execution_options(postgresql_readonly=True), args.scope)
+            return confirmatory_command(store, args)
         else:
             spec = json.loads(args.file.read_text(encoding="utf-8"))
             pairs = [Reference.model_validate(ref) for ref in spec["pairs"]]
@@ -157,6 +171,58 @@ async def execute(args):
         engine.dispose()
 
 
+def confirmatory_command(store, args):
+    from agent_reliability_lab.research.confirmatory import draft_allocation, preflight
+    from agent_reliability_lab.research.confirmatory_analysis import (
+        analysis_draft,
+        analyze_allocation,
+        verify_analysis,
+    )
+    from agent_reliability_lab.research.confirmatory_contracts import (
+        EvidenceSelection,
+        FutureBudget,
+    )
+
+    reference = Reference.model_validate_json(args.file.read_bytes())
+    authorized = args.authorize_private_read
+    status = 0
+    if args.command == "benchmark-allocation-draft":
+        budget = FutureBudget.model_validate_json(args.budget.read_bytes()) if args.budget else None
+        artifact = draft_allocation(
+            store,
+            reference,
+            identity=args.identity,
+            count=args.clusters,
+            repetitions=args.repetitions,
+            target=args.target,
+            budget=budget,
+            synthetic=args.synthetic_development,
+            authorized=authorized,
+        )
+        result = artifact.model_dump(mode="json")
+    elif args.command == "benchmark-preflight":
+        result = preflight(store, reference, authorized=authorized)
+        status = 2 if result["status"] == "blocked" else 0
+    elif reference.kind == "benchmark_confirmatory_analysis":
+        if args.evidence or args.draft_identity:
+            raise ValueError("registered analysis cannot be overridden")
+        result = verify_analysis(store, store.get(reference), authorized=authorized)
+    else:
+        evidence = (
+            EvidenceSelection.model_validate_json(args.evidence.read_bytes())
+            if args.evidence
+            else EvidenceSelection()
+        )
+        if args.draft_identity:
+            result = analysis_draft(
+                store, reference, evidence, args.draft_identity, authorized=authorized
+            ).model_dump(mode="json")
+        else:
+            result = analyze_allocation(store, reference, evidence, authorized=authorized)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return status
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scope", default="research")
@@ -172,6 +238,7 @@ def main():
     )
     power = commands.add_parser("benchmark-power", help="Simulate conditional cluster sample sizes")
     power.add_argument("file", type=Path)
+    power.add_argument("--historical-cp13", action="store_true")
     design = commands.add_parser(
         "benchmark-design-draft",
         help="Create content-free CP13 records from a CP12 protocol reference",
@@ -187,6 +254,24 @@ def main():
     )
     audit.add_argument("file", type=Path)
     audit.add_argument("--authorize-private-read", action="store_true")
+    for name in (
+        "benchmark-allocation-draft",
+        "benchmark-preflight",
+        "benchmark-confirmatory-analyze",
+    ):
+        command = commands.add_parser(name)
+        command.add_argument("file", type=Path)
+        command.add_argument("--authorize-private-read", action="store_true")
+        if name == "benchmark-allocation-draft":
+            command.add_argument("--identity", default="cp14_allocation")
+            command.add_argument("--clusters", type=int, required=True)
+            command.add_argument("--repetitions", type=int, required=True)
+            command.add_argument("--target", type=float, choices=(0.8, 0.9), default=0.8)
+            command.add_argument("--budget", type=Path)
+            command.add_argument("--synthetic-development", action="store_true")
+        elif name == "benchmark-confirmatory-analyze":
+            command.add_argument("--evidence", type=Path)
+            command.add_argument("--draft-identity")
     for name in (
         "append",
         "validate",
@@ -205,6 +290,9 @@ def main():
                 action="store_true",
                 help="Actual human submission only; identities remain unverified",
             )
+            command.add_argument("--authorize-private-read", action="store_true")
+        elif name == "benchmark-run":
+            command.add_argument("--synthetic-allocation", type=Path)
         if name == "analyze":
             command.add_argument("--seed", type=int, default=0)
     command = commands.add_parser("list")
