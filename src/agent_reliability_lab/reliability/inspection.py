@@ -1,0 +1,206 @@
+"""Read-only retry inspection over persisted operations and sealed model requests."""
+
+from agent_reliability_lab.agent.provenance import verify
+from agent_reliability_lab.evaluation.evidence import normalized_task
+from agent_reliability_lab.mcp.context import receipt_key
+from agent_reliability_lab.mcp.contracts import CreateTaskInput, UpdateTaskInput
+from agent_reliability_lab.opsdesk.fixtures import digest
+from agent_reliability_lab.reliability.context import compare_requests
+from agent_reliability_lab.reliability.diagnostics import observed_trial_gaps
+from agent_reliability_lab.reliability.verification import (
+    logical_commitment,
+    matches_response,
+    operation_attempts,
+)
+
+
+def task_commitment(evidence, operation, proofs, committed):
+    if not committed or operation.get("tool") not in {"create_task", "update_task"}:
+        return False
+    config = (evidence.get("execution") or {}).get("config") or {}
+    try:
+        tool = operation["tool"]
+        key = receipt_key(
+            dict(
+                run=config["sandbox_run_id"],
+                actor=config["actor_id"],
+                tenant=config["tenant_id"],
+                tool=tool,
+                operation=operation["operation_id"],
+            )
+        )
+        model = CreateTaskInput if tool == "create_task" else UpdateTaskInput
+        fingerprint = digest(model.model_validate(operation["arguments"]).model_dump(mode="json"))
+        receipts = [
+            r
+            for r in evidence.get("receipts", [])
+            if (
+                r["idempotency_key"],
+                r["actor_id"],
+                r["tenant_id"],
+                r["operation"],
+                r["request_hash"],
+            )
+            == (key, config["actor_id"], config["tenant_id"], tool, fingerprint)
+        ]
+        if len(receipts) != 1 or (committed.get("receipt_key"), committed.get("proposal_id")) != (
+            key,
+            operation["proposal_id"],
+        ):
+            return False
+        payload = normalized_task(receipts[0]["response"])
+        target = payload.get("task_id")
+        if not target or (tool == "update_task" and operation["arguments"]["task_id"] != target):
+            return False
+        audits = [
+            r
+            for r in evidence.get("audits", [])
+            if (r["actor_id"], r["tenant_id"], r["operation"], r["sequence"])
+            == (config["actor_id"], config["tenant_id"], tool, committed.get("audit_sequence"))
+            and r.get("task_id") == target
+            and normalized_task(r["after"]) == payload
+        ]
+        return len(audits) == 1 and any(
+            proof.attempt["status"] == "succeeded"
+            and matches_response(operation, proof)
+            and isinstance(proof.response.get("data"), dict)
+            and normalized_task(proof.response["data"]) == payload
+            for proof in proofs
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def mutation_observation(evidence, operation, committed):
+    tool = operation["tool"]
+    if tool == "queue_notification":
+        intent = evidence.get("notification_intent")
+        if intent and intent.get("payload_hash") == operation.get("arguments_hash"):
+            return "observed"
+        return "unresolved"
+    config = (evidence.get("execution") or {}).get("config") or {}
+    actor, tenant = config.get("actor_id"), config.get("tenant_id")
+    target = (operation.get("arguments") or {}).get("task_id") or (
+        (operation.get("response") or {}).get("data") or {}
+    ).get("task_id")
+    target_observed = False
+    for audit in evidence.get("audits", []):
+        if (
+            not actor
+            or not tenant
+            or (audit.get("operation"), audit.get("actor_id"), audit.get("tenant_id"))
+            != (tool, actor, tenant)
+        ):
+            continue
+        after = audit.get("after")
+        audit_target = audit.get("task_id")
+        if not audit_target or (after is not None and after.get("task_id") != audit_target):
+            continue
+        if (
+            committed
+            and audit.get("sequence") is not None
+            and audit["sequence"] == committed.get("audit_sequence")
+            and (not target or audit_target == target)
+            and after is not None
+        ):
+            return "observed"
+        target_observed |= bool(target and audit_target == target)
+    return "observed_on_target" if target_observed else "unresolved"
+
+
+def retry_chain(evidence, proposal_id, reconciliation=None):
+    operation = next(
+        (row for row in evidence.get("operations", []) if row.get("proposal_id") == proposal_id),
+        None,
+    )
+    if operation is None or not operation.get("operation_id"):
+        return None
+    operation_id = operation["operation_id"]
+    attempts = sorted(
+        (row for row in evidence.get("attempts", []) if row.get("proposal_id") == proposal_id),
+        key=lambda row: row["ordinal"],
+    )
+    provenance = evidence.get("provenance") or []
+    execution_id = operation["execution_id"]
+    try:
+        verify(provenance, execution_id)
+    except (KeyError, TypeError, ValueError):
+        provenance = []
+    requests = [row for row in provenance if row.get("kind") == "model_started"]
+    completions = [
+        row
+        for row in provenance
+        if row.get("kind") == "model_completed" and row["body"].get("turn") == operation["turn"]
+    ]
+    origins = [
+        row for row in requests if any(c["reference"] == row["reference"] for c in completions)
+    ]
+    original = origins[0]["reference"] if len(origins) == len(completions) == 1 else None
+    adjacent = []
+    if original:
+        index = [row["reference"] for row in requests].index(original)
+        if index:
+            adjacent.append(
+                compare_requests(
+                    provenance,
+                    execution_id,
+                    requests[index - 1]["reference"],
+                    original,
+                )
+            )
+        if index + 1 < len(requests):
+            adjacent.append(
+                compare_requests(
+                    provenance,
+                    execution_id,
+                    original,
+                    requests[index + 1]["reference"],
+                )
+            )
+    committed = (reconciliation or {}).get("committed", {}).get(operation_id)
+    denied = bool(attempts) and all(row.get("effect") == "denied" for row in attempts)
+    try:
+        proofs = operation_attempts(operation, attempts, provenance)
+        lifecycle = logical_commitment(operation, proofs)
+    except (KeyError, TypeError, ValueError) as error:
+        proofs = []
+        lifecycle = "contradictory" if str(error).startswith("contradictory") else "unresolved"
+    contradiction = (
+        "contradictory_records" in observed_trial_gaps({"reconciliation": reconciliation or {}})
+        or bool(committed and denied)
+        or lifecycle == "contradictory"
+    )
+    verified = (
+        (reconciliation or {}).get("complete") is True
+        and lifecycle == "verified"
+        and task_commitment(evidence, operation, proofs, committed)
+    )
+    return {
+        "proposal_id": proposal_id,
+        "logical_operation_id": operation_id,
+        "arguments_hash": operation.get("arguments_hash"),
+        "tool": operation.get("tool"),
+        "logical_status": operation.get("status"),
+        "logical_reconciliation": "contradictory"
+        if contradiction
+        else ("verified" if verified else "unresolved"),
+        "model_requests": [original] if original else [],
+        "context_comparisons": adjacent,
+        "attempts": [
+            {
+                "ordinal": row["ordinal"],
+                "attempt_id": row["attempt_id"],
+                "status": row["status"],
+                "error": row.get("error_code"),
+                "effect": row.get("effect"),
+            }
+            for row in attempts
+        ],
+        "receipt": committed,
+        "mutation_evidence": mutation_observation(evidence, operation, committed),
+        "outcome": "contradictory"
+        if contradiction
+        else ("committed" if verified else "denied" if denied else "unknown"),
+        # Returned task receipts do not tell the host which physical attempt originally committed.
+        "receipt_reuse": "not independently observable" if len(attempts) > 1 else "not applicable",
+    }

@@ -25,6 +25,7 @@ from agent_reliability_lab.agent.errors import BudgetExceeded, ExecutionBusy
 from agent_reliability_lab.agent.journal import EVENTS, Redactor
 from agent_reliability_lab.agent.provenance import seal
 from agent_reliability_lab.agent.state import AgentResult, Decision, ModelCall
+from agent_reliability_lab.mcp.contracts import WRITE_TOOLS
 from agent_reliability_lab.opsdesk.database import _MIGRATION_LOCK, SandboxManager
 from agent_reliability_lab.opsdesk.fixtures import digest
 
@@ -465,9 +466,7 @@ class ExecutionStore:
     ) -> str:
         proposal_id = uuid.uuid5(uuid.UUID(execution_id), f"{turn}:{position}").hex
         operation_id = (
-            uuid.uuid5(uuid.UUID(proposal_id), "write").hex
-            if call.name in {"create_task", "update_task"}
-            else None
+            uuid.uuid5(uuid.UUID(proposal_id), "write").hex if call.name in WRITE_TOOLS else None
         )
         safe_arguments = self.redactor.clean(arguments)
         fingerprint = digest(safe_arguments)

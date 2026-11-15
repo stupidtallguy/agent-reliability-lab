@@ -6,6 +6,7 @@ class MemoryView:
     def __init__(self):
         self.trial_value, result = facts()
         self.trial_value["experiment_id"] = result.experiment_id
+        self.trial_value["execution_id"] = result.execution_id
         self.store = store([(self.trial_value, result)])
         self.document = report(self.store, "a" * 32, evaluator_version="1.7.0")
 

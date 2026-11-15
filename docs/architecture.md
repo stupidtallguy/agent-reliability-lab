@@ -176,3 +176,11 @@ execute agents, alter artifacts or register reviews. `evaluation.downloads` is a
 serializer. `AnalysisRecord` adds a kind to the existing immutable generic artifact
 store, so no database migration is required. Wheel resources include only committed
 synthetic specifications and standalone Compose definitions, never local reports.
+
+## Reliability evidence
+
+The optional notifications MCP domain is restricted to a registered scripted
+reliability sandbox in a disposable database. The synthetic provider runs in a
+separate transaction. See [external effects](external-effects.md) and
+[context drift](context-drift.md). Historical evaluator and renderer versions
+retain their existing scoring and report semantics.

@@ -18,6 +18,7 @@ from agent_reliability_lab.dashboard.design import (
     title_case,
 )
 from agent_reliability_lab.dashboard.evidence import execution_trace, security
+from agent_reliability_lab.dashboard.reliability import demo_workspace, quality
 from agent_reliability_lab.research.views import ResearchView, readonly_engine
 
 PAGES = [
@@ -165,6 +166,9 @@ def render(view=None):
             st.info("No dashboard database is configured. Start the synthetic demo to load data.")
             st.code("uv run --locked --extra stack opsdesk-lab demo", language="shell")
             return
+        if scope.startswith("reliability_"):
+            demo_workspace(view, scope.removeprefix("reliability_"), page)
+            return
         if page in {"Baseline vs Guarded", "Research & Data"}:
             exact_refs([("Research scope", scope)], label="Exact research scope")
             if page == "Baseline vs Guarded":
@@ -201,12 +205,14 @@ def render(view=None):
             with st.spinner("Loading inventory counts…"):
                 counts = view.counts()
             pages.overview(document, counts)
+            quality(document)
         elif page == "Execution Traces":
             execution_trace(view, document)
         elif page == "Security & Attacks":
             security(view, document)
         else:
             pages.reports(document, view)
+            quality(document)
     except SQLAlchemyError:
         st.error("The research database is unavailable. Check the host configuration and service.")
     except (ValueError, KeyError, TypeError):

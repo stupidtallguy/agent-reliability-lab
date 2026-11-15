@@ -237,3 +237,73 @@ def contrast(foreground, background):
 )
 def test_normal_text_color_pairs_meet_aa_contrast(foreground, background):
     assert contrast(foreground, background) >= 4.5
+
+
+def test_reliability_workspace_keeps_report_downloads_and_unknown_distinct(monkeypatch):
+    from agent_reliability_lab.reliability.metrics import metric
+
+    def reliability_reports(self, execution_id, *, on_invalid):
+        assert execution_id == "c" * 32
+        return [
+            {
+                "report_id": "d" * 64,
+                "execution_id": execution_id,
+                "revision": 1,
+                "provider": {
+                    "local_intent": "recorded",
+                    "provider": "accepted",
+                    "delivery": "unknown",
+                },
+                "physical_tool_attempts": 2,
+                "metrics": [metric("external_confirmation", 0, 1, "Synthetic notification")],
+            }
+        ]
+
+    monkeypatch.setenv("OPSDESK_DASHBOARD_SCOPE", "reliability_" + "c" * 32)
+    monkeypatch.setattr(MemoryView, "reliability_reports", reliability_reports, raising=False)
+    at = AppTest.from_function(app).run()
+    at.selectbox(key="lab_mobile_workspace").set_value("Reports & Evaluators").run()
+    assert not at.exception and not at.error
+    assert [item.proto.label for item in at.get("download_button")] == [
+        "Download reliability JSON",
+        "Download reliability CSV",
+        "Download reliability MD",
+    ]
+    assert any(
+        "Delivery" in item.proto.body and "Unknown" in item.proto.body for item in at.get("html")
+    )
+
+
+def test_trial_pairing_uses_exact_pinned_score_among_multiple_revisions():
+    from agent_reliability_lab.opsdesk.fixtures import digest
+    from agent_reliability_lab.research.views import trial_matches_score
+
+    evidence = {"execution_id": "execution", "source_hashes": {"attempts": "sealed"}}
+    trial = {
+        "trial_id": "trial",
+        "execution_id": "execution",
+        "evidence_hash": digest(evidence),
+        "evidence": evidence,
+    }
+    score = {
+        "scoring_id": "first",
+        "trial_id": "trial",
+        "execution_id": "execution",
+        "evidence_reference": "opsdesk-eval://trials/trial/evidence",
+        "evidence_hash": digest(evidence),
+        "reconciliation": {"source_hashes": evidence["source_hashes"]},
+    }
+    second = dict(score, scoring_id="second", evidence_hash="different")
+    manifest = {"report_manifest": {"selected_scores": [dict(score, revision=1)]}}
+    assert trial_matches_score(manifest, score, trial)
+    assert trial_matches_score({}, score, trial)
+    assert not trial_matches_score(manifest, dict(score, scoring_id="second"), trial)
+    assert not trial_matches_score(manifest, second, trial)
+    assert not trial_matches_score(manifest, {**score, "evidence_reference": None}, trial)
+    assert not trial_matches_score(manifest, {**score, "evidence_hash": None}, trial)
+    assert not trial_matches_score(manifest, score, {**trial, "evidence": {**evidence, "x": 1}})
+    both = {
+        "report_manifest": {"selected_scores": [dict(score, revision=1), dict(second, revision=2)]}
+    }
+    assert trial_matches_score(both, score, trial)
+    assert not trial_matches_score(both, second, trial)

@@ -12,10 +12,10 @@ from sqlalchemy.exc import OperationalError
 
 from agent_reliability_lab import __version__
 from agent_reliability_lab.mcp.context import BoundContext, canonical, service_key
-from agent_reliability_lab.mcp.contracts import Domain, Envelope, Provenance
+from agent_reliability_lab.mcp.contracts import WRITE_TOOLS, Domain, Envelope, Provenance
 from agent_reliability_lab.mcp.errors import safe_error, service_error
 from agent_reliability_lab.opsdesk.contracts import Lookup, ServiceError, TaskCreate, TaskUpdate
-from agent_reliability_lab.opsdesk.services import WRITES
+from agent_reliability_lab.reliability.notifications import TOOL, NotificationRequest
 
 logger = logging.getLogger(__name__)
 MAX_ARGUMENT_BYTES = 16 * 1024
@@ -35,7 +35,7 @@ class ToolSpec:
         return Envelope[self.output_model]
 
     def discovery(self) -> types.Tool:
-        write = self.name in WRITES
+        write = self.name in WRITE_TOOLS
         return types.Tool(
             name=self.name,
             description=self.description,
@@ -101,9 +101,13 @@ def build_server(domain: Domain, binding: BoundContext, specs: tuple[ToolSpec, .
         try:
             if spec.lookup_field:
                 request = Lookup(record_id=getattr(request, spec.lookup_field))
-            elif spec.name in WRITES:
+            elif spec.name in WRITE_TOOLS:
                 key = service_key(binding.config, spec.name, arguments, params.meta)
-                model = TaskCreate if spec.name == "create_task" else TaskUpdate
+                model = {
+                    "create_task": TaskCreate,
+                    "update_task": TaskUpdate,
+                    TOOL: NotificationRequest,
+                }[spec.name]
                 request = model.model_validate(
                     {**request.model_dump(exclude_unset=True), "idempotency_key": key}
                 )

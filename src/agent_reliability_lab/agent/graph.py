@@ -18,6 +18,7 @@ from agent_reliability_lab.agent.persistence import ExecutionStore, utcnow
 from agent_reliability_lab.agent.state import AgentState, Decision
 from agent_reliability_lab.agent.tool_adapter import ToolSession, provider_tools
 from agent_reliability_lab.opsdesk.fixtures import digest
+from agent_reliability_lab.reliability.context import fingerprints
 
 PERMANENT = {
     "permission_denied",
@@ -135,6 +136,11 @@ class GraphRuntime:
                         tool_schema_hash=digest(tools),
                         max_output_tokens=self.config.budgets.max_output_tokens,
                         source_commit=self.config.source_commit,
+                        **fingerprints(
+                            state["messages"],
+                            self.config.model,
+                            max_output_tokens=self.config.budgets.max_output_tokens,
+                        ),
                     ),
                 )
                 if self.interceptor:
@@ -310,7 +316,9 @@ class GraphRuntime:
                 response = observation_error("tool_protocol_error")
             # A trusted test hook exercises the commit/acknowledgement crash window.
             if self.after_dispatch:
-                self.after_dispatch(operation, response)
+                replacement = self.after_dispatch(operation, response)
+                if replacement is not None:
+                    response = replacement
             response = self.store.redactor.clean(response)
             if len(json.dumps(response).encode()) > self.config.budgets.max_result_bytes:
                 response = observation_error("response_too_large")

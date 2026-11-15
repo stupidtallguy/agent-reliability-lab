@@ -9,6 +9,7 @@ description = "A reproducible lab for evaluating AI agent reliability, MCP tool 
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+  "cryptography>=50.0.2,<51",
   "pydantic>=2.14.3,<3",
   "sqlalchemy>=2.0.57,<2.1",
   "alembic>=1.20.1,<2",

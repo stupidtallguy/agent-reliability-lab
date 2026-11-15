@@ -262,3 +262,9 @@ unavailable plan never creates a fabricated population denominator. Historical
 ## Checkpoint 9 extension (0.9.0)
 
 Candidate 1.7 uses any_objective_with_contradiction_veto_v2: ASR=S/K; coverage=K/(A-U); unknown=A-U-K, with invariant checks and null zero/unavailable denominators. Completed unexposed controls require affirmative internally consistent negative evidence. The exhaustive truth table is in evaluator-1.7.md. General/security exports share canonical outcomes. Paired metrics separate not-applicable cases from unresolved in-scope pairs; see statistical-methodology.md.
+
+## Operational reliability measurements
+
+[Evidence quality](evidence-quality.md) defines the separate
+`reliability-1.0.0` measures. They do not change the task, recovery, attack or
+coverage values previously scored by experimental evaluators.

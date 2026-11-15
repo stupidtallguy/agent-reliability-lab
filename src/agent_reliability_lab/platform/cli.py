@@ -15,6 +15,7 @@ from agent_reliability_lab import __version__
 from agent_reliability_lab.opsdesk.database import make_engine
 from agent_reliability_lab.platform.containers import compose, inspect_owned
 from agent_reliability_lab.platform.demo import assets, prepare_demo
+from agent_reliability_lab.reliability.attestation import PRIVATE_FILE, generate_key, load_signer
 
 DEMO_URL = "postgresql+psycopg://opsdesk_demo@127.0.0.1:55435/opsdesk_lab_test"
 
@@ -52,6 +53,7 @@ def launch_dashboard(port=8501, *, url=None, scope=None, browser=True):
     from agent_reliability_lab.dashboard.design import streamlit_theme
 
     environment = {**os.environ, **streamlit_theme()}
+    environment.pop(PRIVATE_FILE, None)
     if url:
         environment["OPSDESK_DASHBOARD_DATABASE_URL"] = url
     if scope:
@@ -168,13 +170,18 @@ def main():
     test.add_argument("--unit-only", action="store_true")
     test.add_argument("--workspace", type=Path)
     commands.add_parser("stop-tests")
-    demo = commands.add_parser("demo")
-    demo.add_argument("--workspace", type=Path)
-    demo.add_argument("--output", type=Path, default=Path("artifacts/evaluations"))
-    demo.add_argument("--source-commit")
-    demo.add_argument("--no-ui", action="store_true")
-    demo.add_argument("--port", type=int, default=8501)
+    for name in ("demo", "reliability-demo"):
+        demo = commands.add_parser(name)
+        demo.add_argument("--workspace", type=Path)
+        demo.add_argument("--output", type=Path, default=Path("artifacts/evaluations"))
+        demo.add_argument("--no-ui", action="store_true")
+        demo.add_argument("--port", type=int, default=8501)
+        if name == "demo":
+            demo.add_argument("--source-commit")
     dash = commands.add_parser("dashboard")
+    keys = commands.add_parser("publication-keygen")
+    keys.add_argument("--private-file", type=Path, required=True)
+    keys.add_argument("--trust-dir", type=Path, required=True)
     dash.add_argument("--port", type=int, default=8501)
     dash.add_argument("--no-browser", action="store_true")
     workspace = commands.add_parser("review-workspace")
@@ -199,6 +206,8 @@ def main():
             print(json.dumps(review_workspace(args.output), indent=2))
         elif args.command == "dashboard":
             raise SystemExit(launch_dashboard(args.port, browser=not args.no_browser))
+        elif args.command == "publication-keygen":
+            print(generate_key(args.private_file, args.trust_dir))
         elif args.command == "stop-demo":
             inspect_demo(required=True)
             run_command(
@@ -207,12 +216,19 @@ def main():
             print("Owned temporary demo stopped. Exported evidence reports remain on disk.")
         else:
             root = assets(args.workspace)
+            if args.command == "reliability-demo":
+                load_signer()
             start_demo()
             engine = make_engine(DEMO_URL, allow_sandbox=True)
             try:
-                result = asyncio.run(
-                    prepare_demo(engine, root, args.output, source_commit=args.source_commit)
-                )
+                if args.command == "reliability-demo":
+                    from agent_reliability_lab.reliability.demo import prepare_reliability_demo
+
+                    result = asyncio.run(prepare_reliability_demo(engine, args.output))
+                else:
+                    result = asyncio.run(
+                        prepare_demo(engine, root, args.output, source_commit=args.source_commit)
+                    )
             finally:
                 engine.dispose()
             print(json.dumps(result, indent=2))

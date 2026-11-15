@@ -144,3 +144,7 @@ Exports go under ignored `artifacts/`. Dashboard downloads perform no database w
 The v1.0.0 scope is a local software release. Research-study approval, held-out
 generalization, live-model reliability, and production authentication remain outside
 the validated scope.
+
+## Reliability lab
+
+Configure a local publication identity using the [demo guide](docs/reliability-demo.md), then run `uv run --locked --extra stack opsdesk-lab reliability-demo` to inspect a committed local notification, a retried tool call and separately verified delivery. See the [reliability contracts](docs/reliability-contracts.md).

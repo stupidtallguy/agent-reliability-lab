@@ -1,7 +1,11 @@
 """PostgreSQL lifecycle, integrity, authorization and transaction behavior."""
 
 import copy
+import os
+import subprocess
+import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
@@ -224,6 +228,107 @@ def test_idempotent_create_update_and_conflicting_reuse(sandbox) -> None:
     result = service.update_task(SUPPORT, update)
     assert service.update_task(SUPPORT, update) == result
     assert counts(sandbox) == (5, 2, 2)
+
+
+def test_retry_waits_for_uncommitted_receipt_then_reuses_it(sandbox, monkeypatch):
+    service = OpsDeskService(sandbox)
+    request = create_request()
+    written = threading.Event()
+    release = threading.Event()
+    original = service._finish
+
+    def hold_before_commit(*args):
+        result = original(*args)
+        written.set()
+        assert release.wait(8)
+        return result
+
+    monkeypatch.setattr(service, "_finish", hold_before_commit)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        first = pool.submit(service.create_task, SUPPORT, request)
+        assert written.wait(5)
+        retries = [pool.submit(service.create_task, SUPPORT, request) for _ in range(5)]
+        try:
+            with sandbox.engine.connect() as connection:
+                until = time.monotonic() + 5
+                while time.monotonic() < until:
+                    waiting = connection.scalar(
+                        sa.text(
+                            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+                            "AND query LIKE :query"
+                        ),
+                        {"query": f"%{sandbox.schema}.sandbox_identity%FOR UPDATE%"},
+                    )
+                    if waiting:
+                        break
+                    connection.rollback()  # Statistics snapshots are transaction-scoped.
+                    time.sleep(0.02)
+                assert waiting > 0
+        finally:
+            release.set()
+        assert all(retry.result() == first.result() for retry in retries)
+    assert counts(sandbox) == (5, 1, 1)
+
+
+def test_process_death_before_commit_allows_one_fresh_retry(sandbox):
+    run = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import os
+import sys
+from tests.integration.test_postgres import SUPPORT, create_request
+from agent_reliability_lab.opsdesk.database import SandboxManager, engine_from_env
+from agent_reliability_lab.opsdesk.services import OpsDeskService
+service = OpsDeskService(SandboxManager(engine_from_env()).open(sys.argv[1]))
+finish = service._finish
+def exit_before_commit(*args):
+    finish(*args)
+    os._exit(29)
+service._finish = exit_before_commit
+service.create_task(SUPPORT, create_request())
+""",
+            sandbox.run_id,
+        ],
+        cwd=ROOT,
+        env=os.environ.copy(),
+        capture_output=True,
+        timeout=20,
+    )
+    assert run.returncode == 29, run.stderr.decode()
+    assert counts(sandbox) == (4, 0, 0)
+    service = OpsDeskService(sandbox)
+    assert service.create_task(SUPPORT, create_request()) == service.create_task(
+        SUPPORT, create_request()
+    )
+    assert counts(sandbox) == (5, 1, 1)
+
+
+def test_same_key_in_distinct_tenants_and_denied_replay(sandbox):
+    with sandbox.transaction() as (connection, _):
+        connection.execute(
+            t.actors.update()
+            .where(t.actors.c.actor_id == "viewer_other")
+            .values(role="support_agent")
+        )
+    service = OpsDeskService(sandbox)
+    other = ActorContext(actor_id="viewer_other", tenant_id="otherdesk")
+    first = service.create_task(SUPPORT, create_request())
+    request = TaskCreate(
+        customer_id="customer_other", title="Other tenant", idempotency_key="create_01"
+    )
+    second = service.create_task(other, request)
+    assert first.task_id != second.task_id
+    assert service.create_task(other, request) == second
+    with sandbox.transaction() as (connection, _):
+        connection.execute(
+            t.actors.update().where(t.actors.c.actor_id == other.actor_id).values(role="viewer")
+        )
+    with pytest.raises(ServiceError) as denied:
+        service.create_task(other, request)
+    assert denied.value.detail.code == "unauthorized"
+    assert counts(sandbox) == (6, 2, 2)
 
 
 def test_version_conflict_rolls_back(sandbox) -> None:
@@ -502,3 +607,11 @@ def test_unsupported_transition_is_rejected_even_for_supervisor(sandbox) -> None
         OpsDeskService(sandbox).update_task(SUPERVISOR, update_request("task_003", status="open"))
     assert caught.value.detail.code == "invalid_arguments"
     assert sandbox.snapshot() == before
+
+
+def test_identical_arguments_with_independent_keys_are_separate_writes(sandbox):
+    service = OpsDeskService(sandbox)
+    first = service.create_task(SUPPORT, create_request(key="separate_a"))
+    second = service.create_task(SUPPORT, create_request(key="separate_b"))
+    assert first.task_id != second.task_id
+    assert counts(sandbox) == (6, 2, 2)

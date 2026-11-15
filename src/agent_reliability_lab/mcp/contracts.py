@@ -8,7 +8,8 @@ from pydantic import BaseModel, create_model, model_validator
 from agent_reliability_lab.benchmarks.scenario import Contract, Identifier
 from agent_reliability_lab.opsdesk.contracts import TaskCreate, TaskUpdate
 
-Domain = Literal["documents", "business", "tasks"]
+Domain = Literal["documents", "business", "tasks", "notifications"]
+WRITE_TOOLS = frozenset({"create_task", "update_task", "queue_notification"})
 
 
 class DocumentLookup(Contract):
