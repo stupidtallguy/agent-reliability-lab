@@ -225,6 +225,7 @@ class BenchmarkRun(Artifact):
     protocol: Reference
     schedule_hash: Hash
     allocation: Reference | None = Field(default=None, exclude_if=lambda value: value is None)
+    pilot: Reference | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class BenchmarkResult(Artifact):

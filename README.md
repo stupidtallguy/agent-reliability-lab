@@ -108,6 +108,10 @@ request. Held-out execution remains disabled.
 CP14 adds [confirmatory allocation, preflight, and evidence reconstruction](docs/checkpoint-14-confirmatory-preflight.md).
 Its analysis path is verified using scripted development runs.
 
+CP15 adds an [offline development feasibility pilot](docs/checkpoint-15-live-development-pilot.md)
+with PostgreSQL budget reservations, restart-safe usage reconciliation, and score-pinned
+reports. The pilot uses a synthetic provider fixture. Paid execution stays disabled.
+
 The research workflow includes composite dataset releases, preregistrations and
 amendments, pairing, and family-aware analysis. The optional Oracle Review workspace
 remains available. See the [preregistration draft](docs/preregistration-draft.md) and
