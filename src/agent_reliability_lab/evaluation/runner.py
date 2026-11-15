@@ -141,6 +141,8 @@ class ScenarioRunner:
     ) -> str:
         if not paths:
             raise ValueError("at least one scenario path is required")
+        if benchmark_context is not None and (live or config.model.provider != "fake"):
+            raise ValueError("live model execution is disabled in benchmark mode")
         if demonstration and (config.model.provider != "fake" or config.study is not None):
             raise ValueError("a demonstration must use scripted infrastructure validation")
         if config.model.provider == "openai" and (

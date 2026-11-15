@@ -220,6 +220,12 @@ def parse_artifact(value):
             )
 
             model = CP14_CONTRACTS.get(kind)
+        if model is None:
+            from agent_reliability_lab.research.pilot_contracts import PilotPlan, PilotReport
+
+            model = {"benchmark_pilot_plan": PilotPlan, "benchmark_pilot_report": PilotReport}.get(
+                kind
+            )
     if model is None:
         raise ValueError("unsupported research artifact kind")
     return model.model_validate_json(json.dumps(value))

@@ -188,6 +188,13 @@ def run_inputs(store, run):
     slots, catalog = schedule(dataset, protocol)
     if digest(slots) != run.schedule_hash:
         raise ValueError("frozen benchmark schedule hash mismatch")
+    if run.pilot is not None:
+        from agent_reliability_lab.research.pilot import validate_plan
+
+        plan = store.get(run.pilot)
+        validate_plan(store, plan)
+        if plan.protocol != run.protocol or plan.mode != "offline_fixture" or run.allocation:
+            raise ValueError("pilot run and frozen development schedule differ")
     if run.allocation is not None:
         from agent_reliability_lab.research.confirmatory import verify_allocation
 
@@ -236,6 +243,14 @@ def validate_references(store, artifact, *, authorized_private_read=False):
         from agent_reliability_lab.research.confirmatory_analysis import verify_analysis
 
         verify_analysis(store, artifact, authorized=authorized_private_read)
+    elif artifact.kind == "benchmark_pilot_plan":
+        from agent_reliability_lab.research.pilot import validate_plan
+
+        validate_plan(store, artifact)
+    elif artifact.kind == "benchmark_pilot_report":
+        from agent_reliability_lab.research.pilot import verify_pilot_report
+
+        verify_pilot_report(store, artifact)
     else:
         from agent_reliability_lab.research.heldout_design import validate_design_references
 
@@ -488,7 +503,7 @@ def verify_result(store, artifact):
     return actual
 
 
-async def execute_benchmark(store, protocol_ref, *, allocation_ref=None):
+async def execute_benchmark(store, protocol_ref, *, allocation_ref=None, pilot_ref=None):
     if os.environ.get("OPSDESK_TEST_OWNED") != "1":
         raise ValueError("CP12 runs require an explicitly owned synthetic database")
     protocol = store.get(protocol_ref)
@@ -499,6 +514,13 @@ async def execute_benchmark(store, protocol_ref, *, allocation_ref=None):
     runtime = provenance(ExperimentConfig(experimental_evaluator=protocol.evaluator_version))
     if not _source_matches(protocol, runtime):
         raise ValueError("checked-out source or dependency lock differs from preregistration")
+    model_factory_for = None
+    if pilot_ref is not None:
+        from agent_reliability_lab.research.pilot import open_pilot
+
+        if allocation_ref is not None:
+            raise ValueError("pilot execution does not accept a confirmatory allocation")
+        model_factory_for = open_pilot(store, pilot_ref, protocol_ref)
     run = BenchmarkRun(
         identity="run_" + uuid.uuid4().hex,
         author=protocol.author,
@@ -506,6 +528,7 @@ async def execute_benchmark(store, protocol_ref, *, allocation_ref=None):
         protocol=protocol_ref,
         schedule_hash=digest(slots),
         allocation=allocation_ref,
+        pilot=pilot_ref,
     )
     run_ref = store.append(run)
     runner = ScenarioRunner(store.engine)
@@ -521,6 +544,9 @@ async def execute_benchmark(store, protocol_ref, *, allocation_ref=None):
                     [path],
                     _config(protocol, spec, arm, pair_id),
                     benchmark_context=_context(run_ref, run, protocol, slot, arm),
+                    model_factory=model_factory_for(run_ref, slot["slot"], arm)
+                    if model_factory_for
+                    else None,
                 )
                 (trial,) = runner.store.list_trials(experiment_id=identifier)
                 (scoring,) = runner.store.scores(trial["trial_id"])
