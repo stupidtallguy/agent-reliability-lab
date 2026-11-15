@@ -6,7 +6,6 @@ import json
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from functools import partial
 
 from agent_reliability_lab.agent.provenance import verify_projection
 from agent_reliability_lab.evaluation.contracts import Evidence, ModelPrice, PriceBook
@@ -147,10 +146,10 @@ def open_pilot(store, plan_ref, protocol_ref):
     broker.open(plan, arms)
     by_arm = {(arm.slot, arm.arm): arm for arm in arms}
 
-    def model_factory(run_ref, slot, arm):
-        return partial(OfflinePilotModel, broker, plan, by_arm[(slot, arm)], run_ref)
+    def make_model(run_ref, slot, arm, script_config):
+        return OfflinePilotModel(broker, plan, by_arm[(slot, arm)], run_ref, script_config)
 
-    return model_factory
+    return make_model
 
 
 def _verify_request(evidence, calls):

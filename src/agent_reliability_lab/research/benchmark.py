@@ -514,13 +514,13 @@ async def execute_benchmark(store, protocol_ref, *, allocation_ref=None, pilot_r
     runtime = provenance(ExperimentConfig(experimental_evaluator=protocol.evaluator_version))
     if not _source_matches(protocol, runtime):
         raise ValueError("checked-out source or dependency lock differs from preregistration")
-    model_factory_for = None
+    pilot_model_for = None
     if pilot_ref is not None:
         from agent_reliability_lab.research.pilot import open_pilot
 
         if allocation_ref is not None:
             raise ValueError("pilot execution does not accept a confirmatory allocation")
-        model_factory_for = open_pilot(store, pilot_ref, protocol_ref)
+        pilot_model_for = open_pilot(store, pilot_ref, protocol_ref)
     run = BenchmarkRun(
         identity="run_" + uuid.uuid4().hex,
         author=protocol.author,
@@ -540,13 +540,17 @@ async def execute_benchmark(store, protocol_ref, *, allocation_ref=None, pilot_r
             path.write_text(spec.case.model_dump_json(), encoding="utf-8")
             pair_id = digest([run_ref.content_hash, slot["slot"]])[:32]
             for arm in slot["order"]:
+                pilot_model = None
+                if pilot_model_for is not None:
+                    script_config = protocol.model.model_copy(
+                        update={"script": protocol.scripts[spec.scenario_id]}
+                    )
+                    pilot_model = pilot_model_for(run_ref, slot["slot"], arm, script_config)
                 identifier = await runner.run(
                     [path],
                     _config(protocol, spec, arm, pair_id),
                     benchmark_context=_context(run_ref, run, protocol, slot, arm),
-                    model_factory=model_factory_for(run_ref, slot["slot"], arm)
-                    if model_factory_for
-                    else None,
+                    benchmark_model=pilot_model,
                 )
                 (trial,) = runner.store.list_trials(experiment_id=identifier)
                 (scoring,) = runner.store.scores(trial["trial_id"])

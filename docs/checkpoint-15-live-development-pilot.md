@@ -18,7 +18,7 @@ flowchart LR
   S --> V
 ```
 
-The pilot plan pins the exact CP12 protocol and schedule hash, exact requested provider and model configuration, model allowlist, versioned USD pricing manifest, ledger ID, and all capacity limits. Amendments must link the previous plan and use a new ledger. Each supported pilot opens a ledger once. The brokered adapter joins the sealed model request to its actual execution, registered trial, sandbox, actor, tenant, schedule slot, and arm before admission. A direct adapter call without a sealed request is rejected. The general evaluation runner also rejects the legacy live flag when given benchmark context.
+The pilot plan pins the exact CP12 protocol and schedule hash, exact requested provider and model configuration, model allowlist, versioned USD pricing manifest, ledger ID, and all capacity limits. Amendments must link the previous plan and use a new ledger. Each supported pilot opens a ledger once. The brokered adapter joins the sealed model request to its actual execution, registered trial, sandbox, actor, tenant, schedule slot, and arm before admission. A direct adapter call without a sealed request is rejected. The evaluation runner also rejects the legacy live flag and arbitrary model factories when given benchmark context.
 
 ## Reservation and recovery
 

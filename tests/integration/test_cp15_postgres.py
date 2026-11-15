@@ -81,8 +81,18 @@ def call(plan, arm, **overrides):
     )
 
 
-def test_competition_for_last_budget_unit_has_one_winner(pilot_factory):
-    store, plan = pilot_factory(total_calls=1)
+@pytest.mark.parametrize("limit", ["calls", "usd"])
+def test_competition_for_last_budget_unit_has_one_winner(pilot_factory, limit):
+    store, plan = pilot_factory(total_calls=1 if limit == "calls" else 6)
+    if limit == "usd":
+        plan.limits = plan.limits.model_copy(
+            update=dict(
+                maximum_usd=plan.price_ceiling(
+                    plan.limits.maximum_input_tokens,
+                    validate_plan(store, plan)[0].maximum_output_tokens,
+                )
+            )
+        )
     broker, arm = open_ledger(store, plan)
     contenders = [call(plan, arm) for _ in range(6)]
     barrier = Barrier(len(contenders))
@@ -97,7 +107,7 @@ def test_competition_for_last_budget_unit_has_one_winner(pilot_factory):
 
     with ThreadPoolExecutor(max_workers=len(contenders)) as workers:
         results = list(workers.map(attempt, contenders))
-    assert results.count("pilot_provider_calls") == 5
+    assert results.count("pilot_provider_calls" if limit == "calls" else "pilot_usd") == 5
     (reservation,) = broker.snapshot()
     assert reservation["attempt_id"] in results
     winner = next(

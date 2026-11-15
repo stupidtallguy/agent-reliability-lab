@@ -114,3 +114,19 @@ def test_benchmark_runner_rejects_direct_openai_adapter_even_with_legacy_opt_in(
     config = ExperimentConfig(model=ModelConfig(provider="openai", model_id="mock-v1"))
     with pytest.raises(ValueError, match="disabled in benchmark mode"):
         asyncio.run(runner.run([Path("never-read.json")], config, live=True, benchmark_context={}))
+
+
+def test_benchmark_runner_rejects_an_unbrokered_model_factory_before_invoking_it():
+    def forbidden(_):
+        pytest.fail("benchmark started a model factory outside the broker")
+
+    runner = object.__new__(ScenarioRunner)
+    with pytest.raises(ValueError, match="arbitrary model factories are disabled"):
+        asyncio.run(
+            runner.run(
+                [Path("never-read.json")],
+                ExperimentConfig(),
+                model_factory=forbidden,
+                benchmark_context={},
+            )
+        )
