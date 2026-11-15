@@ -39,6 +39,10 @@ CHECKS = (
 )
 
 
+class CatalogUnavailable(ValueError):
+    """The opted-in private catalog could not be read."""
+
+
 def _git(root, *args):
     return subprocess.run(
         ["git", "-C", str(root), *args], capture_output=True, check=False, timeout=15
@@ -71,7 +75,7 @@ def _unique_keys(items):
 def _private_path():
     setting = os.environ.get(PRIVATE_ENV)
     if not setting:
-        raise ValueError("private catalog path is not configured")
+        raise CatalogUnavailable("private catalog path is not configured")
     path = Path(setting).resolve(strict=True)
     if not path.is_file() or not path.name.lower().endswith(PRIVATE_SUFFIX):
         raise ValueError("private catalog must use its dedicated file suffix")
@@ -98,7 +102,7 @@ def load_catalog(seal, *, authorized=False):
         with _private_path().open("rb") as source:
             data = source.read(MAX_BYTES + 1)
     except (OSError, RuntimeError, subprocess.SubprocessError):
-        raise ValueError("private catalog could not be safely opened") from None
+        raise CatalogUnavailable("private catalog could not be safely opened") from None
     if len(data) > MAX_BYTES:
         raise ValueError("private catalog exceeds the size limit")
     if not hmac.compare_digest(hashlib.sha256(data).hexdigest(), seal.artifact_sha256):
@@ -332,6 +336,13 @@ def _exact_text(left, right, minimum):
 
 def _findings(a, b, policy):
     same_partition = a.partition == b.partition
+    within_heldout = (
+        same_partition and a.partition == "held_out" and policy.audit_version == "1.1.0"
+    )
+    cross_templates = within_heldout and not a.families & b.families
+    cross_attacks = within_heldout and (
+        a.attack_families and b.attack_families and not a.attack_families & b.attack_families
+    )
     flags = {
         "scenario_identity": a.identity == b.identity,
         "exact_content": a.content_hash == b.content_hash,
@@ -344,10 +355,11 @@ def _findings(a, b, policy):
         "template": not same_partition and bool(a.templates & b.templates),
         "template_family": not same_partition and bool(a.families & b.families),
         "attack_family": not same_partition and bool(a.attack_families & b.attack_families),
-        "reused_attack_payload": not same_partition and _exact_text(a.attacks, b.attacks, 0),
+        "reused_attack_payload": (not same_partition or cross_attacks)
+        and _exact_text(a.attacks, b.attacks, 0),
     }
     findings = [{"check": name} for name, enabled in flags.items() if enabled]
-    if same_partition:
+    if same_partition and not cross_templates:
         return findings
     text_pairs = [(a.request, b.request), *((x, y) for x in a.attacks for y in b.attacks)]
     scores = [
@@ -364,7 +376,7 @@ def _findings(a, b, policy):
     return findings
 
 
-def audit_catalog(catalog, public, seal, policy):
+def audit_catalog(catalog, public, seal, policy, *, include_inventory=False):
     profiles = {_profile_hash(item): item for item in public}
     if digest(sorted(profiles)) != seal.comparison_hash:
         raise ValueError("frozen development/training comparison fingerprint mismatch")
@@ -412,7 +424,7 @@ def audit_catalog(catalog, public, seal, policy):
         if a.identity in b.lineage or (i >= len(public) and b.identity in a.lineage):
             record({"check": "metadata"}, i, j)
     accepted = [case for i, case in enumerate(private, len(public)) if i not in excluded]
-    return dict(
+    report = dict(
         audit_version=policy.audit_version,
         benchmark_version=seal.benchmark_version,
         dataset_fingerprint=seal.artifact_sha256,
@@ -437,3 +449,17 @@ def audit_catalog(catalog, public, seal, policy):
         human_review="not_performed",
         execution="disabled",
     )
+    if include_inventory:
+        report["eligible_inventory"] = sorted(
+            (
+                dict(
+                    cluster=digest([catalog.nonce, "template-family", next(iter(case.families))]),
+                    scenario=labels[i],
+                    origin=case.origin,
+                )
+                for i, case in enumerate(private, len(public))
+                if i not in excluded
+            ),
+            key=lambda row: (row["cluster"], row["scenario"]),
+        )
+    return report

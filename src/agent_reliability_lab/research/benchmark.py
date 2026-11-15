@@ -188,10 +188,22 @@ def run_inputs(store, run):
     slots, catalog = schedule(dataset, protocol)
     if digest(slots) != run.schedule_hash:
         raise ValueError("frozen benchmark schedule hash mismatch")
+    if run.allocation is not None:
+        from agent_reliability_lab.research.confirmatory import verify_allocation
+
+        allocation = store.get(run.allocation)
+        if (
+            allocation.kind != "benchmark_allocation"
+            or allocation.source != "synthetic_development"
+        ):
+            raise ValueError("held-out execution is disabled")
+        _, confirmatory, _ = verify_allocation(store, allocation)
+        if confirmatory.development_protocol != run.protocol:
+            raise ValueError("synthetic run and allocation development protocols differ")
     return protocol, dataset, slots, catalog
 
 
-def validate_references(store, artifact):
+def validate_references(store, artifact, *, authorized_private_read=False):
     if artifact.kind == "benchmark_dataset":
         if any(item.partition == "held_out" for item in artifact.cases):
             raise ValueError("held-out stimuli must remain in a sealed private catalog")
@@ -216,6 +228,14 @@ def validate_references(store, artifact):
         run_inputs(store, artifact)
     elif artifact.kind == "benchmark_result":
         verify_result(store, artifact)
+    elif artifact.kind == "benchmark_allocation":
+        from agent_reliability_lab.research.confirmatory import verify_allocation
+
+        verify_allocation(store, artifact, authorized=authorized_private_read)
+    elif artifact.kind == "benchmark_confirmatory_analysis":
+        from agent_reliability_lab.research.confirmatory_analysis import verify_analysis
+
+        verify_analysis(store, artifact, authorized=authorized_private_read)
     else:
         from agent_reliability_lab.research.heldout_design import validate_design_references
 
@@ -276,6 +296,14 @@ def _arm_evidence(store, report_id, expected, protocol, spec, pairing_id):
     trial = store.evaluations.trial(result.trial_id)
     pin = document["report_manifest"]["selected_scores"][0]
     scored_capture = result.eligible or result.evidence_hash is not None
+    actual_revision = next(
+        (
+            revision
+            for revision, score in enumerate(store.evaluations.scores(trial["trial_id"]), 1)
+            if score.scoring_id == result.scoring_id
+        ),
+        None,
+    )
     if (
         result.experiment_id != document["experiment_id"]
         or trial["experiment_id"] != result.experiment_id
@@ -289,6 +317,7 @@ def _arm_evidence(store, report_id, expected, protocol, spec, pairing_id):
         or pin["scoring_id"] != result.scoring_id
         or pin["trial_id"] != trial["trial_id"]
         or pin["revision"] != document["selection"]["revisions"].get(result.scoring_id)
+        or pin["revision"] != actual_revision
         or result.execution_id != trial["execution_id"]
         or (
             scored_capture
@@ -328,13 +357,19 @@ def _arm_evidence(store, report_id, expected, protocol, spec, pairing_id):
     )
 
 
-def build_result(store, run_ref, report_ids):
+def build_result(store, run_ref, report_ids, *, partial=False):
     run = store.get(run_ref)
     if run.kind != "benchmark_run":
         raise ValueError("benchmark result requires a frozen run")
     protocol, dataset, slots, catalog = run_inputs(store, run)
     expected_keys = {slot["slot"] + ":" + arm for slot in slots for arm in protocol.arms}
-    if set(report_ids) != expected_keys or len(set(report_ids.values())) != len(expected_keys):
+    if (
+        partial
+        and (run.allocation is None or not set(report_ids) <= expected_keys)
+        or not partial
+        and set(report_ids) != expected_keys
+        or len(set(report_ids.values())) != len(report_ids)
+    ):
         raise ValueError("each planned arm must have exactly one distinct evaluator report")
     rows, units, scores = [], [], []
     for slot in slots:
@@ -342,9 +377,12 @@ def build_result(store, run_ref, report_ids):
         arms = {}
         pair_id = digest([run_ref.content_hash, slot["slot"]])[:32]
         for arm in protocol.arms:
+            report_id = report_ids.get(slot["slot"] + ":" + arm)
+            if report_id is None:
+                continue
             result, item = _arm_evidence(
                 store,
-                report_ids[slot["slot"] + ":" + arm],
+                report_id,
                 _context(run_ref, run, protocol, slot, arm),
                 protocol,
                 spec,
@@ -352,6 +390,26 @@ def build_result(store, run_ref, report_ids):
             )
             arms[arm] = item
             scores.append(result)
+        if len(arms) < 2:
+            rows.append(
+                dict(
+                    **slot,
+                    arms=arms,
+                    comparison="incomplete",
+                    criteria={},
+                    exclusion="selected_evidence_missing",
+                )
+            )
+            units.extend(
+                dict(
+                    pair_id=slot["slot"],
+                    verified=False,
+                    baseline_trial_id=arm["trial_id"],
+                    baseline_execution_id=arm["execution_id"],
+                )
+                for arm in arms.values()
+            )
+            continue
         left, right = (arms[arm] for arm in protocol.arms)
 
         comparison, criteria, reason = verify_pair(
@@ -415,7 +473,7 @@ def build_result(store, run_ref, report_ids):
         order_seed=protocol.order_seed,
         budgets=protocol.budgets.model_dump(mode="json"),
         pairs=rows,
-        summary=summarize_pairs(rows, protocol.statistics),
+        summary=None if partial else summarize_pairs(rows, protocol.statistics),
     )
 
 
@@ -430,7 +488,7 @@ def verify_result(store, artifact):
     return actual
 
 
-async def execute_benchmark(store, protocol_ref):
+async def execute_benchmark(store, protocol_ref, *, allocation_ref=None):
     if os.environ.get("OPSDESK_TEST_OWNED") != "1":
         raise ValueError("CP12 runs require an explicitly owned synthetic database")
     protocol = store.get(protocol_ref)
@@ -447,6 +505,7 @@ async def execute_benchmark(store, protocol_ref):
         created_at=datetime.now(UTC),
         protocol=protocol_ref,
         schedule_hash=digest(slots),
+        allocation=allocation_ref,
     )
     run_ref = store.append(run)
     runner = ScenarioRunner(store.engine)

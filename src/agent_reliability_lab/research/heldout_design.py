@@ -88,7 +88,7 @@ def draft_design(store, reference, identity, artifact_sha256, count, power):
     return {"catalog-seal": seal, "confirmatory-protocol": protocol, "analysis-plan": analysis}
 
 
-def audit_registered(store, protocol_ref, *, authorized=False):
+def audit_registered(store, protocol_ref, *, authorized=False, include_inventory=False):
     if not authorized:
         raise ValueError("private catalog access requires explicit authorization")
     protocol = _get(store, protocol_ref, "benchmark_confirmatory_protocol")
@@ -99,7 +99,11 @@ def audit_registered(store, protocol_ref, *, authorized=False):
     if comparison_fingerprint(public) != seal.comparison_hash:
         raise ValueError("frozen development/training comparison fingerprint mismatch")
     report = audit_catalog(
-        load_catalog(seal, authorized=authorized), public, seal, protocol.leakage
+        load_catalog(seal, authorized=authorized),
+        public,
+        seal,
+        protocol.leakage,
+        include_inventory=include_inventory,
     )
     report["protocol"] = protocol_ref.model_dump(mode="json")
     report["catalog"] = protocol.catalog.model_dump(mode="json")

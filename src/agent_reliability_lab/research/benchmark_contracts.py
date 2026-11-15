@@ -224,6 +224,7 @@ class BenchmarkRun(Artifact):
     version: Literal[1] = 1
     protocol: Reference
     schedule_hash: Hash
+    allocation: Reference | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class BenchmarkResult(Artifact):

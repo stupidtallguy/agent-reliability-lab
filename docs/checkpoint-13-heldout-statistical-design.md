@@ -154,7 +154,7 @@ Run the public-safe checks with Python 3.11 or 3.12.
 ```sh
 uv sync --locked --extra stack
 uv run --locked opsdesk-research benchmark-guard
-uv run --locked opsdesk-research benchmark-power benchmarks/research/example-cp13-power.json
+uv run --locked opsdesk-research benchmark-power benchmarks/research/example-cp13-power.json --historical-cp13
 uv run --locked pytest -q tests/test_cp13.py -m 'not integration'
 ```
 
