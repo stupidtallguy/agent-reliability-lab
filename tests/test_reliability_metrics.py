@@ -187,3 +187,38 @@ def test_local_inventory_constrains_terminal_chain(
     assert metrics["duplicate_effect"]["value"] == duplicate
     if mutations in (0, None):
         assert metrics["external_confirmation"]["value"] == 0
+
+
+@pytest.mark.parametrize(
+    ("mutations", "receipt", "deduplication", "contradiction"),
+    [
+        (0, True, None, 1),
+        (2, True, None, 1),
+        (None, True, None, 0),
+        (1, False, None, 1),
+        (1, None, None, 0),
+        (1, True, 1, 0),
+    ],
+)
+def test_deduplication_requires_one_mutation_and_a_reconciled_receipt(
+    mutations, receipt, deduplication, contradiction
+):
+    rows = notification_metrics(
+        {
+            "notification_id": "n",
+            "delivery": "unknown",
+            "local_intent": "recorded",
+            "acknowledged": True,
+        },
+        operation_id="op",
+        mutation_count=mutations,
+        receipt_reconciled=receipt,
+        attempt_observations=[Observation("retry", True)],
+        faults=[Observation("fault", True)],
+        conflicts=[],
+        dispatched=True,
+    )
+    by_name = {row["name"]: row for row in rows}
+    assert by_name["retry_deduplication"]["value"] == deduplication
+    assert by_name["verified_recovery"]["value"] == deduplication
+    assert by_name["contradiction"]["value"] == contradiction

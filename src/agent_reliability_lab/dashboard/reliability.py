@@ -34,6 +34,8 @@ def retry_panel(chain):
             ("Tool", chain.get("tool")),
             ("Logical operation", short_ref(chain["logical_operation_id"])),
             ("Commitment", title_case(chain["outcome"])),
+            ("Logical status", title_case(chain.get("logical_status"))),
+            ("Logical reconciliation", title_case(chain.get("logical_reconciliation"))),
             ("Underlying mutation", title_case(chain.get("mutation_evidence"))),
             ("Receipt reuse", chain["receipt_reuse"]),
         ]
@@ -98,7 +100,10 @@ def retry_inspector(evidence, score):
 
 
 def demo_workspace(view, execution, page):
-    documents = view.reliability_reports(execution)
+    documents = view.reliability_reports(
+        execution,
+        on_invalid=lambda: st.error("A report or its successor could not be authenticated."),
+    )
     if not documents:
         st.info("This execution has no saved synthetic reliability report.")
         return
@@ -131,6 +136,15 @@ def demo_workspace(view, execution, page):
                     mime,
                 )
         return
+    if getattr(chosen, "verification", None) == "verified":
+        if chosen.current_state == "current":
+            st.caption("Authenticated publication · Current sources match")
+        else:
+            st.caption("Authenticated historical publication")
+            if chosen.current_state == "inconsistent":
+                st.warning("Current evidence is inconsistent with this frozen publication.")
+            elif chosen.current_state == "historical":
+                st.caption("Additional provider evidence is now available.")
     fields(
         [
             ("Local intent", title_case(chosen["provider"]["local_intent"])),

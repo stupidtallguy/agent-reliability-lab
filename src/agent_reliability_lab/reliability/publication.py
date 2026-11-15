@@ -7,7 +7,7 @@ from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.reliability import notifications as n
 from agent_reliability_lab.reliability.inspection import retry_chain
 from agent_reliability_lab.reliability.metrics import Observation, notification_metrics
-from agent_reliability_lab.reliability.verification import operation_attempts
+from agent_reliability_lab.reliability.verification import logical_commitment, operation_attempts
 
 
 def select_chain(connection, execution, operation, identifier, key):
@@ -56,6 +56,9 @@ def canonical_metrics(document, snapshot, operation, records):
     provider = document["provider"]
     local = snapshot["local"]
     proofs = operation_attempts(operation, snapshot["attempts"], records)
+    lifecycle = logical_commitment(operation, proofs)
+    if lifecycle != "verified":
+        raise ValueError(f"{lifecycle} logical operation lifecycle")
     exported = document["retry"]
     observed = [
         {k: row[k] for k in ("ordinal", "attempt_id", "status", "effect")}
@@ -65,6 +68,8 @@ def canonical_metrics(document, snapshot, operation, records):
     intent = local["intent"]
     binding = document["execution_evidence"]
     receipt = exported.get("receipt") or {}
+    execution = snapshot["execution"]
+    config = execution["config"]
     if (
         observed != exported.get("attempts")
         or len(observed) != document.get("physical_tool_attempts")
@@ -76,6 +81,10 @@ def canonical_metrics(document, snapshot, operation, records):
         or exported.get("outcome") != "committed"
         or exported.get("arguments_hash") != operation["arguments_hash"]
         or intent["receipt"] != operation["response"]["data"]
+        or intent["marker"] != execution["context"]["marker"]
+        or intent["run_id"] != config["sandbox_run_id"]
+        or intent["actor_id"] != config["actor_id"]
+        or intent["tenant_id"] != config["tenant_id"]
         or intent["operation_key"] != binding["operation_key"]
         or intent["payload_hash"] != operation["arguments_hash"]
         or intent["notification_id"] != provider["notification_id"]
@@ -124,9 +133,11 @@ def canonical_metrics(document, snapshot, operation, records):
     if any(
         value != exported.get(key)
         for key, value in projected.items()
-        if key not in {"outcome", "receipt_reuse"}
+        if key not in {"outcome", "receipt_reuse", "logical_reconciliation"}
     ):
         raise ValueError("contradictory frozen retry evidence")
+    if exported.get("logical_reconciliation") != lifecycle:
+        raise ValueError("contradictory publication lifecycle claim")
     faults = []
     retries = {}
     markers = [

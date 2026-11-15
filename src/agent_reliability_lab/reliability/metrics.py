@@ -8,8 +8,9 @@ from pathlib import Path
 
 from agent_reliability_lab.reliability.diagnostics import observed_trial_gaps
 
-VERSION = "reliability-1.2.0"
+VERSION = "reliability-1.3.0"
 PREVIOUS_VERSION = "reliability-1.1.0"
+UNSIGNED_VERSIONS = frozenset({"reliability-1.0.0", PREVIOUS_VERSION, "reliability-1.2.0"})
 
 DEFINITIONS = {
     "outcome_ascertainment": "Determinate outcomes / applicable observations",
@@ -136,9 +137,27 @@ def notification_metrics(
     identity = provider["notification_id"]
     terminal = provider["delivery"]
     terminal_observed = terminal in {"provider_rejected", "delivered", "failed"}
-    contradictory = terminal == "contradictory" or (
-        mutation_count == 0 and (terminal_observed or receipt_reconciled is True)
+    retry_success = bool(attempt_observations) and any(
+        attempt.outcome is True for attempt in attempt_observations
     )
+    contradictory = (
+        terminal == "contradictory"
+        or (
+            mutation_count == 0
+            and (terminal_observed or receipt_reconciled is True or retry_success)
+        )
+        or (
+            retry_success
+            and (
+                receipt_reconciled is False or (mutation_count is not None and mutation_count != 1)
+            )
+        )
+    )
+    if attempt_observations and (mutation_count != 1 or receipt_reconciled is not True):
+        attempt_observations = [
+            Observation(attempt.identity, None) if attempt.outcome is True else attempt
+            for attempt in attempt_observations
+        ]
     determinate = terminal_observed and not contradictory and mutation_count is not None
 
     inspected = provider.get("local_intent") == "recorded" or contradictory
@@ -173,7 +192,13 @@ def notification_metrics(
                 None
                 if faults is None
                 else [
-                    Observation(fault.identity, None) if contradictory else fault
+                    Observation(fault.identity, None)
+                    if contradictory
+                    or (
+                        fault.outcome is True
+                        and (mutation_count != 1 or receipt_reconciled is not True)
+                    )
+                    else fault
                     for fault in faults
                 ]
             ),
@@ -194,7 +219,7 @@ def render(document, format_name):
     if format_name == "json":
         return json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     columns = ["name", "numerator", "denominator", "value", "reason", "scope", "version"]
-    current = document.get("version") in {VERSION, PREVIOUS_VERSION}
+    current = document.get("version") in {VERSION, *UNSIGNED_VERSIONS - {"reliability-1.0.0"}}
     if current:
         columns += ["unresolved"]
     if format_name == "csv":

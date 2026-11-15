@@ -242,7 +242,7 @@ def test_normal_text_color_pairs_meet_aa_contrast(foreground, background):
 def test_reliability_workspace_keeps_report_downloads_and_unknown_distinct(monkeypatch):
     from agent_reliability_lab.reliability.metrics import metric
 
-    def reliability_reports(self, execution_id):
+    def reliability_reports(self, execution_id, *, on_invalid):
         assert execution_id == "c" * 32
         return [
             {

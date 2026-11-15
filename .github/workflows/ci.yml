@@ -76,6 +76,9 @@ jobs:
         run: |
           uv run --locked opsdesk-lab --version
           uv run --locked opsdesk-lab demo --no-ui --output .local/product-demo
+          export OPSDESK_PUBLICATION_PRIVATE_KEY_FILE="$RUNNER_TEMP/publication-signing.key"
+          export OPSDESK_PUBLICATION_TRUST_DIR="$RUNNER_TEMP/publication-trust"
+          uv run --locked opsdesk-lab publication-keygen --private-file "$OPSDESK_PUBLICATION_PRIVATE_KEY_FILE" --trust-dir "$OPSDESK_PUBLICATION_TRUST_DIR"
           uv run --locked opsdesk-lab reliability-demo --no-ui --output .local/reliability-demo
       - name: Validate Compose configuration without rendering credentials
         env:

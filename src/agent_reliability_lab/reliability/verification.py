@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from agent_reliability_lab.agent.provenance import verify
+from agent_reliability_lab.evaluation.evidence import response_projection
 from agent_reliability_lab.opsdesk.fixtures import digest
 
 
@@ -49,8 +50,6 @@ def operation_attempts(operation, attempts, records):
         ):
             raise ValueError("contradictory attempt identity")
         seen.add(identifier)
-        if attempt["status"] == "started":
-            continue
         journal = [
             r
             for r in records
@@ -62,6 +61,27 @@ def operation_attempts(operation, attempts, records):
         sealed = [
             r for r in records if r["kind"] == "tool_response" and r["reference"] == identifier
         ]
+        identity = {
+            "tool_call_id": proposal,
+            "logical_operation_id": operation["operation_id"],
+            "tool": operation["tool"],
+        }
+        if (
+            not journal
+            or journal[0]["body"]["event_type"] != "tool_call_started"
+            or journal[0]["sequence"] <= originals[0]["sequence"]
+            or journal[0]["body"]["payload"].get("ordinal") != attempt["ordinal"]
+            or any(
+                record["body"].get("execution_id") != operation["execution_id"]
+                or any(record["body"]["payload"].get(key) != val for key, val in identity.items())
+                for record in journal
+            )
+        ):
+            raise ValueError("contradictory attempt dispatch identity")
+        if attempt["status"] == "started":
+            if len(journal) != 1 or sealed:
+                raise ValueError("contradictory unfinished attempt lifecycle")
+            continue
         if len(journal) != 2 or len(sealed) != 1:
             raise ValueError("missing or contradictory attempt records")
         start, done = journal
@@ -75,23 +95,8 @@ def operation_attempts(operation, attempts, records):
             else ("denied" if error in {"permission_denied", "approval_required"} else "unknown")
         )
         if (
-            start["body"]["event_type"] != "tool_call_started"
-            or done["body"]["event_type"] != "tool_call_" + expected
-            or not originals[0]["sequence"]
-            < start["sequence"]
-            < done["sequence"]
-            < sealed[0]["sequence"]
-            or any(r["body"].get("execution_id") != operation["execution_id"] for r in journal)
-            or any(
-                r["body"]["payload"].get(key) != val
-                for r in journal
-                for key, val in {
-                    "tool_call_id": proposal,
-                    "logical_operation_id": operation["operation_id"],
-                    "tool": operation["tool"],
-                }.items()
-            )
-            or start["body"]["payload"].get("ordinal") != attempt["ordinal"]
+            done["body"]["event_type"] != "tool_call_" + expected
+            or not start["sequence"] < done["sequence"] < sealed[0]["sequence"]
             or raw.get("proposal_id") != proposal
             or raw.get("attempt_id") != identifier
             or raw.get("operation_id") != operation["operation_id"]
@@ -104,3 +109,32 @@ def operation_attempts(operation, attempts, records):
             raise ValueError("contradictory attempt lifecycle")
         proofs.append(AttemptProof(attempt, response, start["sequence"], sealed[0]["sequence"]))
     return proofs
+
+
+def matches_response(operation, proof):
+    captured = operation.get("response")
+    return captured == proof.response or captured == response_projection(proof.response)
+
+
+def logical_commitment(operation, proofs):
+    """Separate a sealed business effect from reconciliation of the logical lifecycle."""
+    status = operation.get("status")
+    successes = [proof for proof in proofs if proof.attempt["status"] == "succeeded"]
+    if len({digest(proof.response.get("data")) for proof in successes}) > 1:
+        return "contradictory"
+    if status == "succeeded":
+        if not proofs:
+            return "unresolved"
+        return (
+            "verified"
+            if any(matches_response(operation, proof) for proof in successes)
+            else "contradictory"
+        )
+    if successes and (
+        status in {"prepared", "rejected"}
+        or proofs[-1].attempt["status"] == "succeeded"
+        or any(matches_response(operation, proof) for proof in successes)
+    ):
+        return "contradictory"
+    # A committed effect can precede an acknowledgment failure.
+    return "unresolved"

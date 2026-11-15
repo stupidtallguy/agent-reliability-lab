@@ -7,10 +7,14 @@ from agent_reliability_lab.mcp.contracts import CreateTaskInput, UpdateTaskInput
 from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.reliability.context import compare_requests
 from agent_reliability_lab.reliability.diagnostics import observed_trial_gaps
-from agent_reliability_lab.reliability.verification import operation_attempts
+from agent_reliability_lab.reliability.verification import (
+    logical_commitment,
+    matches_response,
+    operation_attempts,
+)
 
 
-def task_commitment(evidence, operation, attempts, committed):
+def task_commitment(evidence, operation, proofs, committed):
     if not committed or operation.get("tool") not in {"create_task", "update_task"}:
         return False
     config = (evidence.get("execution") or {}).get("config") or {}
@@ -52,9 +56,9 @@ def task_commitment(evidence, operation, attempts, committed):
             == (config["actor_id"], config["tenant_id"], tool, committed.get("audit_sequence"))
             and normalized_task(r["after"]) == payload
         ]
-        proofs = operation_attempts(operation, attempts, evidence.get("provenance") or [])
         return len(audits) == 1 and any(
             proof.attempt["status"] == "succeeded"
+            and matches_response(operation, proof)
             and isinstance(proof.response.get("data"), dict)
             and normalized_task(proof.response["data"]) == payload
             for proof in proofs
@@ -144,17 +148,31 @@ def retry_chain(evidence, proposal_id, reconciliation=None):
             )
     committed = (reconciliation or {}).get("committed", {}).get(operation_id)
     denied = bool(attempts) and all(row.get("effect") == "denied" for row in attempts)
-    contradiction = "contradictory_records" in observed_trial_gaps(
-        {"reconciliation": reconciliation or {}}
-    ) or bool(committed and denied)
-    verified = (reconciliation or {}).get("complete") is True and task_commitment(
-        evidence, operation, attempts, committed
+    try:
+        proofs = operation_attempts(operation, attempts, provenance)
+        lifecycle = logical_commitment(operation, proofs)
+    except (KeyError, TypeError, ValueError) as error:
+        proofs = []
+        lifecycle = "contradictory" if str(error).startswith("contradictory") else "unresolved"
+    contradiction = (
+        "contradictory_records" in observed_trial_gaps({"reconciliation": reconciliation or {}})
+        or bool(committed and denied)
+        or lifecycle == "contradictory"
+    )
+    verified = (
+        (reconciliation or {}).get("complete") is True
+        and lifecycle == "verified"
+        and task_commitment(evidence, operation, proofs, committed)
     )
     return {
         "proposal_id": proposal_id,
         "logical_operation_id": operation_id,
         "arguments_hash": operation.get("arguments_hash"),
         "tool": operation.get("tool"),
+        "logical_status": operation.get("status"),
+        "logical_reconciliation": "contradictory"
+        if contradiction
+        else ("verified" if verified else "unresolved"),
         "model_requests": [original] if original else [],
         "context_comparisons": adjacent,
         "attempts": [

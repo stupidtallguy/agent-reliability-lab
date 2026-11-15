@@ -156,6 +156,13 @@ report_evidence = table(
     sa.ForeignKeyConstraint(["report_id"], [f"{SCHEMA}.reports.report_id"]),
 )
 
+publication_attestations = table(
+    "publication_attestations",
+    key("report_id"),
+    field("attestation", JSONB),
+    sa.ForeignKeyConstraint(["report_id"], [f"{SCHEMA}.reports.report_id"]),
+)
+
 
 def lookup(connection, source, notification_id):
     return (
@@ -199,6 +206,7 @@ class NotificationLab:
                 delivery,
                 intent_conflicts,
                 report_evidence,
+                publication_attestations,
             ):
                 connection.exec_driver_sql(f"""
                     CREATE OR REPLACE TRIGGER frozen_reliability_evidence

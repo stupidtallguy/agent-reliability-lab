@@ -26,21 +26,32 @@ class ResearchView:
     def __init__(self, engine):
         self.engine = engine.execution_options(postgresql_readonly=True)
 
-    def reliability_reports(self, execution_id, *, limit=50):
-        from agent_reliability_lab.reliability.revisions import report_rows, validated_reports
+    def reliability_reports(self, execution_id, *, limit=50, on_invalid=None):
+        from agent_reliability_lab.reliability.revisions import (
+            current_state,
+            report_rows,
+            validated_reports,
+        )
 
         if not 1 <= limit <= 100 or not isinstance(execution_id, str) or len(execution_id) != 32:
             raise ValueError("invalid reliability report selection")
         with self.engine.connect() as connection, connection.begin():
-            connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+            connection.exec_driver_sql("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             if not connection.scalar(sa.select(sa.func.to_regclass("opsdesk_reliability.reports"))):
                 return []
             documents = []
-            for document in validated_reports(
-                report_rows(connection, execution_id), execution_id, connection
-            ):
-                if len(documents) < limit:
-                    documents.append(document)
+            try:
+                for document in validated_reports(
+                    report_rows(connection, execution_id), execution_id, connection
+                ):
+                    if len(documents) < limit:
+                        if document.verification == "verified":
+                            document.current_state = current_state(connection, document)
+                        documents.append(document)
+            except (KeyError, TypeError, ValueError):
+                if on_invalid is None:
+                    raise
+                on_invalid()
         return documents
 
     def rows(self, resource, *, identifier=None, kind=None, limit=50, offset=0):

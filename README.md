@@ -147,4 +147,4 @@ the validated scope.
 
 ## Reliability lab
 
-Run `uv run --locked --extra stack opsdesk-lab reliability-demo` to explore a scripted notification with one committed local effect, a retried tool call and separately verified delivery. See the [demo guide](docs/reliability-demo.md) and [reliability contracts](docs/reliability-contracts.md).
+Configure a local publication identity using the [demo guide](docs/reliability-demo.md), then run `uv run --locked --extra stack opsdesk-lab reliability-demo` to inspect a committed local notification, a retried tool call and separately verified delivery. See the [reliability contracts](docs/reliability-contracts.md).

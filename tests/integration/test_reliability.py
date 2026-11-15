@@ -27,6 +27,18 @@ ACTOR = ActorContext(actor_id="support_001", tenant_id="opsdesk")
 PAYLOAD = {"customer_id": "customer_001", "template": "order_status"}
 
 
+@pytest.fixture(autouse=True)
+def publication_identity(monkeypatch, tmp_path):
+    from agent_reliability_lab.reliability.attestation import PRIVATE_FILE, TRUST_DIR, generate_key
+
+    private = tmp_path / "signer"
+    trust = tmp_path / "trust"
+    generate_key(private, trust)
+    monkeypatch.setenv(PRIVATE_FILE, str(private))
+    monkeypatch.setenv(TRUST_DIR, str(trust))
+    return private, trust
+
+
 @pytest.fixture
 def lab(manager):
     run = "rel_" + uuid.uuid4().hex[:18]
@@ -439,8 +451,13 @@ async def test_publication_recomputes_metrics_and_rejects_rehashed_storage(manag
     import copy
 
     from agent_reliability_lab.opsdesk.fixtures import digest
+    from agent_reliability_lab.reliability.attestation import authenticate, load_signer
     from agent_reliability_lab.reliability.demo import prepare_reliability_demo
-    from agent_reliability_lab.reliability.notifications import report_evidence, reports
+    from agent_reliability_lab.reliability.notifications import (
+        publication_attestations,
+        report_evidence,
+        reports,
+    )
     from agent_reliability_lab.reliability.revisions import freeze, report_rows, validated_reports
     from agent_reliability_lab.research.views import ResearchView
 
@@ -505,6 +522,12 @@ async def test_publication_recomputes_metrics_and_rejects_rehashed_storage(manag
         )
         connection.execute(
             report_evidence.insert().values(report_id=forged["report_id"], snapshot=snapshot)
+        )
+        connection.execute(
+            publication_attestations.insert().values(
+                report_id=forged["report_id"],
+                attestation=authenticate(forged, snapshot, load_signer()),
+            )
         )
         with pytest.raises(ValueError, match="reliability metrics"):
             list(
@@ -663,14 +686,255 @@ async def test_inspector_uses_sealed_attempt_receipt_and_audit(lab):
     }
     got = retry_chain(evidence, operation["proposal_id"], reconciliation)
     assert (got["outcome"], got["mutation_evidence"]) == ("committed", "observed")
+    from agent_reliability_lab.evaluation.evidence import response_projection
+
+    projected = {**operation, "response": response_projection(operation["response"])}
+    frozen = retry_chain(
+        {**evidence, "operations": [projected]}, operation["proposal_id"], reconciliation
+    )
+    assert frozen["outcome"] == "committed"
     mismatched_audit = {**audits[0], "tenant_id": "other"}
     conflict = retry_chain(
         {**evidence, "audits": [mismatched_audit]}, operation["proposal_id"], reconciliation
     )
     assert (conflict["outcome"], conflict["mutation_evidence"]) == ("unknown", "unresolved")
+    failed = {**evidence, "operations": [{**operation, "status": "failed"}]}
+    status_conflict = retry_chain(failed, operation["proposal_id"], reconciliation)
+    assert (
+        status_conflict["outcome"],
+        status_conflict["logical_status"],
+        status_conflict["mutation_evidence"],
+    ) == ("contradictory", "failed", "observed")
     for field in ("receipts", "audits", "provenance"):
         broken = {**evidence, field: []}
         assert retry_chain(broken, operation["proposal_id"], reconciliation)["outcome"] == "unknown"
     broken = deepcopy(evidence)
     broken["attempts"][0]["effect"] = "unknown"
-    assert retry_chain(broken, operation["proposal_id"], reconciliation)["outcome"] == "unknown"
+    assert (
+        retry_chain(broken, operation["proposal_id"], reconciliation)["outcome"] == "contradictory"
+    )
+
+
+@pytest.mark.anyio
+async def test_publication_authentication_rejects_copied_and_modified_revisions(
+    lab, tmp_path, monkeypatch
+):
+    from copy import deepcopy
+
+    from agent_reliability_lab.opsdesk.fixtures import digest
+    from agent_reliability_lab.reliability import notifications as tables
+    from agent_reliability_lab.reliability.attestation import PRIVATE_FILE, TRUST_DIR
+    from agent_reliability_lab.reliability.demo import run_reliability_demo
+    from agent_reliability_lab.reliability.revisions import freeze, report_rows, validated_reports
+    from agent_reliability_lab.research.views import ResearchView
+
+    engine = lab.sandbox.engine
+    run = await run_reliability_demo(engine, lab.sandbox, tmp_path, transport="memory")
+    eid = run["execution_id"]
+    view = ResearchView(engine)
+    first, second = view.reliability_reports(eid)
+    identifier = second["provider"]["notification_id"]
+    deliver(lab, identifier, 2, "failed")
+    assert lab.evidence(identifier)["delivery"] == "contradictory"
+    with pytest.raises(ValueError, match="invalid frozen provider observations"):
+        freeze(engine, {**second, "previous_report_id": second["report_id"]}, 3)
+
+    with engine.connect() as connection:
+        snapshot = connection.scalar(
+            sa.select(tables.report_evidence.c.snapshot).filter_by(report_id=second["report_id"])
+        )
+        original = connection.scalar(
+            sa.select(tables.publication_attestations.c.attestation).filter_by(
+                report_id=second["report_id"]
+            )
+        )
+
+    for variant, reason in (
+        ("missing", "missing or malformed publication attestation"),
+        ("copied", "attestation does not match frozen report"),
+        ("altered revision", "ancestry"),
+        ("altered predecessor", "ancestry"),
+        ("metrics", "attestation does not match frozen report"),
+        ("algorithm", "unsupported publication attestation"),
+        ("key", "unknown or invalid publication verification key"),
+        ("signature", "invalid publication signature"),
+        ("snapshot", "attestation does not match frozen report"),
+    ):
+        forged = deepcopy({**second, "revision": 3, "previous_report_id": second["report_id"]})
+        proposed_snapshot = deepcopy(snapshot)
+        attestation = deepcopy(original)
+        if variant == "altered revision":
+            forged["revision"] = 4
+        if variant == "altered predecessor":
+            forged["previous_report_id"] = first["report_id"]
+        if variant == "metrics":
+            forged["metrics"][0].update(numerator=100, value=100)
+        if variant == "algorithm":
+            attestation["manifest"]["algorithm"] = "none"
+        if variant == "key":
+            attestation["manifest"]["key_id"] = "a" * 64
+        if variant == "signature":
+            attestation["signature"] = "00" * 64
+        if variant == "snapshot":
+            proposed_snapshot["local"]["mutation_count"] = 0
+        forged["pinned_evidence_hash"] = digest(proposed_snapshot)
+        del forged["report_id"]
+        forged["report_id"] = digest(forged)
+        with engine.connect() as connection, connection.begin() as transaction:
+            connection.execute(
+                tables.reports.insert().values(
+                    execution_id=eid, report_id=forged["report_id"], revision=3, document=forged
+                )
+            )
+            connection.execute(
+                tables.report_evidence.insert().values(
+                    report_id=forged["report_id"], snapshot=proposed_snapshot
+                )
+            )
+            if variant != "missing":
+                connection.execute(
+                    tables.publication_attestations.insert().values(
+                        report_id=forged["report_id"], attestation=attestation
+                    )
+                )
+            verified_prefix = validated_reports(report_rows(connection, eid), eid, connection)
+            assert next(verified_prefix) == first
+            assert next(verified_prefix) == second
+            with pytest.raises(ValueError, match=reason):
+                next(verified_prefix)
+            transaction.rollback()
+
+    live = lab.evidence(identifier)
+    from agent_reliability_lab.reliability.diagnostics import provider_gaps
+
+    live["unknown_reasons"] = provider_gaps(live)
+    candidate = {
+        **second,
+        "provider": live,
+        "provider_evidence_hash": digest(live),
+        "previous_report_id": second["report_id"],
+    }
+    candidate.pop("metrics")
+    with monkeypatch.context() as isolated:
+        isolated.delenv(PRIVATE_FILE)
+        with pytest.raises(ValueError, match="signing key is not configured"):
+            freeze(engine, candidate, 3)
+        assert view.reliability_reports(eid) == [first, second]
+    third = freeze(engine, candidate, 3)
+    assert third["provider"]["delivery"] == "contradictory"
+    assert third["report_id"] != second["report_id"]
+    with monkeypatch.context() as isolated:
+        isolated.delenv(TRUST_DIR)
+        with pytest.raises(ValueError, match="trust directory"):
+            view.reliability_reports(eid)
+
+
+@pytest.mark.anyio
+async def test_signed_history_survives_provider_and_logical_status_changes(manager, tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    from agent_reliability_lab.agent import tables as agent
+    from agent_reliability_lab.reliability.attestation import PRIVATE_FILE
+    from agent_reliability_lab.reliability.demo import prepare_reliability_demo
+    from agent_reliability_lab.reliability.metrics import render
+    from agent_reliability_lab.reliability.revisions import freeze
+    from agent_reliability_lab.research.views import ResearchView
+
+    engine = manager.engine
+    data = await prepare_reliability_demo(engine, tmp_path, transport="stdio")
+    eid = data["execution_id"]
+    view = ResearchView(engine)
+    first, second = view.reliability_reports(eid)
+    assert [first.current_state, second.current_state] == ["historical", "current"]
+    candidate = {**second, "previous_report_id": second["report_id"]}
+    logical = second["execution_evidence"]["logical_operation_id"]
+    update = agent.operations.update().filter_by(operation_id=logical)
+    with engine.begin() as connection:
+        connection.execute(update.values(status="failed"))
+    with pytest.raises(ValueError, match="contradictory logical operation lifecycle"):
+        freeze(engine, candidate, 3)
+    with engine.begin() as connection:
+        connection.execute(update.values(status="succeeded"))
+        connection.execute(
+            provider.update()
+            .filter_by(notification_id=second["provider"]["notification_id"])
+            .values(payload_hash="f" * 64)
+        )
+    with pytest.raises(ValueError, match="contradictory frozen provider binding"):
+        freeze(engine, candidate, 3)
+    archived = view.reliability_reports(eid)
+    assert [doc.current_state for doc in archived] == ["inconsistent", "inconsistent"]
+    assert archived == [first, second]
+    for doc in archived:
+        for ext in ("json", "csv", "md"):
+            assert (
+                render(doc, ext).encode()
+                == (tmp_path / doc["report_id"] / f"reliability.{ext}").read_bytes()
+            )
+    script = """
+import sys
+from agent_reliability_lab.opsdesk.database import engine_from_env
+from agent_reliability_lab.research.views import ResearchView
+docs = ResearchView(engine_from_env()).reliability_reports(sys.argv[1])
+assert [item['report_id'] for item in docs] == sys.argv[2:4]
+assert all(item.verification == 'verified' for item in docs)
+"""
+    child_env = {k: v for k, v in os.environ.items() if k != PRIVATE_FILE}
+    child = subprocess.run(
+        [sys.executable, "-B", "-c", script, eid, first["report_id"], second["report_id"]],
+        env=child_env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
+
+
+@pytest.mark.anyio
+async def test_event_writer_cannot_cross_signed_publication_boundary(lab, tmp_path, monkeypatch):
+    from threading import Event
+
+    from agent_reliability_lab.reliability import revisions
+    from agent_reliability_lab.reliability.demo import run_reliability_demo
+    from agent_reliability_lab.research.views import ResearchView
+
+    engine = lab.sandbox.engine
+    run = await run_reliability_demo(engine, lab.sandbox, tmp_path, transport="memory")
+    view = ResearchView(engine)
+    latest = view.reliability_reports(run["execution_id"])[-1]
+    nid = latest["provider"]["notification_id"]
+    captured, resume = Event(), Event()
+    capture = revisions._capture
+
+    def paused_capture(*args):
+        snap = capture(*args)
+        captured.set()
+        assert resume.wait(10)
+        return snap
+
+    monkeypatch.setattr(revisions, "_capture", paused_capture)
+    candidate = {**latest, "previous_report_id": latest["report_id"]}
+    with ThreadPoolExecutor(2) as pool:
+        publication = pool.submit(revisions.freeze, engine, candidate, 3)
+        try:
+            assert captured.wait(5)
+            started = Event()
+
+            def callback():
+                started.set()
+                return deliver(lab, nid, 2, "failed")
+
+            writer = pool.submit(callback)
+            assert started.wait(5)
+            # The authoritative write begins with the notification lock.
+            assert not writer.done()
+        finally:
+            resume.set()
+        assert publication.result(timeout=10)["provider"]["delivery"] == "delivered"
+        assert writer.result(timeout=10)
+    _, _, frozen = view.reliability_reports(run["execution_id"])
+    assert frozen.current_state == "inconsistent"
+    assert lab.evidence(nid)["delivery"] == "contradictory"

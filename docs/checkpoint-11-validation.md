@@ -89,3 +89,53 @@ requires a matching sealed successful attempt, receipt and independent mutation
 audit before displaying verified commitment. The observation label requires
 an audit row in the execution's actor and tenant scope. It can still show a
 mutation on the target when its attribution to the operation is unresolved.
+
+## Checkpoint 11.3 authenticated publication
+
+The publisher uses Ed25519 with an operator-managed private key outside
+PostgreSQL. The attestation schema is `opsdesk-reliability-publication/1.0.0`.
+New reports use operational metrics `reliability-1.3.0`. A positive retry
+deduplication or recovery measurement now requires a resolved physical retry,
+exactly one observed local mutation, and reconciliation of the corresponding
+receipt. Incompatible known observations are contradictory. Missing required
+evidence leaves the measurement unavailable.
+
+The authenticated manifest binds the execution, original logical operation,
+notification, report ID, revision and predecessor to the report contents,
+canonical metrics, and frozen evidence digests. The boundary includes the sealed
+execution ledger head and the complete provider population collected under the
+existing publication locks. One transaction inserts the document, frozen
+observations and attestation. The public verification key comes from a
+configured trust directory. A database writer cannot choose that directory or
+authenticate a new revision by hashing, copying or editing rows.
+
+The reader verifies the signed snapshot and its ancestry. A separate read-only
+query compares the signed observation to live records for presentation.
+An ordinary later event advances current state. A conflicting callback or
+mutated provider payload is shown separately as a current inconsistency.
+An invalid successor is excluded with a visible warning. Earlier authenticated
+revisions remain available. Unsigned versions 1.0.0 through 1.2.0 retain their
+original export format and historical unverified status.
+
+The publisher and Retry Inspector reconcile the logical terminal status with
+the sealed attempt and response. A failed status conflicting with a sealed
+success remains visible alongside any independently observed mutation.
+An acknowledgment failure can leave a real effect and unresolved logical
+commitment. A later unsuccessful physical retry does not erase a supported
+successful logical result.
+
+See the [demo guide](reliability-demo.md) for key configuration. Rotate by
+generating a distinct private file in the existing trust directory and changing
+the publisher's private-file setting. Keep retired public files to verify old
+reports. Removing a public file withdraws trust and makes those signatures
+unverifiable. The dashboard and MCP tool process receive no signing-key
+configuration from the launcher. CI generates disposable identities.
+
+This trust model assumes the publisher process and trust directory remain
+under operator control. An authorized signature authenticates the bounded
+publication, including its pinned observations. The publisher remains
+responsible for collecting and validating those observations. A compromised
+signer or manipulated source records that mislead the publisher before signing
+fall outside this guarantee. A database owner can withhold or delete a
+legitimate signed history. Detecting rollback to an older signed prefix
+requires an independently pinned head, which this local workflow lacks.
