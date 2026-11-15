@@ -146,6 +146,7 @@ async def test_injection_activation_cannot_override_release_gates(lab, tmp_path,
             update={"scenario_hash": digest(data)}
         )
         config.annotations.pop(sid)
+        config.scripts[sid] = [{"answer": "held-out sidecar canary"}]
     else:
         config.annotations[sid].scenario_hash = "0" * 64
     path = tmp_path / "gated.json"
@@ -158,6 +159,13 @@ async def test_injection_activation_cannot_override_release_gates(lab, tmp_path,
         "held_out_access_not_enabled" if problem == "held_out" else "oracle_scenario_hash_mismatch"
     )
     assert trial["sandbox_run_id"] is None
+    if problem == "held_out":
+        manifest = runner.store.experiment(identifier)["manifest"]
+        assert trial["scenario"] is None
+        assert all(
+            sid not in manifest["config"][field]
+            for field in ("scripts", "annotations", "harnesses", "write_scopes")
+        )
 
 
 async def test_hard_process_restart_preserves_injection_and_receipt(lab):

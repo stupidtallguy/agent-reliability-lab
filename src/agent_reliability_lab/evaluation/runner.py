@@ -153,19 +153,21 @@ class ScenarioRunner:
             for case, _, _ in cases
             if case and case.scenario.metadata.split == "held_out"
         }
-        if withheld and (
-            config.model.script
-            or any(
-                withheld.intersection(items)
-                for items in (
-                    config.scripts,
-                    config.annotations,
-                    config.harnesses,
-                    config.write_scopes,
-                )
+        if withheld:
+            visible = {
+                case.scenario.scenario_id
+                for case, _, _ in cases
+                if case and case.scenario.scenario_id not in withheld
+            }
+            if visible and config.model.script:
+                raise ValueError("held-out cases cannot share an unscoped development script")
+            scoped = {
+                name: {sid: value for sid, value in getattr(config, name).items() if sid in visible}
+                for name in ("scripts", "annotations", "harnesses", "write_scopes")
+            }
+            config = config.model_copy(
+                update={**scoped, "model": config.model.model_copy(update={"script": []})}
             )
-        ):
-            raise ValueError("held-out configuration cannot enter the development runner")
         cases = [
             (None, fingerprint, "held_out_access_not_enabled")
             if case and case.scenario.scenario_id in withheld

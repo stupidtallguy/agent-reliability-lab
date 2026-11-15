@@ -52,7 +52,9 @@ future stimuli on an access-controlled filesystem or private artifact store.
   the catalog marker in staged JSON, including renamed JSON. CI runs the same
   guard. It cannot detect stimuli pasted into arbitrary unrelated text. The
   application blocks persistence of raw held-out BenchmarkDatasets. The legacy
-  evaluator withholds held-out scenario bodies from its exclusion records.
+  evaluator keeps the existing `not_executed` exclusion for held-out scenarios
+  while withholding their scenario bodies and scoped sidecars. Mixed runs
+  require individually scoped development scripts if a script is supplied.
 - The audit compares scenario identity, exact content, executable inputs, and
   normalized inputs. It checks template and attack-family identifiers and
   normalized attack-payload reuse. Normalized requests and exact normalized
