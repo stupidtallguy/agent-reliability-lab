@@ -200,6 +200,14 @@ ARTIFACTS = {
 def parse_artifact(value):
     import json
 
-    if value.get("kind") not in ARTIFACTS:
+    kind = value.get("kind") if isinstance(value, dict) else None
+    if not isinstance(kind, str):
+        raise ValueError("research artifact kind is required")
+    model = ARTIFACTS.get(kind)
+    if model is None and kind.startswith("benchmark_"):
+        from agent_reliability_lab.research.benchmark_contracts import CONTRACTS
+
+        model = CONTRACTS.get(kind)
+    if model is None:
         raise ValueError("unsupported research artifact kind")
-    return ARTIFACTS[value["kind"]].model_validate_json(json.dumps(value))
+    return model.model_validate_json(json.dumps(value))

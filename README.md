@@ -93,6 +93,12 @@ eligibility does not establish causal influence. Local hashes do not authenticat
 an external provider. Declared human identities do not establish independent review.
 No defense-superiority or held-out generalization claim is made.
 
+CP12 adds a versioned benchmark protocol for paired scripted runs across tool
+use, policy resilience, and failure recovery. It freezes the dataset, design,
+and arm order before execution and verifies paired results from exact score and
+capture references. Follow the [benchmark quick start](docs/checkpoint-12-benchmark-foundation.md#execute-and-reproduce)
+to run the eight-case development pilot on disposable PostgreSQL.
+
 The research workflow includes composite dataset releases, preregistrations and
 amendments, pairing, and family-aware analysis. The optional Oracle Review workspace
 remains available. See the [preregistration draft](docs/preregistration-draft.md) and
