@@ -14,6 +14,8 @@ from agent_reliability_lab.research.benchmark import (
 from agent_reliability_lab.research.contracts import parse_artifact
 from agent_reliability_lab.research.persistence import ResearchStore
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.anyio
 async def test_cp12_frozen_pairs_scores_and_tamper_detection(manager, monkeypatch):
