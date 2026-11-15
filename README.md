@@ -99,6 +99,11 @@ and arm order before execution and verifies paired results from exact score and
 capture references. Follow the [benchmark quick start](docs/checkpoint-12-benchmark-foundation.md#execute-and-reproduce)
 to run the eight-case development pilot on disposable PostgreSQL.
 
+CP13 adds [sealed-catalog auditing and cluster-level study planning](docs/checkpoint-13-heldout-statistical-design.md).
+The planning workflow uses explicit sensitivity assumptions and can run without
+private stimuli. The audit opens a separately stored catalog only on explicit
+request. Held-out execution remains disabled.
+
 The research workflow includes composite dataset releases, preregistrations and
 amendments, pairing, and family-aware analysis. The optional Oracle Review workspace
 remains available. See the [preregistration draft](docs/preregistration-draft.md) and

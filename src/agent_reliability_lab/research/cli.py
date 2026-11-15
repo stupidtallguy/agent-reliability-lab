@@ -15,8 +15,39 @@ from agent_reliability_lab.research.persistence import ResearchStore
 async def execute(args):
     if args.command == "validate":
         result = parse_artifact(json.loads(args.file.read_text(encoding="utf-8")))
+        if result.kind == "benchmark_dataset" and any(
+            c.partition == "held_out" for c in result.cases
+        ):
+            raise ValueError("held-out stimuli must remain in a sealed private catalog")
         print(result.model_dump_json(indent=2))
         return
+    if args.command == "benchmark-guard":
+        from agent_reliability_lab.research.heldout import guard_index
+
+        guard_index()
+        print('{"tracked_private_catalogs": false}')
+        return
+    if args.command == "benchmark-power":
+        from agent_reliability_lab.research.cluster_design import plan_power
+        from agent_reliability_lab.research.heldout_contracts import (
+            ConfirmatoryProtocol,
+            PowerDesign,
+        )
+
+        raw = args.file.read_bytes()
+        if json.loads(raw).get("kind") == "benchmark_confirmatory_protocol":
+            protocol = ConfirmatoryProtocol.model_validate_json(raw)
+            report = plan_power(protocol.power)
+            from agent_reliability_lab.opsdesk.fixtures import digest
+
+            report["protocol_hash"] = digest(protocol.model_dump(mode="json"))
+            report["catalog"] = protocol.catalog.model_dump(mode="json")
+        else:
+            report = plan_power(PowerDesign.model_validate_json(raw))
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return
+    if args.command == "benchmark-heldout-audit" and not args.authorize_private_read:
+        raise ValueError("private catalog access requires explicit authorization")
     if args.command == "benchmark-draft":
         from agent_reliability_lab.research.benchmark import starter_draft
 
@@ -78,6 +109,26 @@ async def execute(args):
                 if artifact.kind != "benchmark_result":
                     raise ValueError("verification requires a frozen benchmark result")
                 result = verify_result(store, artifact)
+        elif args.command in {"benchmark-design-draft", "benchmark-heldout-audit"}:
+            from agent_reliability_lab.research.heldout_contracts import PowerDesign
+            from agent_reliability_lab.research.heldout_design import audit_registered, draft_design
+
+            store = ResearchStore(engine.execution_options(postgresql_readonly=True), args.scope)
+            ref = Reference.model_validate_json(args.file.read_bytes())
+            if args.command == "benchmark-design-draft":
+                power = (
+                    PowerDesign.model_validate_json(args.power.read_bytes()) if args.power else None
+                )
+                records = draft_design(store, ref, args.identity, args.sha256, args.count, power)
+                args.output.mkdir(parents=True, exist_ok=False)
+                for name, artifact in records.items():
+                    (args.output / f"{name}.json").write_text(
+                        artifact.model_dump_json(indent=2) + "\n", encoding="utf-8"
+                    )
+                return
+            result = audit_registered(store, ref, authorized=args.authorize_private_read)
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0 if result["passed"] else 2
         else:
             spec = json.loads(args.file.read_text(encoding="utf-8"))
             pairs = [Reference.model_validate(ref) for ref in spec["pairs"]]
@@ -116,6 +167,26 @@ def main():
     draft.add_argument("--workspace", type=Path)
     draft.add_argument("--repetitions", type=int, default=2)
     draft.add_argument("--seed", type=int, default=42)
+    commands.add_parser(
+        "benchmark-guard", help="Check the Git index for sealed private catalog files"
+    )
+    power = commands.add_parser("benchmark-power", help="Simulate conditional cluster sample sizes")
+    power.add_argument("file", type=Path)
+    design = commands.add_parser(
+        "benchmark-design-draft",
+        help="Create content-free CP13 records from a CP12 protocol reference",
+    )
+    design.add_argument("file", type=Path)
+    design.add_argument("output", type=Path)
+    design.add_argument("--identity", default="cp13_design")
+    design.add_argument("--sha256", required=True)
+    design.add_argument("--count", type=int, required=True)
+    design.add_argument("--power", type=Path)
+    audit = commands.add_parser(
+        "benchmark-heldout-audit", help="Verify and audit sealed stimuli without executing"
+    )
+    audit.add_argument("file", type=Path)
+    audit.add_argument("--authorize-private-read", action="store_true")
     for name in (
         "append",
         "validate",
@@ -141,7 +212,9 @@ def main():
     command.add_argument("--identity")
     args = parser.parse_args()
     try:
-        asyncio.run(execute(args))
+        status = asyncio.run(execute(args))
+        if status:
+            parser.exit(status)
     except Exception as error:
         if getattr(error, "code", None):
             import sys

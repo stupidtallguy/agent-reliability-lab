@@ -148,8 +148,28 @@ class ScenarioRunner:
         ):
             raise ValueError("live evaluation requires --live and an explicit model ID")
         cases = [read_case(path) for path in paths]
+        withheld = {
+            case.scenario.scenario_id
+            for case, _, _ in cases
+            if case and case.scenario.metadata.split == "held_out"
+        }
+        if withheld and (
+            config.model.script
+            or any(
+                withheld.intersection(items)
+                for items in (
+                    config.scripts,
+                    config.annotations,
+                    config.harnesses,
+                    config.write_scopes,
+                )
+            )
+        ):
+            raise ValueError("held-out configuration cannot enter the development runner")
         cases = [
-            (None, fingerprint, "sensitive_scenario_rejected")
+            (None, fingerprint, "held_out_access_not_enabled")
+            if case and case.scenario.scenario_id in withheld
+            else (None, fingerprint, "sensitive_scenario_rejected")
             if case and self.store.contains_sensitive(case.model_dump(mode="json"))
             else (case, fingerprint, problem)
             for case, fingerprint, problem in cases
@@ -240,8 +260,6 @@ class ScenarioRunner:
                     experiment_id, scenario, fingerprint, oracle, trial_index, mode
                 )
                 reason = problem
-                if scenario and scenario.metadata.split != "development":
-                    reason = "held_out_access_not_enabled"
                 if oracle.scenario_hash is not None and oracle.scenario_hash != fingerprint:
                     reason = "oracle_scenario_hash_mismatch"
                 if scenario and scenario.injections and reason is None:
@@ -271,7 +289,7 @@ class ScenarioRunner:
                 if reason:
                     status = (
                         "invalid_scenario"
-                        if problem
+                        if (problem and problem != "held_out_access_not_enabled")
                         or reason
                         in {"oracle_scenario_hash_mismatch", "harness_scenario_binding_mismatch"}
                         else "not_executed"

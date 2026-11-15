@@ -208,6 +208,12 @@ def parse_artifact(value):
         from agent_reliability_lab.research.benchmark_contracts import CONTRACTS
 
         model = CONTRACTS.get(kind)
+        if model is None:
+            from agent_reliability_lab.research.heldout_contracts import (
+                CONTRACTS as DESIGN_CONTRACTS,
+            )
+
+            model = DESIGN_CONTRACTS.get(kind)
     if model is None:
         raise ValueError("unsupported research artifact kind")
     return model.model_validate_json(json.dumps(value))

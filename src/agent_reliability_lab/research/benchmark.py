@@ -193,6 +193,8 @@ def run_inputs(store, run):
 
 def validate_references(store, artifact):
     if artifact.kind == "benchmark_dataset":
+        if any(item.partition == "held_out" for item in artifact.cases):
+            raise ValueError("held-out stimuli must remain in a sealed private catalog")
         assigned = {key: item.partition for item in artifact.cases for key in item.partition_keys()}
         for row in store.list("benchmark_dataset"):
             for item in parse_artifact(row["body"]).cases:
@@ -214,6 +216,10 @@ def validate_references(store, artifact):
         run_inputs(store, artifact)
     elif artifact.kind == "benchmark_result":
         verify_result(store, artifact)
+    else:
+        from agent_reliability_lab.research.heldout_design import validate_design_references
+
+        validate_design_references(store, artifact)
 
 
 def _context(run_ref, run, protocol, slot, arm):
