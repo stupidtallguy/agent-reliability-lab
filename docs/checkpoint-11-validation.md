@@ -177,3 +177,8 @@ three-attempt variants interrupt the second dispatch before invoking MCP.
 The trial integrity regression changes only the disposable capture while
 preserving the earlier materialized score. These probes verify the product's
 evidence checks under privileged test writes.
+
+The demo retries transient PostgreSQL lock conflicts with bounded backoff.
+Each attempt opens a new publication transaction and validates the sources
+again. The publisher itself retains fail-fast locks and rejects permanent
+evidence conflicts.

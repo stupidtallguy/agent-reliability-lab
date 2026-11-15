@@ -1,8 +1,10 @@
 """A scripted agent and an isolated synthetic provider with two frozen observations."""
 
+import asyncio
 import uuid
 
 import sqlalchemy as sa
+from sqlalchemy.exc import OperationalError
 
 from agent_reliability_lab.agent import tables as agent
 from agent_reliability_lab.agent.config import AgentConfig, ModelConfig
@@ -23,6 +25,17 @@ from agent_reliability_lab.reliability.notifications import (
     outbox,
 )
 from agent_reliability_lab.reliability.revisions import freeze
+
+
+async def _freeze_after_transient_lock(engine, document, revision):
+    for delay in (0.05, 0.1, 0.2, 0.4, 0.8, 1.6):
+        try:
+            return freeze(engine, document, revision)
+        except OperationalError as error:
+            if getattr(error.orig, "sqlstate", None) != "55P03":
+                raise
+        await asyncio.sleep(delay)
+    return freeze(engine, document, revision)
 
 
 async def prepare_reliability_demo(engine, output, *, transport="memory"):
@@ -190,7 +203,7 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
             lab.callback(identifier, event_id, 1, "delivered")
         evidence = lab.evidence(identifier)
         evidence["unknown_reasons"] = provider_gaps(evidence)
-        document = freeze(
+        document = await _freeze_after_transient_lock(
             engine,
             dict(
                 **common,

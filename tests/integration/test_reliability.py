@@ -222,6 +222,34 @@ async def test_real_agent_retries_and_later_evidence_appends(manager, tmp_path, 
 
 
 @pytest.mark.anyio
+async def test_demo_retries_transient_publication_lock(manager, tmp_path, monkeypatch):
+    from agent_reliability_lab.reliability import demo
+    from agent_reliability_lab.research.views import ResearchView
+
+    engine = manager.engine
+    publish = demo.freeze
+    observed = []
+
+    def with_transient_lock(bound_engine, document, revision):
+        if observed or revision != 1:
+            return publish(bound_engine, document, revision)
+        with engine.begin() as writer:
+            writer.exec_driver_sql("LOCK TABLE opsdesk_agent.events IN SHARE UPDATE EXCLUSIVE MODE")
+            try:
+                return publish(bound_engine, document, revision)
+            except sa.exc.OperationalError as error:
+                observed.append(error.orig.sqlstate)
+                raise
+
+    monkeypatch.setattr(demo, "freeze", with_transient_lock)
+    result = await demo.prepare_reliability_demo(engine, tmp_path)
+    assert observed == ["55P03"]
+    assert [
+        row["revision"] for row in ResearchView(engine).reliability_reports(result["execution_id"])
+    ] == [1, 2]
+
+
+@pytest.mark.anyio
 async def test_changed_model_input_does_not_change_signed_write_intent(lab, manager):
     from agent_reliability_lab.agent import tables as agent
     from agent_reliability_lab.agent.config import AgentConfig, ModelConfig
