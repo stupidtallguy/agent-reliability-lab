@@ -1,5 +1,7 @@
 """Serial append and independent read validation for reliability report revisions."""
 
+from dataclasses import dataclass
+
 import sqlalchemy as sa
 
 from agent_reliability_lab.agent import tables as agent
@@ -14,7 +16,7 @@ from agent_reliability_lab.reliability.attestation import (
     load_signer,
     verify_attestation,
 )
-from agent_reliability_lab.reliability.metrics import UNSIGNED_VERSIONS, VERSION
+from agent_reliability_lab.reliability.metrics import SIGNED_VERSIONS, UNSIGNED_VERSIONS, VERSION
 from agent_reliability_lab.reliability.notifications import (
     acknowledgments,
     callback_conflicts,
@@ -32,6 +34,11 @@ from agent_reliability_lab.reliability.publication import (
     canonical_metrics,
     require_metrics,
     select_chain,
+)
+from agent_reliability_lab.reliability.verification import (
+    logical_commitment,
+    matches_response,
+    operation_attempts,
 )
 
 _FIXED = (
@@ -95,9 +102,11 @@ class ReportDocument(dict):
 
     @property
     def verification(self):
-        return "verified" if self["version"] == VERSION else "legacy_unverified"
+        return "verified" if self["version"] in SIGNED_VERSIONS else "legacy_unverified"
 
     current_state = None
+    current_source_reason = None
+    current_source_reference = None
 
 
 def _historical_reference(connection, document):
@@ -139,6 +148,7 @@ def _lock_sources(connection, identifier):
         n.acknowledgments,
         business.registry,
         agent.executions,
+        agent.events,
         agent.operations,
         agent.attempts,
         agent.provenance,
@@ -161,7 +171,15 @@ def _capture(connection, document, execution, operation):
     )
     provider = provider_population(connection, identifier)
     validate_provider_evidence(provider, document["provider"])
-    attempts = [
+    return {
+        "local": local,
+        "attempts": attempt_inventory(connection, operation["proposal_id"]),
+        "provider": provider,
+    }
+
+
+def attempt_inventory(connection, proposal):
+    return [
         {
             key: row[key]
             for key in ("proposal_id", "attempt_id", "ordinal", "status", "error_code", "effect")
@@ -169,12 +187,22 @@ def _capture(connection, document, execution, operation):
         for row in connection.execute(
             sa.select(agent.attempts)
             .filter_by(
-                proposal_id=operation["proposal_id"],
+                proposal_id=proposal,
             )
-            .order_by(agent.attempts.c.ordinal)
+            .order_by(agent.attempts.c.ordinal, agent.attempts.c.attempt_id)
         ).mappings()
     ]
-    return {"local": local, "attempts": attempts, "provider": provider}
+
+
+def journal_matches(connection, execution_id, records):
+    events = connection.execute(
+        sa.select(agent.events)
+        .filter_by(execution_id=execution_id)
+        .order_by(agent.events.c.sequence)
+    ).mappings()
+    return [portable(dict(row)) for row in events] == [
+        row["body"] for row in records if row["kind"] == "journal_event"
+    ]
 
 
 _OBSERVATIONS = (
@@ -282,9 +310,9 @@ def validated_reports(rows, execution_id, connection, *, candidate=None):
         provider = document.get("provider")
         if not isinstance(provider, dict) or not provider.get("notification_id"):
             raise ValueError("missing reliability notification evidence")
-        if document.get("version") not in {VERSION, *UNSIGNED_VERSIONS}:
+        if document.get("version") not in SIGNED_VERSIONS | UNSIGNED_VERSIONS:
             raise ValueError("unsupported reliability report version")
-        if document.get("version") != VERSION:
+        if document.get("version") not in SIGNED_VERSIONS:
             _historical_reference(connection, document)
         else:
             if candidate is not None and candidate[0] == row["report_id"]:
@@ -394,6 +422,8 @@ def freeze(engine, document, revision):
         # Pin the source tables before reading the operation, its ledger and attempts.
         _lock_sources(connection, document["provider"]["notification_id"])
         execution, operations, records = execution_evidence(connection, execution_id)
+        if not journal_matches(connection, execution_id, records):
+            raise ValueError("live execution journal differs from sealed provenance")
         operation = operations.get(document["execution_evidence"].get("logical_operation_id"))
         if not operation or operation["tool"] != n.TOOL:
             raise ValueError("missing reliability operation")
@@ -410,7 +440,7 @@ def freeze(engine, document, revision):
             operation=portable(dict(operation)),
             records=records,
         )
-        canonical = canonical_metrics(document, snapshot, operation, records)
+        canonical = canonical_metrics(document, snapshot, operation, records, materialize=True)
         if "metrics" in submitted:
             require_metrics(submitted["metrics"], canonical)
         document["metrics"] = canonical
@@ -440,27 +470,116 @@ def freeze(engine, document, revision):
     return ReportDocument(document)
 
 
+@dataclass(frozen=True)
+class SourceAgreement:
+    status: str
+    reason: str | None = None
+    reference: str | None = None
+
+
 def current_state(connection, document):
     """A read-only comparison. It cannot downgrade or authenticate frozen evidence."""
     identifier = document["provider"]["notification_id"]
-    provider = provider_population(connection, identifier)
+    execution_id = document["execution_id"]
+    binding = document["execution_evidence"]
+    logical_id = binding["logical_operation_id"]
     try:
-        execution, operations, _ = execution_evidence(connection, document["execution_id"])
-        binding = document["execution_evidence"]
-        operation = operations[binding["logical_operation_id"]]
-        local = select_chain(connection, execution, operation, identifier, binding["operation_key"])
+        execution, operations, records = execution_evidence(connection, execution_id)
+        operation = operations[logical_id]
         snapshot = connection.scalar(
             sa.select(n.report_evidence.c.snapshot).filter_by(report_id=document["report_id"])
         )
+        local = select_chain(
+            connection, execution, snapshot["operation"], identifier, binding["operation_key"]
+        )
+        if not journal_matches(connection, execution_id, records):
+            return SourceAgreement(
+                "inconsistent", "Live journal differs from sealed provenance.", execution_id
+            )
+        frozen_records = snapshot["records"]
+        if records[: len(frozen_records)] != frozen_records:
+            return SourceAgreement(
+                "inconsistent", "Sealed execution history changed.", execution_id
+            )
+        attempts = attempt_inventory(connection, operation["proposal_id"])
+        frozen = snapshot["attempts"]
+        current_by_id = {row["attempt_id"]: row for row in attempts}
+        for row in frozen:
+            identity = row["attempt_id"]
+            if row != current_by_id.get(identity):
+                return SourceAgreement(
+                    "inconsistent", "Physical attempt changed or is missing.", identity
+                )
+        proofs = operation_attempts(operation, attempts, records)
+        projection = portable(dict(operation))
+        prior = snapshot["operation"]
+        appended = len(attempts) > len(frozen) and attempts[: len(frozen)] == frozen
+        lifecycle = logical_commitment(operation, proofs)
+        last = attempts[-1] if attempts else {}
+        pending_append = (
+            appended
+            and operation["status"] == last.get("status") == "started"
+            and operation["response"] == prior["response"]
+        )
+        if projection != prior:
+            same_operation = {
+                k: v for k, v in projection.items() if k not in {"status", "response"}
+            } == {k: v for k, v in prior.items() if k not in {"status", "response"}}
+            coherent_append = (
+                pending_append
+                or operation["status"] == last.get("status")
+                and proofs
+                and matches_response(operation, proofs[-1])
+            )
+            if not (appended and same_operation and coherent_append):
+                return SourceAgreement(
+                    "inconsistent", "Logical operation or response changed.", logical_id
+                )
+        if (lifecycle == "contradictory" and not pending_append) or (
+            lifecycle != "verified" and not appended
+        ):
+            return SourceAgreement(
+                "inconsistent", "Live attempt lifecycle cannot verify commitment.", logical_id
+            )
+        provider = provider_population(connection, identifier)
         if (
             not provider["binding"]
             or not provider["request"]
             or local != snapshot["local"]
-            or portable(dict(operation)) != snapshot["operation"]
             or any(provider[k] != snapshot["provider"][k] for k in ("binding", "request"))
             or provider_outcome(provider) == "contradictory"
         ):
-            return "inconsistent"
-        return "current" if provider == snapshot["provider"] else "historical"
+            return SourceAgreement(
+                "inconsistent", "Current local or provider evidence conflicts.", identifier
+            )
+        validate_provider_evidence(
+            provider,
+            {
+                **document["provider"],
+                **{key: provider[key] for _, key in _OBSERVATIONS},
+                "acknowledged": provider["acknowledged"],
+                "outbox": "acknowledged" if provider["acknowledged"] else "pending",
+                "delivery": provider_outcome(provider),
+            },
+        )
+        if any(
+            row not in provider[key]
+            for key in ("issued", *(key for _, key in _OBSERVATIONS))
+            for row in snapshot["provider"][key]
+        ) or (snapshot["provider"]["acknowledged"] and not provider["acknowledged"]):
+            return SourceAgreement(
+                "inconsistent", "Earlier provider evidence is missing.", identifier
+            )
+        if attempts != frozen or records != frozen_records:
+            return SourceAgreement(
+                "historical", "Additional execution evidence is now available.", logical_id
+            )
+        if provider != snapshot["provider"]:
+            return SourceAgreement(
+                "historical", "Additional provider evidence is now available.", identifier
+            )
+        return SourceAgreement("current")
     except (KeyError, TypeError, ValueError):
-        return "inconsistent"
+        return SourceAgreement(
+            "inconsistent", "Current sources could not be reconciled.", logical_id
+        )

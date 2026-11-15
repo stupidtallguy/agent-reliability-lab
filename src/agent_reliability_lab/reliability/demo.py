@@ -160,7 +160,6 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
     # Publication independently verifies the sealed observation and attempts.
     chain["outcome"] = "committed"
     chain["logical_reconciliation"] = "verified"
-    chain["receipt_reuse"] = "verified for attempt 2"
 
     lab.dispatch(identifier, "lose_ack")
     lab.dispatch(identifier)
@@ -202,6 +201,7 @@ async def run_reliability_demo(engine, sandbox, output, *, transport):
             revision,
         )
         folder = export(document, output)
+        common["retry"] = document["retry"]
         revisions.append(
             {
                 "report_id": document["report_id"],

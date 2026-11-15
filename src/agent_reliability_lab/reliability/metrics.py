@@ -8,7 +8,9 @@ from pathlib import Path
 
 from agent_reliability_lab.reliability.diagnostics import observed_trial_gaps
 
-VERSION = "reliability-1.3.0"
+VERSION = "reliability-1.4.0"
+SIGNED_V130 = "reliability-1.3.0"
+SIGNED_VERSIONS = frozenset({SIGNED_V130, VERSION})
 PREVIOUS_VERSION = "reliability-1.1.0"
 UNSIGNED_VERSIONS = frozenset({"reliability-1.0.0", PREVIOUS_VERSION, "reliability-1.2.0"})
 
@@ -29,7 +31,7 @@ DEFINITIONS = {
 QUALITY_NAMES = ("outcome_ascertainment", "unknown_outcome", "chain_completeness", "contradiction")
 
 
-def metric(name, numerator, denominator, scope):
+def metric(name, numerator, denominator, scope, *, version=VERSION):
     if denominator is not None and (numerator is None or not 0 <= numerator <= denominator):
         raise ValueError("invalid operational metric population")
     if denominator is None and numerator is not None:
@@ -39,7 +41,7 @@ def metric(name, numerator, denominator, scope):
         numerator=numerator,
         denominator=denominator,
         scope=scope,
-        version=VERSION,
+        version=version,
         value=numerator / denominator if denominator else None,
         reason=None
         if denominator
@@ -103,21 +105,25 @@ class Observation:
     outcome: bool | None
 
 
-def revised_metrics(populations: dict[str, list[Observation] | None], *, scope: str):
+def revised_metrics(
+    populations: dict[str, list[Observation] | None], *, scope: str, version=VERSION
+):
     records = []
     for name in DEFINITIONS:
         population = populations.get(name)
         if population is None:
-            records.append(metric(name, None, None, scope))
+            records.append(metric(name, None, None, scope, version=version))
             continue
         if len({row.identity for row in population}) != len(population):
             raise ValueError("duplicate operational observation")
         known = [row for row in population if row.outcome is not None]
         if not known and population:
-            record = metric(name, None, None, scope)
+            record = metric(name, None, None, scope, version=version)
             record["reason"] = "outcomes_unresolved"
         else:
-            record = metric(name, sum(row.outcome is True for row in known), len(known), scope)
+            record = metric(
+                name, sum(row.outcome is True for row in known), len(known), scope, version=version
+            )
         record["unresolved"] = len(population) - len(known)
         records.append(record)
     return records
@@ -133,6 +139,7 @@ def notification_metrics(
     faults,
     conflicts,
     dispatched,
+    version=VERSION,
 ):
     identity = provider["notification_id"]
     terminal = provider["delivery"]
@@ -212,6 +219,7 @@ def notification_metrics(
             ],
         },
         scope="One scripted, synthetic notification intent",
+        version=version,
     )
 
 
@@ -219,7 +227,9 @@ def render(document, format_name):
     if format_name == "json":
         return json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     columns = ["name", "numerator", "denominator", "value", "reason", "scope", "version"]
-    current = document.get("version") in {VERSION, *UNSIGNED_VERSIONS - {"reliability-1.0.0"}}
+    current = document.get("version") in (SIGNED_VERSIONS | UNSIGNED_VERSIONS) - {
+        "reliability-1.0.0"
+    }
     if current:
         columns += ["unresolved"]
     if format_name == "csv":

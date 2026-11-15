@@ -193,6 +193,10 @@ async def test_real_agent_retries_and_later_evidence_appends(manager, tmp_path, 
     first, second = ResearchView(manager.engine).reliability_reports(summary["execution_id"])
     assert first["report_id"] == second["previous_report_id"]
     assert [a["status"] for a in first["retry"]["attempts"]] == ["failed", "succeeded"]
+    retry = first["retry"]["receipt_reuse_attempts"]
+    assert [(item["attempt_id"], item["ordinal"]) for item in retry] == [
+        (first["retry"]["attempts"][1]["attempt_id"], 2)
+    ]
     assert first["retry"]["context_comparisons"][0]["relation"] == "changed"
     assert first["provider"]["delivery_events"] == []
     assert second["provider"]["delivery_events"][0]["status"] == "delivered"
@@ -713,6 +717,150 @@ async def test_inspector_uses_sealed_attempt_receipt_and_audit(lab):
     assert (
         retry_chain(broken, operation["proposal_id"], reconciliation)["outcome"] == "contradictory"
     )
+
+    wrong_task = {**evidence, "audits": [{**audits[0], "task_id": "task_001"}]}
+    wrong = retry_chain(wrong_task, operation["proposal_id"], reconciliation)
+    assert wrong["outcome"] == "unknown"
+    assert wrong["mutation_evidence"] == "unresolved"
+    wrong_receipt = deepcopy(evidence)
+    wrong_receipt["receipts"][0]["response"]["task_id"] = "task_001"
+    assert (
+        retry_chain(wrong_receipt, operation["proposal_id"], reconciliation)["outcome"] == "unknown"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure", [TimeoutError, ConnectionError])
+async def test_receipt_reuse_follows_attempt_that_reached_mcp(
+    manager, tmp_path, monkeypatch, failure
+):
+    from agent_reliability_lab.agent.config import AgentConfig, Budgets
+    from agent_reliability_lab.agent.tool_adapter import ToolSession
+    from agent_reliability_lab.reliability import demo
+    from agent_reliability_lab.research.views import ResearchView
+
+    monkeypatch.setattr(
+        demo, "AgentConfig", lambda **kw: AgentConfig(**kw, budgets=Budgets(max_retries=2))
+    )
+    call = ToolSession.call
+    reached = []
+
+    async def pre_mcp_failure(session, *args, **kwargs):
+        ordinal = len(reached) + 1
+        reached.append(ordinal != 2)
+        if ordinal == 2:
+            raise failure("pre-MCP failure")
+        return await call(session, *args, **kwargs)
+
+    monkeypatch.setattr(ToolSession, "call", pre_mcp_failure)
+    result = await demo.prepare_reliability_demo(manager.engine, tmp_path)
+    first, second = ResearchView(manager.engine).reliability_reports(result["execution_id"])
+    assert reached == [True, False, True]
+    for report in (first, second):
+        assert [
+            report[k]
+            for k in (
+                "logical_operation_count",
+                "physical_tool_attempts",
+                "receipt_count",
+                "local_mutations",
+            )
+        ] == [1, 3, 1, 1]
+        chain = report["retry"]
+        assert [row["status"] for row in chain["attempts"]] == ["failed", "failed", "succeeded"]
+        expected = chain["attempts"][2]["attempt_id"]
+        assert [(x["attempt_id"], x["ordinal"]) for x in chain["receipt_reuse_attempts"]] == [
+            (expected, 3)
+        ]
+        assert chain["receipt_reuse"] == "verified for attempt 3"
+        first_fault, second_fault = chain["fault_observations"]
+        assert first_fault["verified_recovery_attempt_id"] == expected
+        assert first_fault["attempt_id"] == chain["attempts"][0]["attempt_id"]
+        assert second_fault["attempt_id"] == chain["attempts"][1]["attempt_id"]
+        assert second_fault["verified_recovery_attempt_id"] is None
+        by_name = {m["name"]: m for m in report["metrics"]}
+        assert by_name["retry_deduplication"]["value"] == 1
+        assert by_name["verified_recovery"]["unresolved"] == 1
+
+
+@pytest.mark.anyio
+async def test_signed_current_sources_compare_attempts_and_journal(lab, tmp_path, monkeypatch):
+    from agent_reliability_lab.agent import tables as agent
+    from agent_reliability_lab.agent.persistence import ExecutionStore
+    from agent_reliability_lab.reliability import revisions
+    from agent_reliability_lab.reliability.demo import run_reliability_demo
+    from agent_reliability_lab.reliability.metrics import render
+    from agent_reliability_lab.research.views import ResearchView
+
+    engine = lab.sandbox.engine
+    summary = await run_reliability_demo(engine, lab.sandbox, tmp_path, transport="memory")
+    eid = summary["execution_id"]
+    view = ResearchView(engine)
+    first, second = view.reliability_reports(eid)
+    assert [item.current_state for item in (first, second)] == ["historical", "current"]
+    key = second["retry"]["attempts"][1]["attempt_id"]
+    attempt = agent.attempts.update().filter_by(attempt_id=key)
+    changes = [
+        attempt.values(status="failed", error_code="permission_denied"),
+        attempt.values(error_code="permission_denied"),
+        attempt.values(effect="denied"),
+        attempt.values(attempt_id=uuid.uuid4().hex),
+        agent.attempts.delete().filter_by(attempt_id=key),
+        agent.events.delete().filter_by(execution_id=eid, event_type="tool_call_succeeded"),
+    ]
+    for change in changes:
+        with engine.connect() as connection, connection.begin() as tx:
+            if change.table is agent.events:
+                connection.exec_driver_sql(
+                    "ALTER TABLE opsdesk_agent.events DISABLE TRIGGER immutable_history"
+                )
+            connection.execute(change)
+            check = revisions.current_state(connection, second)
+            assert check.status == "inconsistent"
+            assert check.reference in (key, eid)
+            tx.rollback()
+
+    from streamlit.testing.v1 import AppTest
+
+    with engine.begin() as connection:
+        connection.execute(changes[0])
+    monkeypatch.setenv(
+        "OPSDESK_DASHBOARD_DATABASE_URL", engine.url.render_as_string(hide_password=False)
+    )
+    ui = AppTest.from_string(
+        f"""
+import os
+from agent_reliability_lab.dashboard.reliability import demo_workspace
+from agent_reliability_lab.research.views import ResearchView, readonly_engine
+view = ResearchView(readonly_engine(os.environ["OPSDESK_DASHBOARD_DATABASE_URL"]))
+demo_workspace(view, {eid!r}, "Reports & Evaluators")
+"""
+    ).run()
+    assert not ui.exception
+    assert any("inconsistent" in row.value for row in ui.warning)
+    assert any("Physical attempt changed" in row.value for row in ui.caption)
+    assert all("Current sources match" not in row.value for row in ui.caption)
+    assert view.reliability_reports(eid) == [first, second]
+    with engine.begin() as connection:
+        connection.execute(attempt.values(status="succeeded", error_code=None))
+
+    def unavailable(*args):
+        raise sa.exc.OperationalError("test", {}, RuntimeError("query unavailable"))
+
+    with monkeypatch.context() as checked:
+        checked.setattr(revisions, "attempt_inventory", unavailable)
+        history = view.reliability_reports(eid)
+        assert history == [first, second]
+        assert all(d.current_state == "unavailable" for d in history)
+    with engine.connect() as connection:
+        _, ops, _ = revisions.execution_evidence(connection, eid)
+        operation = ops[second["execution_evidence"]["logical_operation_id"]]
+    appended = ExecutionStore(engine).begin_attempt(eid, dict(operation), 1, 3, 10)
+    assert appended and appended[1] == 3
+    recent = view.reliability_reports(eid)[-1]
+    assert recent.current_state == "historical"
+    assert recent.current_source_reason == "Additional execution evidence is now available."
+    assert render(recent, "json") == render(second, "json")
 
 
 @pytest.mark.anyio

@@ -2,10 +2,49 @@
 
 import sqlalchemy as sa
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 
 from agent_reliability_lab.agent import tables as a
 from agent_reliability_lab.evaluation import tables as e
+from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research.persistence import artifacts
+
+
+def trial_matches_score(document, score, trial):
+    """Join the selected score revision to the exact captured trial it evaluated."""
+    evidence = trial.get("evidence")
+    identity = score.get("scoring_id")
+    pinned_hash = score.get("evidence_hash")
+    if (
+        not identity
+        or not pinned_hash
+        or not isinstance(evidence, dict)
+        or not score.get("execution_id")
+        or score["execution_id"] != trial.get("execution_id")
+        or evidence.get("execution_id") != score["execution_id"]
+        or not score.get("trial_id")
+        or score["trial_id"] != trial.get("trial_id")
+        or score.get("evidence_reference") != f"opsdesk-eval://trials/{score['trial_id']}/evidence"
+        or trial.get("evidence_hash") != pinned_hash
+        or digest(evidence) != pinned_hash
+    ):
+        return False
+    pins = (document.get("report_manifest") or {}).get("selected_scores")
+    if pins is not None:
+        selected = [row for row in pins if row.get("scoring_id") == identity]
+        if len(selected) != 1 or any(
+            selected[0].get(key) != score.get(key) for key in ("trial_id", "evidence_hash")
+        ):
+            return False
+    reconciliation = score.get("reconciliation") or {}
+    journal = reconciliation.get("journal_reference")
+    if (
+        journal is not None
+        and journal != f"opsdesk-agent://executions/{score['execution_id']}/journal"
+    ):
+        return False
+    sources = reconciliation.get("source_hashes")
+    return sources is None or sources == evidence.get("source_hashes")
 
 
 def readonly_engine(url):
@@ -46,7 +85,19 @@ class ResearchView:
                 ):
                     if len(documents) < limit:
                         if document.verification == "verified":
-                            document.current_state = current_state(connection, document)
+                            try:
+                                with connection.begin_nested():
+                                    agreement = current_state(connection, document)
+                            except SQLAlchemyError:
+                                document.current_state = "unavailable"
+                                document.current_source_reason = (
+                                    "Current source query was unavailable."
+                                )
+                                document.current_source_reference = execution_id
+                            else:
+                                document.current_state = agreement.status
+                                document.current_source_reason = agreement.reason
+                                document.current_source_reference = agreement.reference
                         documents.append(document)
             except (KeyError, TypeError, ValueError):
                 if on_invalid is None:

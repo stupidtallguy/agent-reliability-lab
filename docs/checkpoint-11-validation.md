@@ -139,3 +139,41 @@ signer or manipulated source records that mislead the publisher before signing
 fall outside this guarantee. A database owner can withhold or delete a
 legitimate signed history. Detecting rollback to an older signed prefix
 requires an independently pinned head, which this local workflow lacks.
+
+## Checkpoint 11.5 evidence identity
+
+The baseline at `b30364b` credited attempt 2 when the second physical
+attempt failed before MCP and attempt 3 actually returned the receipt.
+A connection-failure variant also replaced the verified retry observation
+with an unresolved one. The same baseline labelled a signed report current
+after its live successful attempt was changed to permission denied. Its
+ordinary trial view paired a rehashed trial with a score pinned to the
+previous capture.
+
+Operational version `reliability-1.4.0` derives receipt reuse from a sealed
+matching receipt response on the actual successful retry and a scoped receipt
+observation within the earlier fault's dispatch and response boundaries.
+Timeout and transport faults keep their own attempt IDs, ordinals and ledger
+references. Faults without adequate receipts remain unresolved. A verified
+retry is counted once by its attempt ID even when multiple faults refer to it.
+Historical signed `reliability-1.3.0` reports still verify and render using
+their original metric semantics. The Ed25519 attestation schema is unchanged.
+
+Current-source comparison uses the captured attempt inventory, the sealed
+ledger and the live journal in addition to the operation, local receipt and
+provider population. Changed historical facts are flagged with an evidence
+reference. Consistent later observations and unavailable queries have
+distinct states. These labels are presentation metadata and never modify an
+authenticated observation or its exports.
+
+The ordinary trial view checks the selected score revision's evidence hash
+against the stored and recomputed trial hash before showing score-backed
+results. A mismatched trial and score retain separate references for inspection.
+The Retry Inspector also requires the audit row and audit payload to identify
+the task in the scoped receipt. Historical evaluator records are preserved.
+
+Run the PostgreSQL regressions in an isolated test database. The two
+three-attempt variants interrupt the second dispatch before invoking MCP.
+The trial integrity regression changes only the disposable capture while
+preserving the earlier materialized score. These probes verify the product's
+evidence checks under privileged test writes.

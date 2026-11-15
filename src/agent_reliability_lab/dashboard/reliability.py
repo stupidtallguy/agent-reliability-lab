@@ -79,12 +79,33 @@ def retry_panel(chain):
             ),
             *((f"Attempt {row['ordinal']}", row["attempt_id"]) for row in attempts),
             *(
+                (f"Verified receipt reuse on attempt {row['ordinal']}", row["attempt_id"])
+                for row in chain.get("receipt_reuse_attempts", [])
+            ),
+            *(
                 (title_case(name), str(value))
                 for name, value in (chain.get("receipt") or {}).items()
             ),
         ],
         label="Exact retry and receipt references",
     )
+    if chain.get("fault_observations"):
+        with st.expander("Fault attribution"):
+            st.dataframe(
+                [
+                    {
+                        "Attempt": fault["ordinal"],
+                        "Fault": title_case(fault["error_code"]),
+                        "Recovery": (
+                            short_ref(fault["verified_recovery_attempt_id"])
+                            if fault["verified_recovery_attempt_id"]
+                            else "Unresolved"
+                        ),
+                    }
+                    for fault in chain["fault_observations"]
+                ],
+                hide_index=True,
+            )
 
 
 def retry_inspector(evidence, score):
@@ -144,7 +165,16 @@ def demo_workspace(view, execution, page):
             if chosen.current_state == "inconsistent":
                 st.warning("Current evidence is inconsistent with this frozen publication.")
             elif chosen.current_state == "historical":
-                st.caption("Additional provider evidence is now available.")
+                st.caption(chosen.current_source_reason)
+            elif chosen.current_state == "unavailable":
+                st.warning("Current source verification is unavailable.")
+            if chosen.current_state in {"inconsistent", "unavailable"}:
+                st.caption(chosen.current_source_reason)
+            if chosen.current_source_reference:
+                exact_refs(
+                    [("Current source reference", chosen.current_source_reference)],
+                    label="Exact current evidence reference",
+                )
     fields(
         [
             ("Local intent", title_case(chosen["provider"]["local_intent"])),

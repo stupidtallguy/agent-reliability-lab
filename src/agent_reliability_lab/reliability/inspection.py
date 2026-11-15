@@ -49,11 +49,15 @@ def task_commitment(evidence, operation, proofs, committed):
         ):
             return False
         payload = normalized_task(receipts[0]["response"])
+        target = payload.get("task_id")
+        if not target or (tool == "update_task" and operation["arguments"]["task_id"] != target):
+            return False
         audits = [
             r
             for r in evidence.get("audits", [])
             if (r["actor_id"], r["tenant_id"], r["operation"], r["sequence"])
             == (config["actor_id"], config["tenant_id"], tool, committed.get("audit_sequence"))
+            and r.get("task_id") == target
             and normalized_task(r["after"]) == payload
         ]
         return len(audits) == 1 and any(
@@ -76,7 +80,9 @@ def mutation_observation(evidence, operation, committed):
         return "unresolved"
     config = (evidence.get("execution") or {}).get("config") or {}
     actor, tenant = config.get("actor_id"), config.get("tenant_id")
-    target = (operation.get("arguments") or {}).get("task_id")
+    target = (operation.get("arguments") or {}).get("task_id") or (
+        (operation.get("response") or {}).get("data") or {}
+    ).get("task_id")
     target_observed = False
     for audit in evidence.get("audits", []):
         if (
@@ -86,14 +92,19 @@ def mutation_observation(evidence, operation, committed):
             != (tool, actor, tenant)
         ):
             continue
+        after = audit.get("after")
+        audit_target = audit.get("task_id")
+        if not audit_target or (after is not None and after.get("task_id") != audit_target):
+            continue
         if (
             committed
             and audit.get("sequence") is not None
             and audit["sequence"] == committed.get("audit_sequence")
-            and (not target or audit.get("task_id") == target)
+            and (not target or audit_target == target)
+            and after is not None
         ):
             return "observed"
-        target_observed |= bool(target and audit.get("task_id") == target)
+        target_observed |= bool(target and audit_target == target)
     return "observed_on_target" if target_observed else "unresolved"
 
 

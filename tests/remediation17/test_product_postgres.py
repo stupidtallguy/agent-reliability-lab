@@ -42,3 +42,53 @@ async def test_complete_demo_is_repeatable_and_readonly_views_cannot_write(lab, 
         assert (
             c.execute(sa.text("SELECT count(*) FROM opsdesk_control.sandboxes")).scalar_one() == 0
         )
+
+
+async def test_execution_trace_quarantines_rehashed_trial_with_wrong_audit_target(lab, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    from agent_reliability_lab.evaluation import tables as t
+    from agent_reliability_lab.evaluation.reporting import report
+    from agent_reliability_lab.opsdesk.fixtures import digest
+    from agent_reliability_lab.research.views import trial_matches_score
+
+    runner, run = lab
+    trial, _ = await run("benign_create")
+    doc = report(runner.store, trial["experiment_id"], evaluator_version="1.7.0")
+    score = doc["results"][0]
+    assert trial_matches_score(doc, score, trial)
+    assert score["reconciliation"]["complete"]
+    eid = trial["trial_id"]
+    monkeypatch.setenv(
+        "OPSDESK_DASHBOARD_DATABASE_URL", runner.engine.url.render_as_string(hide_password=False)
+    )
+    ui = AppTest.from_string(
+        f"""
+import os
+from agent_reliability_lab.dashboard.evidence import execution_trace
+from agent_reliability_lab.research.views import ResearchView, readonly_engine
+view = ResearchView(readonly_engine(os.environ["OPSDESK_DASHBOARD_DATABASE_URL"]))
+execution_trace(view, view.report({doc["report_id"]!r}))
+"""
+    ).run()
+    assert not ui.exception and not ui.error
+    assert "Committed" in " ".join(x.proto.body for x in ui.get("html"))
+    altered = trial["evidence"]
+    audit = altered["audits"][0]
+    assert audit["task_id"] != "task_001"
+    audit["task_id"] = "task_001"
+    with runner.engine.begin() as c:
+        c.exec_driver_sql("ALTER TABLE opsdesk_evaluation.trials DISABLE TRIGGER USER")
+        c.execute(
+            t.trials.update()
+            .filter_by(trial_id=eid)
+            .values(evidence=altered, evidence_hash=digest(altered))
+        )
+        c.exec_driver_sql("ALTER TABLE opsdesk_evaluation.trials ENABLE TRIGGER USER")
+    ui.run()
+    assert not ui.exception
+    assert "unverified for this trial" in ui.error[0].value
+    assert "Committed" not in " ".join(x.proto.body for x in ui.get("html"))
+    view = ResearchView(runner.engine)
+    assert view.report(doc["report_id"])["results"] == doc["results"]
+    assert view.trial(eid)["evidence_hash"] == digest(altered)

@@ -104,7 +104,22 @@ def select_trial(view, document, *, security=False):
         format_func=lambda t: f"{t['scenario_id']} · trial {t.get('trial_index', '—')}",
         key=f"trial_{security}_{document['report_id']}",
     )
-    return view.trial(selected["trial_id"]), selected
+    from agent_reliability_lab.research.views import trial_matches_score
+
+    trial = view.trial(selected["trial_id"])
+    if not trial_matches_score(document, selected, trial):
+        st.error("The selected score revision is unverified for this trial's evidence.")
+        exact_refs(
+            [
+                ("Trial ID", trial.get("trial_id")),
+                ("Score ID", selected.get("scoring_id")),
+                ("Score-pinned evidence hash", selected.get("evidence_hash")),
+                ("Stored trial evidence hash", trial.get("evidence_hash")),
+            ],
+            label="Exact trial and score evidence references",
+        )
+        return None, None
+    return trial, selected
 
 
 def execution_trace(view, document):
