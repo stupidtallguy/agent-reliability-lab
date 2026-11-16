@@ -150,6 +150,9 @@ class ProviderObservation(Contract):
         default=None, ge=0, le=4000000000, exclude_if=lambda value: value is None
     )
     unpriced_usage: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    invalid_metering: Literal[True] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PilotReport(Artifact):

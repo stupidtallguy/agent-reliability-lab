@@ -379,12 +379,21 @@ class PilotBudgetBroker:
                 body = body | dict(
                     state="breached",
                     charged_tokens=max(
-                        body["charged_tokens"], (inputs or 0) + (outputs or 0), total or 0
+                        body["reserved_tokens"],
+                        body["charged_tokens"],
+                        (inputs or 0) + (outputs or 0),
+                        total or 0,
                     ),
-                    charged_usd=str(max(Decimal(body["charged_usd"]), amount or Decimal(0))),
+                    charged_usd=str(
+                        max(
+                            Decimal(body["reserved_usd"]),
+                            Decimal(body["charged_usd"]),
+                            amount or Decimal(0),
+                        )
+                    ),
                 )
                 self._change(connection, request, "breached", body)
-            elif complete and not model_mismatch:
+            elif complete and not model_mismatch and observation.invalid_metering is None:
                 body = body | dict(
                     state="settled",
                     charged_tokens=inputs + outputs,

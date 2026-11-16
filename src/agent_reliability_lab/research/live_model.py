@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import time
 
 import httpx2
@@ -198,39 +199,95 @@ class LiveHTTPModel(BoundPilotModel):
         except ValueError:
             body = {}
         body = body if isinstance(body, dict) else {}
-        usage = body.get("usage")
-        usage = usage if isinstance(usage, dict) else {}
-        details = usage.get("prompt_tokens_details")
-        details = details if isinstance(details, dict) else {}
-        output_details = usage.get("completion_tokens_details")
-        output_details = output_details if isinstance(output_details, dict) else {}
-        explicit_unpriced_usage = (
-            body.get("service_tier") not in (None, "default")
-            or details.get("audio_tokens") not in (None, 0)
-            or output_details.get("audio_tokens") not in (None, 0)
-        )
-        try:
-            observation = ProviderObservation(
-                outcome="failed" if code else "completed",
-                reported_model=body.get("model"),
-                provider_request_id=response.headers.get("x-request-id"),
+        metering, invalid = _metering(body)
+        model = body.get("model")
+        request_id = response.headers.get("x-request-id")
+        safe_model = _safe_id(model, r"[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}")
+        safe_request_id = _safe_id(request_id, r"[a-zA-Z0-9_.:-]{1,128}")
+        invalid = invalid or model != safe_model or request_id != safe_request_id
+        error_code = "invalid_provider_usage_or_identity" if invalid else code
+        result = self.broker.observe(
+            attempt,
+            ProviderObservation(
+                outcome="failed" if error_code else "completed",
+                reported_model=safe_model,
+                provider_request_id=safe_request_id,
                 response_hash=reply,
-                input_tokens=usage.get("prompt_tokens"),
-                output_tokens=usage.get("completion_tokens"),
-                cached_input_tokens=details.get("cached_tokens"),
-                cache_write_tokens=details.get("cache_write_tokens"),
-                reported_total_tokens=usage.get("total_tokens"),
-                unpriced_usage=explicit_unpriced_usage,
+                invalid_metering=True if invalid else None,
                 elapsed_ms=round((time.perf_counter() - started) * 1000),
                 http_status=response.status_code,
-                error_code=code,
-            )
-            result = self.broker.observe(attempt, observation)
-        except ValueError:
-            self.broker.mark_uncertain(attempt, reason="invalid_provider_usage_or_identity")
-            raise ModelFailure("invalid_provider_usage_or_identity") from None
+                error_code=error_code,
+                **metering,
+            ),
+        )
         if result["state"] == "breached":
             raise ModelFailure("pilot_provider_bound_breach")
+        if invalid:
+            raise ModelFailure(error_code)
+
+
+def _safe_id(value, pattern):
+    if isinstance(value, str) and re.fullmatch(pattern, value) and Redactor().text(value) == value:
+        return value
+    return None
+
+
+def _metering(body):
+    """Keep usable observations when a separate field is malformed or unpriced."""
+    usage = body.get("usage")
+    invalid = usage is not None and not isinstance(usage, dict)
+    usage = usage if isinstance(usage, dict) else {}
+    prompt = usage.get("prompt_tokens_details")
+    completion = usage.get("completion_tokens_details")
+    invalid |= any(
+        details is not None and not isinstance(details, dict) for details in (prompt, completion)
+    )
+    prompt = prompt if isinstance(prompt, dict) else {}
+    completion = completion if isinstance(completion, dict) else {}
+    unpriced = body.get("service_tier") not in (None, "default")
+    for fields, supported in (
+        (
+            usage,
+            {
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "prompt_tokens_details",
+                "completion_tokens_details",
+            },
+        ),
+        (prompt, {"text_tokens", "cached_tokens", "cache_write_tokens"}),
+        (completion, {"text_tokens", "reasoning_tokens"}),
+    ):
+        # Zeroed modality or prediction counters are harmless defaults.
+        unpriced |= any(
+            value not in (0, None) for key, value in fields.items() if key not in supported
+        )
+    selected = {}
+    for name, value, ceiling in (
+        ("input_tokens", usage.get("prompt_tokens"), 2_000_000_000),
+        ("output_tokens", usage.get("completion_tokens"), 2_000_000_000),
+        ("cached_input_tokens", prompt.get("cached_tokens"), 2_000_000_000),
+        ("cache_write_tokens", prompt.get("cache_write_tokens"), 2_000_000_000),
+        ("reported_total_tokens", usage.get("total_tokens"), 4_000_000_000),
+    ):
+        if value is None:
+            continue
+        if type(value) is int and 0 <= value <= ceiling:
+            selected[name] = value
+        else:
+            invalid = True
+            # An out-of-range nonnegative count still proves the bound was exceeded.
+            unpriced |= type(value) is int and value > ceiling
+    for fields, allowed in (
+        (prompt, ("text_tokens",)),
+        (completion, ("text_tokens", "reasoning_tokens")),
+    ):
+        invalid |= any(
+            fields.get(key) is not None and (type(fields[key]) is not int or fields[key] < 0)
+            for key in allowed
+        )
+    return selected | {"unpriced_usage": unpriced}, invalid
 
 
 def _failure_code(error):

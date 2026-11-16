@@ -245,6 +245,10 @@ def test_score_pinned_http_pilot_and_preflight(pilot, monkeypatch, tmp_path):
         ("wrong_model", "pilot_provider_bound_breach", "breached"),
         ("too_many_tokens", "pilot_provider_bound_breach", "breached"),
         ("cache_write", "pilot_provider_bound_breach", "breached"),
+        ("image_usage", "pilot_provider_bound_breach", "breached"),
+        ("unknown_usage_category", "pilot_provider_bound_breach", "breached"),
+        ("malformed_with_excess", "pilot_provider_bound_breach", "breached"),
+        ("malformed_only", "invalid_provider_usage_or_identity", "observed"),
         ("contradictory_total", "pilot_provider_bound_breach", "breached"),
         ("unpriced_tier", "pilot_provider_bound_breach", "breached"),
         ("billable_failure", "invalid_model_response", "settled"),
@@ -284,6 +288,14 @@ def test_http_failures_are_single_request_and_keep_appropriate_holds(
             body["usage"]["completion_tokens"] = arm.maximum_output_tokens + 1
         if variant == "cache_write":
             body["usage"]["prompt_tokens_details"]["cache_write_tokens"] = 4
+        if variant == "image_usage":
+            body["usage"]["prompt_tokens_details"]["image_tokens"] = 7
+        if variant == "unknown_usage_category":
+            body["usage"]["prompt_tokens_details"]["future_metering_tokens"] = 7
+        if variant in {"malformed_with_excess", "malformed_only"}:
+            body["usage"]["prompt_tokens"] = "unreadable"
+        if variant == "malformed_with_excess":
+            body["usage"]["completion_tokens"] = arm.maximum_output_tokens + 1
         if variant == "contradictory_total":
             body["usage"]["total_tokens"] = 123456
         if variant == "unpriced_tier":
@@ -320,6 +332,11 @@ def test_http_failures_are_single_request_and_keep_appropriate_holds(
         assert Decimal(actual["charged_usd"]) >= Decimal(actual["reserved_usd"])
     if variant == "billable_failure":
         assert actual["charged_tokens"] == 29 and actual["observation"]["outcome"] == "failed"
+    if variant == "malformed_with_excess":
+        assert actual["observation"]["input_tokens"] is None
+        assert actual["observation"]["output_tokens"] == arm.maximum_output_tokens + 1
+    if variant in {"malformed_only", "malformed_with_excess"}:
+        assert actual["observation"]["invalid_metering"] is True
     assert "private provider error" not in str(broker.snapshot())
     if state != "breached":
         with pytest.raises(ModelFailure, match="pilot_attempt_already_dispatched"):
