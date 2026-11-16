@@ -63,7 +63,7 @@ def validate_plan(store, plan):
                 _config(protocol, spec, arm, "0" * 32),
                 "pilot_plan",
                 protocol.source_commit,
-                protocol.scripts[spec.scenario_id],
+                protocol.scripts.get(spec.scenario_id),
             )
             arms.append(
                 PilotArm(
@@ -266,7 +266,7 @@ def _document(store, plan_ref, result_ref, event_count=None):
     events = broker.snapshot(event_count)
     rows = {event["attempt_id"]: event["body"] for event in events}
     inventory, requests_without_reservation = _join_budget(store, result, plan, rows)
-    return dict(
+    document = dict(
         schema_version="development-pilot-report-1.0.0",
         interpretation="offline_fixture_exploratory",
         methodology=METHODOLOGY,
@@ -288,16 +288,48 @@ def _document(store, plan_ref, result_ref, event_count=None):
         usage=_usage(rows),
         benchmark=result,
     )
+    if run.live_authorization is not None:
+        authority = store.get(run.live_authorization)
+        if any(
+            row["request"].get("authorization_hash") != run.live_authorization.content_hash
+            or not row["request"].get("wire_hash")
+            for row in rows.values()
+        ):
+            raise ValueError("provider events differ from the frozen execution authorization")
+        document.update(
+            schema_version="development-http-pilot-report-1.0.0",
+            interpretation=authority.mode,
+            authorization=run.live_authorization.model_dump(mode="json"),
+            provider_profile=authority.profile.model_dump(mode="json"),
+            methodology=(
+                "Exploratory feasibility over two counterbalanced pairs of one template. "
+                "The guarded arm changes task scope and observation framing. Both arms share the "
+                "provider configuration and independent synthetic sandboxes. Scores are verified "
+                "against captured tool evidence. Costs are estimates at frozen prices. Missing "
+                "usage keeps the reservation. "
+                + (
+                    "This run used simulated HTTP responses."
+                    if authority.mode == "mock_http"
+                    else "Provider usage remains separate from independently verified invoices."
+                )
+            ),
+        )
+    return document
 
 
 async def run_pilot(store, plan_ref):
     plan = store.get(plan_ref)
     if plan.kind != "benchmark_pilot_plan" or plan.mode != "offline_fixture":
         raise ValueError("live pilot execution is disabled")
-    result_ref, artifact = await execute_benchmark(store, plan.protocol, pilot_ref=plan_ref)
+    result_ref, _ = await execute_benchmark(store, plan.protocol, pilot_ref=plan_ref)
+    return publish_pilot(store, plan_ref, result_ref)
+
+
+def publish_pilot(store, plan_ref, result_ref):
+    plan = store.get(plan_ref)
     document = _document(store, plan_ref, result_ref)
     report = PilotReport(
-        identity=artifact.identity,
+        identity=result_ref.identity,
         author=plan.author,
         created_at=datetime.now(UTC),
         plan=plan_ref,
@@ -339,6 +371,10 @@ def render_pilot(document):
             "ledger_id",
         )
     } | {key: benchmark[key] for key in ("source_commit", "evaluator_version", "planned_pairs")}
+    if "authorization" in document:
+        metadata.update(
+            authorization=document["authorization"], interpretation=document["interpretation"]
+        )
     result_rows = [("metadata", "", key, value) for key, value in metadata.items()] + [
         ("usage", "", key, value) for key, value in document["usage"].items()
     ]

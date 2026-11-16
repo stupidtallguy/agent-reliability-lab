@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add CP16 provider authorizations, read-only preflight, and a broker-gated SDK
+  HTTP pathway verified with network-denied mocks. Keep paid transport locked.
+
 - Add CP15's offline paired development pilot, atomic PostgreSQL provider budget
   broker, simulated usage reconciliation, and reproducible score-pinned reports.
   Live benchmark execution stays disabled.

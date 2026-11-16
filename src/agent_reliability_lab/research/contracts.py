@@ -226,6 +226,10 @@ def parse_artifact(value):
             model = {"benchmark_pilot_plan": PilotPlan, "benchmark_pilot_report": PilotReport}.get(
                 kind
             )
+        if kind == "benchmark_live_authorization":
+            from agent_reliability_lab.research.live_contracts import LiveAuthorization
+
+            model = LiveAuthorization
     if model is None:
         raise ValueError("unsupported research artifact kind")
     return model.model_validate_json(json.dumps(value))

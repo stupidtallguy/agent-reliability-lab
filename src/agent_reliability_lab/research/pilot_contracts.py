@@ -123,6 +123,8 @@ class CallRequest(Contract):
     input_hash: Hash
     estimated_input_tokens: int = Field(ge=0)
     maximum_output_tokens: int = Field(ge=1, le=16384)
+    authorization_hash: Hash | None = Field(default=None, exclude_if=lambda value: value is None)
+    wire_hash: Hash | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ProviderObservation(Contract):
@@ -134,6 +136,23 @@ class ProviderObservation(Contract):
     billed_usd: Money | None = None
     elapsed_ms: int | None = Field(default=None, ge=0)
     response_hash: Hash | None = None
+    http_status: int | None = Field(
+        default=None, ge=100, le=599, exclude_if=lambda value: value is None
+    )
+    error_code: Identifier | None = Field(default=None, exclude_if=lambda value: value is None)
+    cached_input_tokens: int | None = Field(
+        default=None, ge=0, le=2000000000, exclude_if=lambda value: value is None
+    )
+    cache_write_tokens: int | None = Field(
+        default=None, ge=0, le=2000000000, exclude_if=lambda value: value is None
+    )
+    reported_total_tokens: int | None = Field(
+        default=None, ge=0, le=4000000000, exclude_if=lambda value: value is None
+    )
+    unpriced_usage: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    invalid_metering: Literal[True] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PilotReport(Artifact):

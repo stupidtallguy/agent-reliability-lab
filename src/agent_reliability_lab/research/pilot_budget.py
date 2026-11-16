@@ -48,10 +48,32 @@ events = sa.Table(
 
 
 class PilotBudgetBroker:
-    def __init__(self, engine, scope, plan):
+    def __init__(self, engine, scope, plan, *, authorization=None):
         self.engine, self.scope = engine, scope
         self.ledger_id = plan.ledger_id
         self.plan_hash = digest(plan.model_dump(mode="json"))
+        self.authorization = authorization
+
+    def _authorize(self, connection, mode, request=None):
+        if mode == "offline_fixture":
+            if (
+                self.authorization is not None
+                or request is not None
+                and request.authorization_hash is not None
+            ):
+                raise ValueError("offline ledger cannot consume provider authorization")
+            return None
+        from agent_reliability_lab.research.live import active_authorization
+
+        authority = active_authorization(connection, self.scope, self.authorization, self.plan_hash)
+        if request is not None and (
+            request.authorization_hash != self.authorization.content_hash
+            or request.wire_hash is None
+        ):
+            raise ValueError(
+                "physical attempt does not pin the provider authorization and wire request"
+            )
+        return authority
 
     def _require_disposable(self):
         if os.environ.get("OPSDESK_TEST_OWNED") != "1" or self.engine.url.database not in {
@@ -86,15 +108,18 @@ class PilotBudgetBroker:
     def open(self, plan, arms):
         self._require_disposable()
         body = plan.model_dump(mode="json")
-        if digest(body) != self.plan_hash or plan.mode != "offline_fixture":
-            raise ValueError("live execution is disabled or pilot plan differs")
+        if digest(body) != self.plan_hash:
+            raise ValueError("pilot plan differs from ledger")
         inventory = {f"{a.slot}:{a.arm}": a.model_dump(mode="json") for a in arms}
         if not inventory or len(inventory) != len(arms):
             raise ValueError("pilot requires unique allocated arms")
         with self.engine.begin() as connection:
+            authority = self._authorize(connection, plan.mode)
             now = self._now(connection)
             price = plan.pricing.prices[0]
             deadline = now + timedelta(seconds=plan.limits.duration_seconds)
+            if authority is not None:
+                deadline = min(deadline, authority.deadline)
             if now < price.effective_from or (
                 price.effective_until is not None and deadline >= price.effective_until
             ):
@@ -183,6 +208,8 @@ class PilotBudgetBroker:
     def reserve(self, request):
         submitted = request.model_dump(mode="json")
         with self.engine.begin() as connection:
+            mode = self._ledger(connection, writing=False)["plan"]["mode"]
+            self._authorize(connection, mode, request)
             ledger = self._ledger(connection)
             existing = self._attempt(connection, request.attempt_id)
             if existing is not None:
@@ -264,6 +291,8 @@ class PilotBudgetBroker:
     def begin_dispatch(self, request):
         """Commit the sole dispatch permit and return the remaining experiment seconds."""
         with self.engine.begin() as connection:
+            mode = self._ledger(connection, writing=False)["plan"]["mode"]
+            self._authorize(connection, mode, request)
             ledger = self._ledger(connection)
             body = self._owned(connection, request)
             if body["state"] != "reserved":
@@ -281,12 +310,15 @@ class PilotBudgetBroker:
             self._change(connection, request, "cancelled", body | {"state": "cancelled"})
             return True
 
-    def mark_uncertain(self, request):
+    def mark_uncertain(self, request, *, reason=None):
         with self.engine.begin() as connection:
             self._ledger(connection)
             body = self._owned(connection, request)
             if body["state"] == "dispatched":
-                self._change(connection, request, "uncertain", body | {"state": "uncertain"})
+                body = body | {"state": "uncertain"}
+                if reason is not None:
+                    body["uncertain_reason"] = reason
+                self._change(connection, request, "uncertain", body)
 
     def observe(self, request, observation: ProviderObservation):
         """Reconcile a reply, including billable failures, without refunding unknown usage."""
@@ -309,7 +341,7 @@ class PilotBudgetBroker:
             if previous == observed:
                 return body
             if previous is not None and any(
-                observed[key] != value for key, value in previous.items() if value is not None
+                observed.get(key) != value for key, value in previous.items() if value is not None
             ):
                 raise ValueError("conflicting provider observation for this attempt")
             plan = PilotPlan.model_validate_json(json.dumps(ledger["plan"]))
@@ -319,12 +351,22 @@ class PilotBudgetBroker:
             priced = plan.price_ceiling(inputs, outputs) if complete else None
             amount = max(priced, billed or Decimal(0)) if complete else billed
             model_mismatch = observation.reported_model != plan.model.model_id
+            total = observation.reported_total_tokens
             breach = (
                 body["state"] == "breached"
                 or (inputs is not None and inputs > body["reserved_input_tokens"])
                 or (outputs is not None and outputs > request.maximum_output_tokens)
                 or (amount is not None and amount > Decimal(body["reserved_usd"]))
                 or (observation.reported_model is not None and model_mismatch)
+                or plan.mode == "future_live_requested"
+                and (
+                    bool(observation.cache_write_tokens)
+                    or observation.unpriced_usage is True
+                    or inputs is not None
+                    and (observation.cached_input_tokens or 0) > inputs
+                    or total is not None
+                    and (total > body["reserved_tokens"] or complete and total != inputs + outputs)
+                )
             )
             body = body | {"observation": observed, "state": "observed"}
             self._change(connection, request, "observed", body)
@@ -336,11 +378,22 @@ class PilotBudgetBroker:
                 )
                 body = body | dict(
                     state="breached",
-                    charged_tokens=max(body["charged_tokens"], (inputs or 0) + (outputs or 0)),
-                    charged_usd=str(max(Decimal(body["charged_usd"]), amount or Decimal(0))),
+                    charged_tokens=max(
+                        body["reserved_tokens"],
+                        body["charged_tokens"],
+                        (inputs or 0) + (outputs or 0),
+                        total or 0,
+                    ),
+                    charged_usd=str(
+                        max(
+                            Decimal(body["reserved_usd"]),
+                            Decimal(body["charged_usd"]),
+                            amount or Decimal(0),
+                        )
+                    ),
                 )
                 self._change(connection, request, "breached", body)
-            elif complete and not model_mismatch:
+            elif complete and not model_mismatch and observation.invalid_metering is None:
                 body = body | dict(
                     state="settled",
                     charged_tokens=inputs + outputs,
