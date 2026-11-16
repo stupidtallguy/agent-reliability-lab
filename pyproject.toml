@@ -21,6 +21,7 @@ dependencies = [
   # Already a LangGraph dependency; explicitly disable hosted tracing in the agent.
   "langsmith>=0.14.17,<1",
   "openai==3.46.0",
+  "httpx2==2.16.0",
   "jsonschema>=4.26,<5",
 ]
 

@@ -188,7 +188,21 @@ def run_inputs(store, run):
     slots, catalog = schedule(dataset, protocol)
     if digest(slots) != run.schedule_hash:
         raise ValueError("frozen benchmark schedule hash mismatch")
-    if run.pilot is not None:
+    if run.live_authorization is not None:
+        from agent_reliability_lab.research.live import validate_authorization
+
+        authority = store.get(run.live_authorization)
+        if (
+            run.pilot is None
+            or run.allocation is not None
+            or run.protocol != authority.protocol
+            or run.pilot != authority.pilot
+        ):
+            raise ValueError("provider run differs from frozen authorization")
+        validate_authorization(store, authority, store.get(run.pilot))
+    elif protocol.mode != "synthetic_exploratory":
+        raise ValueError("provider development run requires a registered authorization")
+    elif run.pilot is not None:
         from agent_reliability_lab.research.pilot import validate_plan
 
         plan = store.get(run.pilot)
@@ -251,14 +265,18 @@ def validate_references(store, artifact, *, authorized_private_read=False):
         from agent_reliability_lab.research.pilot import verify_pilot_report
 
         verify_pilot_report(store, artifact)
+    elif artifact.kind == "benchmark_live_authorization":
+        from agent_reliability_lab.research.live import validate_authorization
+
+        validate_authorization(store, artifact)
     else:
         from agent_reliability_lab.research.heldout_design import validate_design_references
 
         validate_design_references(store, artifact)
 
 
-def _context(run_ref, run, protocol, slot, arm):
-    return dict(
+def _context(run_ref, run, protocol, slot, arm, authority=None):
+    context = dict(
         schema_version="1.0",
         run=run_ref.model_dump(mode="json"),
         protocol=run.protocol.model_dump(mode="json"),
@@ -267,6 +285,12 @@ def _context(run_ref, run, protocol, slot, arm):
         slot=slot,
         arm=arm,
     )
+    if authority is not None:
+        context.update(
+            execution_mode=authority.mode,
+            live_authorization=run.live_authorization.model_dump(mode="json"),
+        )
+    return context
 
 
 def _config(protocol, spec, arm, pairing_id):
@@ -279,7 +303,7 @@ def _config(protocol, spec, arm, pairing_id):
         model=protocol.model,
         budgets=protocol.budgets,
         transport=protocol.transport,
-        scripts={name: protocol.scripts[name]},
+        scripts={name: protocol.scripts[name]} if name in protocol.scripts else {},
         annotations={name: spec.case.oracle},
         harnesses={name: spec.harness},
         write_scopes={name: spec.write_scopes},
@@ -322,7 +346,8 @@ def _arm_evidence(store, report_id, expected, protocol, spec, pairing_id):
     if (
         result.experiment_id != document["experiment_id"]
         or trial["experiment_id"] != result.experiment_id
-        or result.mode != "scripted"
+        or result.mode
+        != ("live" if expected.get("execution_mode") == "paid_openai" else "scripted")
         or (result.eligible and result.evaluator_version != protocol.evaluator_version)
         or result.scenario_hash != spec.scenario_hash
         or trial["scenario_hash"] != spec.scenario_hash
@@ -347,7 +372,7 @@ def _arm_evidence(store, report_id, expected, protocol, spec, pairing_id):
             config,
             trial["sandbox_run_id"],
             protocol.source_commit,
-            protocol.scripts[spec.scenario_id],
+            protocol.scripts.get(spec.scenario_id),
         ).model_dump(mode="json")
         captured = evidence["execution"]
         if captured.get("config") != config_projection(host) or captured.get(
@@ -377,6 +402,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
     if run.kind != "benchmark_run":
         raise ValueError("benchmark result requires a frozen run")
     protocol, dataset, slots, catalog = run_inputs(store, run)
+    authority = store.get(run.live_authorization) if run.live_authorization else None
     expected_keys = {slot["slot"] + ":" + arm for slot in slots for arm in protocol.arms}
     if (
         partial
@@ -398,7 +424,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
             result, item = _arm_evidence(
                 store,
                 report_id,
-                _context(run_ref, run, protocol, slot, arm),
+                _context(run_ref, run, protocol, slot, arm, authority),
                 protocol,
                 spec,
                 pair_id,
@@ -463,7 +489,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
         raise ValueError("benchmark sandbox identity reused")
     return dict(
         schema_version="1.0",
-        interpretation="synthetic_exploratory",
+        interpretation=authority.mode if authority else "synthetic_exploratory",
         run=run_ref.model_dump(mode="json"),
         protocol=run.protocol.model_dump(mode="json"),
         dataset=protocol.dataset.model_dump(mode="json"),
@@ -503,7 +529,16 @@ def verify_result(store, artifact):
     return actual
 
 
-async def execute_benchmark(store, protocol_ref, *, allocation_ref=None, pilot_ref=None):
+async def execute_benchmark(
+    store,
+    protocol_ref,
+    *,
+    allocation_ref=None,
+    pilot_ref=None,
+    live_authorization=None,
+    mock_transport=None,
+    activate_paid=False,
+):
     if os.environ.get("OPSDESK_TEST_OWNED") != "1":
         raise ValueError("CP12 runs require an explicitly owned synthetic database")
     protocol = store.get(protocol_ref)
@@ -515,7 +550,23 @@ async def execute_benchmark(store, protocol_ref, *, allocation_ref=None, pilot_r
     if not _source_matches(protocol, runtime):
         raise ValueError("checked-out source or dependency lock differs from preregistration")
     pilot_model_for = None
-    if pilot_ref is not None:
+    authority = None
+    if live_authorization is not None:
+        from agent_reliability_lab.research.live import open_provider_pilot
+
+        if allocation_ref is not None or pilot_ref is None:
+            raise ValueError("provider execution requires only its development pilot plan")
+        authority, pilot_model_for = open_provider_pilot(
+            store,
+            pilot_ref,
+            protocol_ref,
+            live_authorization,
+            mock_transport,
+            activate_paid,
+        )
+    elif protocol.mode != "synthetic_exploratory" or mock_transport is not None or activate_paid:
+        raise ValueError("provider benchmarks require explicit registered authorization")
+    elif pilot_ref is not None:
         from agent_reliability_lab.research.pilot import open_pilot
 
         if allocation_ref is not None:
@@ -529,6 +580,7 @@ async def execute_benchmark(store, protocol_ref, *, allocation_ref=None, pilot_r
         schedule_hash=digest(slots),
         allocation=allocation_ref,
         pilot=pilot_ref,
+        live_authorization=live_authorization,
     )
     run_ref = store.append(run)
     runner = ScenarioRunner(store.engine)
@@ -543,13 +595,13 @@ async def execute_benchmark(store, protocol_ref, *, allocation_ref=None, pilot_r
                 pilot_model = None
                 if pilot_model_for is not None:
                     script_config = protocol.model.model_copy(
-                        update={"script": protocol.scripts[spec.scenario_id]}
+                        update={"script": protocol.scripts.get(spec.scenario_id, [])}
                     )
                     pilot_model = pilot_model_for(run_ref, slot["slot"], arm, script_config)
                 identifier = await runner.run(
                     [path],
                     _config(protocol, spec, arm, pair_id),
-                    benchmark_context=_context(run_ref, run, protocol, slot, arm),
+                    benchmark_context=_context(run_ref, run, protocol, slot, arm, authority),
                     benchmark_model=pilot_model,
                 )
                 (trial,) = runner.store.list_trials(experiment_id=identifier)

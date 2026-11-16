@@ -112,6 +112,9 @@ CP15 adds an [offline development feasibility pilot](docs/checkpoint-15-live-dev
 with PostgreSQL budget reservations, restart-safe usage reconciliation, and score-pinned
 reports. The pilot uses a synthetic provider fixture. Paid execution stays disabled.
 
+CP16 adds a [broker-gated OpenAI HTTP pathway and readiness preflight](docs/checkpoint-16-real-model-readiness.md).
+The SDK transport and paired workflow run against injected HTTP responses. Public provider egress is locked.
+
 The research workflow includes composite dataset releases, preregistrations and
 amendments, pairing, and family-aware analysis. The optional Oracle Review workspace
 remains available. See the [preregistration draft](docs/preregistration-draft.md) and

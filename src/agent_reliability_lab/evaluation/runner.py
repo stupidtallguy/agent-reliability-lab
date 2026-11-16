@@ -142,14 +142,20 @@ class ScenarioRunner:
     ) -> str:
         if not paths:
             raise ValueError("at least one scenario path is required")
-        if benchmark_context is not None and (live or config.model.provider != "fake"):
+        if benchmark_context is not None and (
+            live or config.model.provider != "fake" and benchmark_model is None
+        ):
             raise ValueError("live model execution is disabled in benchmark mode")
         if benchmark_context is not None and model_factory is not None:
             raise ValueError("arbitrary model factories are disabled in benchmark mode")
         if benchmark_model is not None:
+            from agent_reliability_lab.research.live_model import LiveHTTPModel
             from agent_reliability_lab.research.pilot_model import OfflinePilotModel
 
-            if benchmark_context is None or type(benchmark_model) is not OfflinePilotModel:
+            if benchmark_context is None or type(benchmark_model) not in (
+                OfflinePilotModel,
+                LiveHTTPModel,
+            ):
                 raise ValueError("benchmark model must be the brokered offline adapter")
 
             def offline_factory(_):
@@ -158,8 +164,11 @@ class ScenarioRunner:
             model_factory = offline_factory
         if demonstration and (config.model.provider != "fake" or config.study is not None):
             raise ValueError("a demonstration must use scripted infrastructure validation")
-        if config.model.provider == "openai" and (
-            not live or config.model.model_id == "scripted-v1"
+        brokered_provider = benchmark_model is not None and type(benchmark_model) is LiveHTTPModel
+        if (
+            config.model.provider == "openai"
+            and not brokered_provider
+            and (not live or config.model.model_id == "scripted-v1")
         ):
             raise ValueError("live evaluation requires --live and an explicit model ID")
         cases = [read_case(path) for path in paths]
@@ -264,7 +273,11 @@ class ScenarioRunner:
             manifest["benchmark"] = benchmark_context
         experiment_id = self.store.create_experiment(manifest)
         experiment = self.store.experiment(experiment_id)
-        mode = "scripted" if config.model.provider == "fake" else "live"
+        mode = (
+            "scripted"
+            if config.model.provider == "fake" or brokered_provider and benchmark_model.is_mock
+            else "live"
+        )
         for case, fingerprint, problem in cases:
             scenario = case.scenario if case else None
             oracle = (
