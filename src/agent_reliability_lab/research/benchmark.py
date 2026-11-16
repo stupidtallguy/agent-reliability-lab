@@ -538,6 +538,7 @@ async def execute_benchmark(
     live_authorization=None,
     mock_transport=None,
     activate_paid=False,
+    activate_free=False,
 ):
     if os.environ.get("OPSDESK_TEST_OWNED") != "1":
         raise ValueError("CP12 runs require an explicitly owned synthetic database")
@@ -563,8 +564,14 @@ async def execute_benchmark(
             live_authorization,
             mock_transport,
             activate_paid,
+            activate_free,
         )
-    elif protocol.mode != "synthetic_exploratory" or mock_transport is not None or activate_paid:
+    elif (
+        protocol.mode != "synthetic_exploratory"
+        or mock_transport is not None
+        or activate_paid
+        or activate_free
+    ):
         raise ValueError("provider benchmarks require explicit registered authorization")
     elif pilot_ref is not None:
         from agent_reliability_lab.research.pilot import open_pilot

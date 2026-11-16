@@ -58,6 +58,15 @@ class _PermitTransport(httpx2.AsyncBaseTransport):
         self.gate_error = None
 
     async def handle_async_request(self, request):
+        if self.authority.profile.provider == "groq":
+            mock = self.authority.mode == "mock_http" and type(self.backend) is httpx2.MockTransport
+            external = (
+                self.authority.mode == "groq_free"
+                and live.GROQ_FREE_NETWORK_ENABLED
+                and type(self.backend) is httpx2.AsyncHTTPTransport
+            )
+            if not (mock or external):
+                raise ModelFailure("groq_external_activation_locked")
         if (
             self.broker.authorization is None
             or digest(self.authority.model_dump(mode="json"))

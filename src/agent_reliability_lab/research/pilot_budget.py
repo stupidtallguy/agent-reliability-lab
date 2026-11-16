@@ -53,6 +53,7 @@ class PilotBudgetBroker:
         self.ledger_id = plan.ledger_id
         self.plan_hash = digest(plan.model_dump(mode="json"))
         self.authorization = authorization
+        self.provider = plan.model.provider
 
     def _authorize(self, connection, mode, request=None):
         if mode == "offline_fixture":
@@ -290,13 +291,49 @@ class PilotBudgetBroker:
 
     def begin_dispatch(self, request):
         """Commit the sole dispatch permit and return the remaining experiment seconds."""
-        with self.engine.begin() as connection:
+        # The quota query needs a fresh snapshot after the cross-ledger lock.
+        engine = (
+            self.engine.execution_options(isolation_level="READ COMMITTED")
+            if self.provider == "groq"
+            else self.engine
+        )
+        with engine.begin() as connection:
             mode = self._ledger(connection, writing=False)["plan"]["mode"]
-            self._authorize(connection, mode, request)
+            authority = self._authorize(connection, mode, request)
             ledger = self._ledger(connection)
             body = self._owned(connection, request)
             if body["state"] != "reserved":
                 return None
+            if authority is not None and authority.profile.provider == "groq":
+                rate_limited = connection.scalar(
+                    sa.select(
+                        sa.exists().where(
+                            attempts.c.ledger_id == self.ledger_id,
+                            attempts.c.body["observation"]["http_status"].astext == "429",
+                        )
+                    )
+                )
+                if rate_limited:
+                    raise BudgetExceeded("groq_provider_rate_limited")
+                # Keep simulation traffic separate from production quota accounting.
+                quota = "groq-free" if authority.mode != "mock_http" else f"groq-mock:{self.scope}"
+                lock(connection, "pilot-dispatch-quota:" + quota)
+                since = self._now(connection) - timedelta(hours=24)
+                consumed = connection.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(events)
+                    .where(
+                        events.c.kind == "dispatched",
+                        events.c.recorded_at > since,
+                        events.c.body["quota"].astext == quota,
+                    )
+                )
+                if consumed >= authority.profile.rolling_day_calls:
+                    raise BudgetExceeded("groq_rolling_day_calls")
+                body = body | {
+                    "quota": quota,
+                    "expected_system_fingerprint": authority.profile.expected_system_fingerprint,
+                }
             remaining = self._admit(connection, ledger)
             self._change(connection, request, "dispatched", body | {"state": "dispatched"})
             return remaining
@@ -328,6 +365,7 @@ class PilotBudgetBroker:
             for value in (
                 observation.reported_model,
                 observation.provider_request_id,
+                observation.system_fingerprint,
             )
             if value is not None
         ):
@@ -362,6 +400,14 @@ class PilotBudgetBroker:
                 and (
                     bool(observation.cache_write_tokens)
                     or observation.unpriced_usage is True
+                    or observation.route_mismatch is True
+                    or plan.model.provider == "groq"
+                    and observation.outcome == "completed"
+                    and (
+                        observation.system_fingerprint is None
+                        or observation.system_fingerprint != body["expected_system_fingerprint"]
+                        or not observation.provider_request_id
+                    )
                     or inputs is not None
                     and (observation.cached_input_tokens or 0) > inputs
                     or total is not None

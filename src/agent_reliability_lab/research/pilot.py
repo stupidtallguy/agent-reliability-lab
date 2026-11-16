@@ -314,6 +314,32 @@ def _document(store, plan_ref, result_ref, event_count=None):
                 )
             ),
         )
+        if plan.model.provider == "groq":
+            if any(
+                (observation := row["observation"]) is not None
+                and observation["outcome"] == "completed"
+                and (
+                    observation.get("system_fingerprint")
+                    != authority.profile.expected_system_fingerprint
+                    or observation["reported_model"] != authority.profile.returned_model
+                    or observation.get("route_mismatch") is True
+                    or observation["provider_request_id"] is None
+                )
+                for row in rows.values()
+            ):
+                raise ValueError("Groq provider observation differs from the frozen route")
+            document.update(
+                schema_version="development-groq-pilot-report-1.0.0",
+                financial_verification={
+                    "local_pricing_basis": (
+                        "simulated_free_plan"
+                        if authority.mode == "mock_http"
+                        else "operator_verified_free_plan"
+                    ),
+                    "provider_charge_status": "unavailable",
+                    "invoice_status": "unverified",
+                },
+            )
     return document
 
 
@@ -375,6 +401,8 @@ def render_pilot(document):
         metadata.update(
             authorization=document["authorization"], interpretation=document["interpretation"]
         )
+    if "financial_verification" in document:
+        metadata["financial_verification"] = document["financial_verification"]
     result_rows = [("metadata", "", key, value) for key, value in metadata.items()] + [
         ("usage", "", key, value) for key, value in document["usage"].items()
     ]

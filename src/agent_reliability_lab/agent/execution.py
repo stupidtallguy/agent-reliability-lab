@@ -10,7 +10,12 @@ from sqlalchemy.engine import Engine
 
 from agent_reliability_lab.adversarial.defenses import GUARDED_POLICY
 from agent_reliability_lab.agent.config import AgentConfig
-from agent_reliability_lab.agent.errors import BudgetExceeded, ContextMismatch, ExecutionInterrupted
+from agent_reliability_lab.agent.errors import (
+    BudgetExceeded,
+    ContextMismatch,
+    ExecutionInterrupted,
+    ModelFailure,
+)
 from agent_reliability_lab.agent.graph import SYSTEM_POLICY, GraphRuntime
 from agent_reliability_lab.agent.models.base import ModelAdapter
 from agent_reliability_lab.agent.models.fake import ScriptedModel
@@ -55,6 +60,11 @@ class AgentExecution:
         pause_before_tools: bool = False,
         after_dispatch=None,
     ) -> AgentResult:
+        if config.model.provider == "groq":
+            from agent_reliability_lab.research.groq_model import GroqHTTPModel
+
+            if type(model) is not GroqHTTPModel:
+                raise ModelFailure("groq_requires_brokered_development_pilot")
         with self.store.claim(execution_id):
             row = self.store.get(execution_id)
             if digest(config.model_dump(mode="json")) != row["config_hash"]:
