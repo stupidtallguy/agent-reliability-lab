@@ -17,6 +17,18 @@ async def execute(args):
         result = parse_artifact(json.loads(args.file.read_text(encoding="utf-8")))
         print(result.model_dump_json(indent=2))
         return
+    if args.command == "benchmark-draft":
+        from agent_reliability_lab.research.benchmark import starter_draft
+
+        dataset, protocol = starter_draft(
+            workspace=args.workspace, repetitions=args.repetitions, order_seed=args.seed
+        )
+        args.output.mkdir(parents=True, exist_ok=False)
+        for name, artifact in (("dataset", dataset), ("protocol", protocol)):
+            (args.output / f"{name}.json").write_text(
+                artifact.model_dump_json(indent=2) + "\n", encoding="utf-8"
+            )
+        return
     engine = engine_from_env()
     try:
         store = ResearchStore(engine, args.scope)
@@ -51,6 +63,21 @@ async def execute(args):
             result = verify_pair(
                 store.evaluations, pair.baseline_trial_id, pair.guarded_trial_id, pair.oracle
             )
+        elif args.command in {"benchmark-run", "benchmark-verify"}:
+            from agent_reliability_lab.research.benchmark import execute_benchmark, verify_result
+
+            ref = Reference.model_validate_json(args.file.read_text(encoding="utf-8"))
+            if args.command == "benchmark-run":
+                frozen, _ = await execute_benchmark(store, ref)
+                result = frozen.model_dump(mode="json")
+            else:
+                store = ResearchStore(
+                    engine.execution_options(postgresql_readonly=True), args.scope
+                )
+                artifact = store.get(ref)
+                if artifact.kind != "benchmark_result":
+                    raise ValueError("verification requires a frozen benchmark result")
+                result = verify_result(store, artifact)
         else:
             spec = json.loads(args.file.read_text(encoding="utf-8"))
             pairs = [Reference.model_validate(ref) for ref in spec["pairs"]]
@@ -84,7 +111,21 @@ def main():
     parser.add_argument("--scope", default="research")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="Apply additive research migrations")
-    for name in ("append", "validate", "review-status", "verify-pair", "verify-release", "analyze"):
+    draft = commands.add_parser("benchmark-draft", help="Write an editable synthetic CP12 draft")
+    draft.add_argument("output", type=Path)
+    draft.add_argument("--workspace", type=Path)
+    draft.add_argument("--repetitions", type=int, default=2)
+    draft.add_argument("--seed", type=int, default=42)
+    for name in (
+        "append",
+        "validate",
+        "review-status",
+        "verify-pair",
+        "verify-release",
+        "analyze",
+        "benchmark-run",
+        "benchmark-verify",
+    ):
         command = commands.add_parser(name)
         command.add_argument("file", type=Path)
         if name == "append":

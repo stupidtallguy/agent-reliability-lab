@@ -114,6 +114,14 @@ def response_projection(response: dict | None) -> dict | None:
     }
 
 
+def config_projection(config: dict) -> dict:
+    """The full host config hash is retained separately from this evidence projection."""
+    return {
+        **{key: value for key, value in config.items() if key != "model"},
+        "model": {key: value for key, value in config["model"].items() if key != "script"},
+    }
+
+
 def collect(
     engine: Engine,
     sandbox: Sandbox,
@@ -188,11 +196,7 @@ def collect(
                 timestamp=request_events.get(request["request_id"]),
             )
         # Config scripts and conversation text already live in the agent store.
-        config = execution["config"]
-        execution["config"] = {key: value for key, value in config.items() if key != "model"}
-        execution["config"]["model"] = {
-            key: value for key, value in config["model"].items() if key != "script"
-        }
+        execution["config"] = config_projection(execution["config"])
         return Evidence(
             execution_id=execution_id,
             sandbox_run_id=sandbox.run_id,

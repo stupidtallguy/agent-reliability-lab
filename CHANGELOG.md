@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add the CP12 benchmark catalog and versioned preregistration, with template and
+  attack-family leakage checks, counterbalanced synthetic pairs, pinned result
+  reconstruction, and template-clustered exploratory analysis.
 - Add a reliability lab for transactional retries, sealed model context changes
   and synthetic external-effect evidence.
 - Add a read-only Retry Inspector, operational evidence-quality measures and a

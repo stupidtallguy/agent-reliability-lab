@@ -104,7 +104,11 @@ class ResearchStore:
         return self.reference(artifact)
 
     def _validate_references(self, item):
-        if item.kind in {"attestation", "adjudication"}:
+        if item.kind.startswith("benchmark_"):
+            from agent_reliability_lab.research.benchmark import validate_references
+
+            validate_references(self, item)
+        elif item.kind in {"attestation", "adjudication"}:
             oracle = self.get(item.oracle)
             reviewer = self.get(item.reviewer if item.kind == "attestation" else item.adjudicator)
             if oracle.kind != "oracle" or reviewer.kind != "reviewer":

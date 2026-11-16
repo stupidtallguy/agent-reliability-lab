@@ -87,6 +87,41 @@ def read_case(path: Path) -> tuple[Case | None, str, str | None]:
         return None, hashlib.sha256(raw).hexdigest(), "invalid_scenario_specification"
 
 
+def trial_agent_config(scenario, config, run_id, source_commit, script):
+    """Derive effective host budgets and runtime settings once per planned trial."""
+    budgets = config.budgets.model_copy(
+        update={
+            "max_llm_calls": min(config.budgets.max_llm_calls, scenario.budget.max_model_calls),
+            "max_tool_calls": min(config.budgets.max_tool_calls, scenario.budget.max_tool_calls),
+            "max_wall_seconds": min(
+                config.budgets.max_wall_seconds, float(scenario.budget.max_wall_seconds)
+            ),
+            "max_output_tokens": min(
+                config.budgets.max_output_tokens, scenario.budget.max_total_tokens
+            ),
+        }
+    )
+    model_config = config.model.model_copy(update={"script": script or []})
+    return AgentConfig(
+        source_commit=source_commit,
+        sandbox_run_id=run_id,
+        actor_id=scenario.actor.actor_id,
+        tenant_id=scenario.actor.tenant_id,
+        model=model_config,
+        budgets=budgets,
+        transport=config.transport,
+        runtime_plan=config.harnesses[scenario.scenario_id].runtime()
+        if scenario.scenario_id in config.harnesses
+        else None,
+        defense=Defense(
+            configuration=config.defense,
+            write_scopes=config.write_scopes.get(scenario.scenario_id, []),
+        )
+        if scenario.scenario_id in config.harnesses or config.defense == "guarded"
+        else None,
+    )
+
+
 class ScenarioRunner:
     def __init__(self, engine: Engine):
         self.engine = engine
@@ -102,6 +137,7 @@ class ScenarioRunner:
         model_factory=None,
         execution_options: dict | None = None,
         demonstration: bool = False,
+        benchmark_context: dict | None = None,
     ) -> str:
         if not paths:
             raise ValueError("at least one scenario path is required")
@@ -187,6 +223,8 @@ class ScenarioRunner:
             manifest["study_validation"] = study_validation
         if demonstration:
             manifest["demonstration"] = True
+        if benchmark_context is not None:
+            manifest["benchmark"] = benchmark_context
         experiment_id = self.store.create_experiment(manifest)
         experiment = self.store.experiment(experiment_id)
         mode = "scripted" if config.model.provider == "fake" else "live"
@@ -282,40 +320,12 @@ class ScenarioRunner:
                 cleanup={"status": "deferred", "reason": "execution_not_completed"},
             )
             initial = capture_initial(sandbox)
-            budgets = config.budgets.model_copy(
-                update={
-                    "max_llm_calls": min(
-                        config.budgets.max_llm_calls, scenario.budget.max_model_calls
-                    ),
-                    "max_tool_calls": min(
-                        config.budgets.max_tool_calls, scenario.budget.max_tool_calls
-                    ),
-                    "max_wall_seconds": min(
-                        config.budgets.max_wall_seconds, float(scenario.budget.max_wall_seconds)
-                    ),
-                    "max_output_tokens": min(
-                        config.budgets.max_output_tokens, scenario.budget.max_total_tokens
-                    ),
-                }
-            )
-            model_config = config.model.model_copy(update={"script": script or []})
-            agent_config = AgentConfig(
-                source_commit=experiment["manifest"]["provenance"]["source_commit"],
-                sandbox_run_id=run_id,
-                actor_id=scenario.actor.actor_id,
-                tenant_id=scenario.actor.tenant_id,
-                model=model_config,
-                budgets=budgets,
-                transport=config.transport,
-                runtime_plan=config.harnesses[scenario.scenario_id].runtime()
-                if scenario.scenario_id in config.harnesses
-                else None,
-                defense=Defense(
-                    configuration=config.defense,
-                    write_scopes=config.write_scopes.get(scenario.scenario_id, []),
-                )
-                if scenario.scenario_id in config.harnesses or config.defense == "guarded"
-                else None,
+            agent_config = trial_agent_config(
+                scenario,
+                config,
+                run_id,
+                experiment["manifest"]["provenance"]["source_commit"],
+                script,
             )
             host = AgentExecution(self.engine)
             async with ToolSession(self.engine, host.launch(agent_config), agent_config) as session:
@@ -328,7 +338,7 @@ class ScenarioRunner:
                 trial_id, execution_id=execution_id, state="running", started_at=now()
             )
             started = time.perf_counter()
-            model = model_factory(model_config) if model_factory else None
+            model = model_factory(agent_config.model) if model_factory else None
             result = await host.run(
                 execution_id, agent_config, model=model, live_opt_in=live, **options
             )
