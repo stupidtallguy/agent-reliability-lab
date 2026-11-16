@@ -291,13 +291,11 @@ class PilotBudgetBroker:
 
     def begin_dispatch(self, request):
         """Commit the sole dispatch permit and return the remaining experiment seconds."""
-        # The quota query needs a fresh snapshot after the cross-ledger lock.
-        engine = (
-            self.engine.execution_options(isolation_level="READ COMMITTED")
-            if self.provider == "groq"
-            else self.engine
-        )
-        with engine.begin() as connection:
+        with self.engine.begin() as connection:
+            if self.provider == "groq":
+                # Require a fresh snapshot after the cross-ledger advisory lock even
+                # if the connection pool or the database defaults to REPEATABLE READ.
+                connection.exec_driver_sql("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
             mode = self._ledger(connection, writing=False)["plan"]["mode"]
             authority = self._authorize(connection, mode, request)
             ledger = self._ledger(connection)
