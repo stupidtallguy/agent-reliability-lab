@@ -58,6 +58,19 @@ class _PermitTransport(httpx2.AsyncBaseTransport):
         self.gate_error = None
 
     async def handle_async_request(self, request):
+        if self.authority.profile.provider == "groq":
+            mock = self.authority.mode == "mock_http" and type(self.backend) is httpx2.MockTransport
+            external = (
+                self.authority.mode == "groq_free"
+                and live.GROQ_FREE_NETWORK_ENABLED
+                and type(self.backend) is httpx2.AsyncHTTPTransport
+            )
+            if not (mock or external):
+                raise ModelFailure("groq_external_activation_locked")
+            if external:
+                scheme, _, credential = request.headers.get("Authorization", "").partition(" ")
+                if scheme != "Bearer" or not self.authority.profile.matches_credential(credential):
+                    raise ModelFailure("groq_credential_binding_mismatch")
         if (
             self.broker.authorization is None
             or digest(self.authority.model_dump(mode="json"))
@@ -66,11 +79,14 @@ class _PermitTransport(httpx2.AsyncBaseTransport):
             and not isinstance(self.backend, httpx2.MockTransport)
         ):
             raise ModelFailure("pilot_http_authorization_mismatch")
-        if (
-            request.method != "POST"
-            or str(request.url) != self.authority.profile.endpoint
-            or digest(json.loads(await request.aread())) != self.attempt.wire_hash
-        ):
+        if request.method != "POST" or str(request.url) != self.authority.profile.endpoint:
+            raise ModelFailure("pilot_http_request_differs_from_reservation")
+        raw = await request.aread()
+        if self.authority.profile.provider == "groq":
+            from agent_reliability_lab.research.groq_model import verify_groq_wire
+
+            verify_groq_wire(self.authority.profile, self.attempt, raw)
+        elif digest(json.loads(raw)) != self.attempt.wire_hash:
             raise ModelFailure("pilot_http_request_differs_from_reservation")
         if self.authority.mode == "paid_openai" and not live.PUBLIC_PROVIDER_NETWORK_ENABLED:
             raise ModelFailure("pilot_external_activation_locked")
