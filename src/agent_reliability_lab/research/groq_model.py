@@ -41,6 +41,31 @@ def groq_payload(profile, messages, tools, output_limit):
     return payload
 
 
+def _unique_fields(pairs):
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        raise ValueError("duplicate JSON fields")
+    return fields
+
+
+def verify_groq_wire(profile, attempt, raw):
+    """Independently bind the permit to a single allowed route and sealed input."""
+    try:
+        actual = json.loads(raw, object_pairs_hook=_unique_fields)
+        messages, tools = actual["messages"], actual.get("tools", [])
+        if digest(actual) != attempt.wire_hash:
+            raise ModelFailure("pilot_http_request_differs_from_reservation")
+        if (
+            not isinstance(messages, list)
+            or not isinstance(tools, list)
+            or digest([messages, tools]) != attempt.input_hash
+            or actual != groq_payload(profile, messages, tools, attempt.maximum_output_tokens)
+        ):
+            raise ModelFailure("groq_wire_policy_mismatch")
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise ModelFailure("groq_wire_policy_mismatch") from None
+
+
 def _groq_metering(body):
     usage = body.get("usage")
     timings_valid = True

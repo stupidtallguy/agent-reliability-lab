@@ -383,6 +383,22 @@ def test_groq_blocks_direct_http_changed_endpoint_and_future_activation(factory,
                 httpx2.Request("POST", authority.profile.endpoint, json=altered)
             )
         )
+    forged = _request(plan, arm, ref, altered)
+    broker.reserve(forged)
+    forged_permit = _PermitTransport(broker, forged, authority, httpx2.MockTransport(forbidden))
+    with pytest.raises(ModelFailure, match="groq_wire_policy_mismatch"):
+        asyncio.run(
+            forged_permit.handle_async_request(
+                httpx2.Request("POST", authority.profile.endpoint, json=altered)
+            )
+        )
+    duplicate_fields = b'{"model":"paid-substitution",' + json.dumps(payload).encode()[1:]
+    with pytest.raises(ModelFailure, match="groq_wire_policy_mismatch"):
+        asyncio.run(
+            permit.handle_async_request(
+                httpx2.Request("POST", authority.profile.endpoint, content=duplicate_fields)
+            )
+        )
     assert all(event["kind"] == "reserved" for event in broker.snapshot())
 
 
