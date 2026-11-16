@@ -31,6 +31,7 @@ def test_free_authorization_requires_free_organization_evidence_and_backend_pin(
     assert profile.incompatibilities("groq_free") == [
         "backend_fingerprint_not_pinned",
         "free_organization_unverified",
+        "free_credential_not_pinned",
     ]
     assert profile.incompatibilities("paid_openai") == ["groq_paid_route_forbidden"]
     assert profile.incompatibilities("mock_http") == ["backend_fingerprint_not_pinned"]

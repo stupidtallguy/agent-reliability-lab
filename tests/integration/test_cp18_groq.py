@@ -19,7 +19,7 @@ from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research import live
 from agent_reliability_lab.research.benchmark import starter_draft
 from agent_reliability_lab.research.groq_model import GroqHTTPModel, groq_payload
-from agent_reliability_lab.research.live_contracts import GroqProfile
+from agent_reliability_lab.research.live_contracts import GroqProfile, groq_key_commitment
 from agent_reliability_lab.research.live_model import _PermitTransport
 from agent_reliability_lab.research.persistence import ResearchStore
 from agent_reliability_lab.research.pilot import render_pilot, validate_plan, verify_pilot_report
@@ -343,7 +343,10 @@ def test_groq_blocks_direct_http_changed_endpoint_and_future_activation(factory,
         update={
             "mode": "groq_free",
             "profile": authority.profile.model_copy(
-                update={"free_organization_evidence": "a" * 64}
+                update={
+                    "free_organization_evidence": "a" * 64,
+                    "free_key_commitment": groq_key_commitment("test_only"),
+                }
             ),
         }
     )
@@ -391,7 +394,12 @@ def test_future_free_transport_sends_only_one_approved_request_with_network_repl
     authority = live.draft_authorization(
         store,
         plan_ref,
-        draft.profile.model_copy(update={"free_organization_evidence": "a" * 64}),
+        draft.profile.model_copy(
+            update={
+                "free_organization_evidence": "a" * 64,
+                "free_key_commitment": groq_key_commitment("fixture_only"),
+            }
+        ),
         "groq_free",
         draft.deadline,
     )
@@ -406,8 +414,12 @@ def test_future_free_transport_sends_only_one_approved_request_with_network_repl
 
     # Replace the network handler before exercising the dormant release branch.
     monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", intercept)
-    monkeypatch.setenv("GROQ_API_KEY", "fixture_only")
     monkeypatch.setattr(live, "GROQ_FREE_NETWORK_ENABLED", True)
+    monkeypatch.setenv("GROQ_API_KEY", "different_account_fixture")
+    assert live.preflight(store, plan_ref, auth_ref)["issues"] == [
+        "free_credential_binding_mismatch"
+    ]
+    monkeypatch.setenv("GROQ_API_KEY", "fixture_only")
     with pytest.raises(live.ActivationBlocked, match="explicit_free_activation_required"):
         asyncio.run(live.run_provider_pilot(store, auth_ref, activate_paid=True))
     assert not sent
@@ -423,6 +435,15 @@ def test_future_free_transport_sends_only_one_approved_request_with_network_repl
     payload = groq_payload(authority.profile, messages, [], arm.maximum_output_tokens)
     attempt = _request(plan, arm, auth_ref, payload)
     monkeypatch.setattr(model, "_bound_request", lambda *args, **kwargs: attempt)
+    monkeypatch.setenv("GROQ_API_KEY", "different_account_fixture")
+    with pytest.raises(ModelFailure, match="groq_credential_binding_mismatch"):
+        asyncio.run(
+            model.decide_for_request(
+                attempt.execution_id, attempt.attempt_id, messages, [], 0, arm.maximum_output_tokens
+            )
+        )
+    assert not sent
+    monkeypatch.setenv("GROQ_API_KEY", "fixture_only")
     with pytest.raises(ModelFailure, match="rate_limited"):
         asyncio.run(
             model.decide_for_request(

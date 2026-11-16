@@ -67,6 +67,10 @@ class _PermitTransport(httpx2.AsyncBaseTransport):
             )
             if not (mock or external):
                 raise ModelFailure("groq_external_activation_locked")
+            if external:
+                scheme, _, credential = request.headers.get("Authorization", "").partition(" ")
+                if scheme != "Bearer" or not self.authority.profile.matches_credential(credential):
+                    raise ModelFailure("groq_credential_binding_mismatch")
         if (
             self.broker.authorization is None
             or digest(self.authority.model_dump(mode="json"))

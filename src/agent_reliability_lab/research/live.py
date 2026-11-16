@@ -336,6 +336,12 @@ def preflight(store, plan_ref, authorization_ref=None):
                 issues.extend(auth.profile.incompatibilities(auth.mode))
                 if auth.mode != "mock_http" and not checks["credential_configured"]:
                     issues.append("provider_credential_not_configured")
+                if auth.mode == "groq_free" and checks["credential_configured"]:
+                    checks["credential_matches"] = auth.profile.matches_credential(
+                        os.environ.get("GROQ_API_KEY", "").strip()
+                    )
+                    if not checks["credential_matches"]:
+                        issues.append("free_credential_binding_mismatch")
                 try:
                     active_authorization(
                         connection, store.scope, authorization_ref, plan_ref.content_hash

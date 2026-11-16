@@ -330,11 +330,14 @@ def _document(store, plan_ref, result_ref, event_count=None):
                 raise ValueError("Groq provider observation differs from the frozen route")
             document.update(
                 schema_version="development-groq-pilot-report-1.0.0",
+                provider_profile=authority.profile.model_dump(
+                    mode="json", exclude={"free_key_commitment"}
+                ),
                 financial_verification={
                     "local_pricing_basis": (
                         "simulated_free_plan"
                         if authority.mode == "mock_http"
-                        else "operator_verified_free_plan"
+                        else "operator_attested_free_plan"
                     ),
                     "provider_charge_status": "unavailable",
                     "invoice_status": "unverified",

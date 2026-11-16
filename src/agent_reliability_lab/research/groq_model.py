@@ -133,6 +133,8 @@ class GroqHTTPModel(BoundPilotModel):
             credential = os.environ.get("GROQ_API_KEY", "").strip()
             if not credential:
                 raise ModelFailure("pilot_credential_unavailable")
+            if not profile.matches_credential(credential):
+                raise ModelFailure("groq_credential_binding_mismatch")
             headers = {"Authorization": "Bearer " + credential}
             backend = httpx2.AsyncHTTPTransport(retries=0, trust_env=False)
         transport = _PermitTransport(self.broker, attempt, self.authority, backend)

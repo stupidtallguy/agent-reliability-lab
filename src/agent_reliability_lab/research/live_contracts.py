@@ -1,6 +1,8 @@
 """Frozen authorization and provider compatibility for development HTTP pilots."""
 
 import re
+from hashlib import sha256
+from secrets import compare_digest
 from typing import Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
@@ -75,6 +77,7 @@ class GroqProfile(Contract):
     rolling_day_calls: Literal[16] = GROQ_PILOT_CALLS
     expected_system_fingerprint: ModelID | None = None
     free_organization_evidence: Hash | None = None
+    free_key_commitment: Hash | None = None
 
     @model_validator(mode="after")
     def window(self) -> Self:
@@ -88,9 +91,25 @@ class GroqProfile(Contract):
         issues = []
         if self.expected_system_fingerprint is None:
             issues.append("backend_fingerprint_not_pinned")
-        if mode == "groq_free" and self.free_organization_evidence is None:
-            issues.append("free_organization_unverified")
+        if mode == "groq_free":
+            if self.free_organization_evidence is None:
+                issues.append("free_organization_unverified")
+            if self.free_key_commitment is None:
+                issues.append("free_credential_not_pinned")
         return issues
+
+    def matches_credential(self, credential):
+        return bool(
+            credential
+            and self.free_key_commitment
+            and compare_digest(self.free_key_commitment, groq_key_commitment(credential))
+        )
+
+
+def groq_key_commitment(credential):
+    return sha256(
+        b"agent-reliability-lab/groq-free-key/v1\0" + credential.encode("utf-8")
+    ).hexdigest()
 
 
 class LiveAuthorization(Artifact):
