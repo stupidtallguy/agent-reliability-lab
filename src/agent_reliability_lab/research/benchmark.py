@@ -195,6 +195,7 @@ def run_inputs(store, run):
         if (
             run.pilot is None
             or run.allocation is not None
+            or authority.purpose is not None
             or run.protocol != authority.protocol
             or run.pilot != authority.pilot
         ):

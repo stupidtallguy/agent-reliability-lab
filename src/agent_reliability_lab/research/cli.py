@@ -122,6 +122,10 @@ async def execute(args):
             from pydantic import TypeAdapter
 
             from agent_reliability_lab.evaluation.contracts import PriceBook
+            from agent_reliability_lab.research.groq_qualification import (
+                qualification_evidence,
+                qualify_groq,
+            )
             from agent_reliability_lab.research.live import (
                 draft_authorization,
                 draft_live,
@@ -131,7 +135,16 @@ async def execute(args):
             from agent_reliability_lab.research.live_contracts import GroqProfile, ProviderProfile
 
             ref = Reference.model_validate_json(args.file.read_bytes())
-            if args.command == "benchmark-live-run":
+            if args.command == "benchmark-live-qualify":
+                result = await qualify_groq(store, ref, activate_free=args.activate_free)
+                print(json.dumps(result, indent=2, sort_keys=True))
+                return int(not result["qualified"])
+            elif args.command == "benchmark-live-qualification-evidence":
+                result = qualification_evidence(
+                    ResearchStore(engine.execution_options(postgresql_readonly=True), args.scope),
+                    ref,
+                )
+            elif args.command == "benchmark-live-run":
                 if not (args.activate_paid or args.activate_free):
                     raise ValueError("provider execution requires explicit operator activation")
                 result = (
@@ -171,6 +184,7 @@ async def execute(args):
                         PriceBook.model_validate_json(args.pricing.read_bytes()),
                         args.maximum_usd,
                         args.scenario,
+                        qualification=args.qualification,
                     )
                     args.output.mkdir(parents=True, exist_ok=False)
                     for name, artifact in (("protocol", protocol), ("plan", plan)):
@@ -359,6 +373,7 @@ def main():
     live_draft.add_argument("--maximum-usd", type=Decimal, required=True)
     live_draft.add_argument("--identity", default="cp16_development")
     live_draft.add_argument("--scenario", default="multi_step_resolve_task")
+    live_draft.add_argument("--qualification", action="store_true")
     live_auth = commands.add_parser(
         "benchmark-live-authorize-draft", help="Draft a scoped execution authorization"
     )
@@ -375,6 +390,15 @@ def main():
     activation = live_run.add_mutually_exclusive_group()
     activation.add_argument("--activate-paid", action="store_true")
     activation.add_argument("--activate-free", action="store_true")
+    qualify = commands.add_parser(
+        "benchmark-live-qualify", help="Request one separately authorized Groq fingerprint probe"
+    )
+    qualify.add_argument("file", type=Path)
+    qualify.add_argument("--activate-free", action="store_true")
+    qualification_evidence = commands.add_parser(
+        "benchmark-live-qualification-evidence", help="Verify the stored Groq qualification"
+    )
+    qualification_evidence.add_argument("file", type=Path)
     pilot_draft = commands.add_parser(
         "benchmark-pilot-draft", help="Draft a frozen offline development pilot"
     )

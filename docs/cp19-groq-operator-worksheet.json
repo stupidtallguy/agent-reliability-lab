@@ -1,0 +1,84 @@
+{
+  "schema_version": "cp19-groq-worksheet-1.0",
+  "activation_status": "blocked_pending_private_account_evidence_and_owner_authorization",
+  "evidence_classes": {
+    "official_documentation": [
+      "https://console.groq.com/docs/rate-limits",
+      "https://console.groq.com/docs/billing-faqs",
+      "https://console.groq.com/docs/api-reference",
+      "https://console.groq.com/docs/your-data"
+    ],
+    "private_operator_account_evidence_sha256": null,
+    "actual_provider_observations": null,
+    "independently_verified_invoice": null
+  },
+  "private_account_review": {
+    "owner_verified": null,
+    "free_plan_verified": null,
+    "no_paid_subscription_recharge_or_payment_method": null,
+    "credential_issued_by_verified_organization": null,
+    "exact_model_allowed": null,
+    "requests_per_minute": null,
+    "requests_per_day": null,
+    "tokens_per_minute": null,
+    "tokens_per_day": null,
+    "input_tokens_per_minute_if_configured": null,
+    "output_tokens_per_minute_if_configured": null,
+    "no_conflicting_traffic": null,
+    "retention_and_synthetic_data_reviewed": null
+  },
+  "route": {
+    "provider": "groq",
+    "model": "openai/gpt-oss-20b",
+    "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+    "service_tier": "on_demand",
+    "provider_retries": 0
+  },
+  "zero_price_assumption": {
+    "schema_version": "1.0",
+    "version": "cp19-groq-free-plan-owner-reviewed",
+    "currency": "USD",
+    "prices": [
+      {
+        "provider": "groq",
+        "model_id": "openai/gpt-oss-20b",
+        "effective_from": null,
+        "effective_until": null,
+        "provenance": "Replace with the owner-reviewed Free account evidence reference",
+        "units": "per_million_tokens",
+        "input_rate": "0",
+        "cached_input_rate": "0",
+        "output_rate": "0",
+        "fixed_request_fee": "0"
+      }
+    ]
+  },
+  "qualification": {
+    "purpose": "groq_fingerprint",
+    "maximum_physical_requests": 1,
+    "input_ceiling": 256,
+    "output_ceiling": 256,
+    "owner_approval_reference": null,
+    "authorization_reference": null,
+    "event_hash": null,
+    "observed_fingerprint": null
+  },
+  "study": {
+    "scenario": "multi_step_resolve_task",
+    "partition": "development",
+    "evaluator": "1.7.0",
+    "pair_order_set": [["baseline", "guarded"], ["guarded", "baseline"]],
+    "isolated_trials": 4,
+    "physical_calls_per_trial": 4,
+    "maximum_physical_requests": 16,
+    "proposed_input_ceiling": 7700,
+    "proposed_output_ceiling": 256,
+    "reviewed_build_sha": null,
+    "lock_sha256": null,
+    "protocol_reference": null,
+    "schedule_sha256": null,
+    "plan_reference": null,
+    "authorization_reference": null,
+    "separate_owner_approval_reference": null
+  }
+}

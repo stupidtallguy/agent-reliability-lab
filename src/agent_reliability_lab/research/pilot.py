@@ -51,6 +51,22 @@ def validate_plan(store, plan):
         previous = store.get(plan.supersedes)
         if previous.ledger_id == plan.ledger_id:
             raise ValueError("an amended pilot requires a new budget ledger")
+    if plan.mode == "groq_qualification":
+        if protocol.mode != "provider_development_exploratory" or any(
+            slot["partition"] != "development" for slot in slots
+        ):
+            raise ValueError("Groq qualification requires an existing development scenario")
+        return [
+            PilotArm(
+                slot="groq_qualification",
+                arm="baseline",
+                scenario="groq_qualification",
+                tenant="groq_qualification",
+                actor="groq_qualification",
+                script_config_hash=digest(protocol.model.model_dump(mode="json")),
+                maximum_output_tokens=plan.limits.maximum_output_tokens,
+            )
+        ]
     arms = []
     for slot in slots:
         spec = catalog[slot["scenario_id"]]
