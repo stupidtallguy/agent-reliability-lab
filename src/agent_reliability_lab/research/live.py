@@ -13,12 +13,19 @@ from agent_reliability_lab.opsdesk.database import lock
 from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research.benchmark import _source_matches, schedule
 from agent_reliability_lab.research.contracts import parse_artifact
+from agent_reliability_lab.research.live_contracts import GroqProfile
 from agent_reliability_lab.research.persistence import artifacts
 from agent_reliability_lab.research.pilot import validate_plan
-from agent_reliability_lab.research.pilot_contracts import PilotLimits, PilotModel, PilotPlan
+from agent_reliability_lab.research.pilot_contracts import (
+    GROQ_PILOT_CALLS,
+    PilotLimits,
+    PilotModel,
+    PilotPlan,
+)
 
 # Deployment/build fuse. CP16 does not ship a CLI or environment override for this.
 PUBLIC_PROVIDER_NETWORK_ENABLED = False
+GROQ_FREE_NETWORK_ENABLED = False
 PROVIDER_PROTOCOL = "provider_development_exploratory"
 TEST_DATABASES = {"opsdesk_lab_ci", "opsdesk_lab_test"}
 
@@ -125,6 +132,8 @@ def active_authorization(connection, scope, reference, plan_hash):
         raise ActivationBlocked(issues[0])
     if authority.mode == "paid_openai" and not PUBLIC_PROVIDER_NETWORK_ENABLED:
         raise ActivationBlocked("external_activation_locked")
+    if authority.mode == "groq_free" and not GROQ_FREE_NETWORK_ENABLED:
+        raise ActivationBlocked("groq_external_activation_locked")
     return authority
 
 
@@ -164,8 +173,20 @@ def draft_live(store, parent_ref, identity, profile, pricing, maximum_usd, scena
             )
         ).model_dump_json()
     )
+    if isinstance(profile, GroqProfile):
+        protocol = protocol.model_copy(
+            update={
+                "budgets": protocol.budgets.model_copy(
+                    update={"max_llm_calls": GROQ_PILOT_CALLS // 4}
+                )
+            }
+        )
     slots, _ = schedule(dataset, protocol)
-    model = PilotModel(model_id=profile.requested_model, allowed_models=(profile.requested_model,))
+    model = PilotModel(
+        provider=profile.provider,
+        model_id=profile.requested_model,
+        allowed_models=(profile.requested_model,),
+    )
     calls = 4 * protocol.budgets.max_llm_calls
     plan = PilotPlan(
         identity=identity,
@@ -201,6 +222,11 @@ def draft_authorization(store, plan_ref, profile, mode, deadline):
         raise ActivationBlocked("provider_pilot_plan_required")
     now = datetime.now(UTC)
     artifact = LiveAuthorization(
+        authorization_version=(
+            "development-groq-free-1.0.0"
+            if isinstance(profile, GroqProfile)
+            else "development-http-1.0.0"
+        ),
         identity="auth_" + plan.ledger_id,
         created_at=now,
         starts_at=now,
@@ -238,7 +264,19 @@ def preflight(store, plan_ref, authorization_ref=None):
         protocol = store.get(plan.protocol)
         if protocol.kind != "benchmark_protocol" or protocol.mode != PROVIDER_PROTOCOL:
             raise ActivationBlocked("provider_development_protocol_required")
+        if (protocol.model.provider, protocol.model.model_id) != (
+            plan.model.provider,
+            plan.model.model_id,
+        ):
+            raise ActivationBlocked("provider_protocol_model_mismatch")
         arms = validate_plan(store, plan)
+        if plan.model.provider == "groq":
+            checks.update(
+                credential_configured=bool(os.environ.get("GROQ_API_KEY", "").strip()),
+                public_network_enabled=GROQ_FREE_NETWORK_ENABLED,
+                rolling_day_call_limit=GROQ_PILOT_CALLS,
+                provider_invoice_verified=False,
+            )
         checks["development_only"] = True
         checks["held_out_enabled"] = False
         checks["sdk_retries"] = plan.model.sdk_retries
@@ -296,8 +334,14 @@ def preflight(store, plan_ref, authorization_ref=None):
                 ):
                     issues.append("price_expires_within_execution_window")
                 issues.extend(auth.profile.incompatibilities(auth.mode))
-                if auth.mode == "paid_openai" and not checks["credential_configured"]:
+                if auth.mode != "mock_http" and not checks["credential_configured"]:
                     issues.append("provider_credential_not_configured")
+                if auth.mode == "groq_free" and checks["credential_configured"]:
+                    checks["credential_matches"] = auth.profile.matches_credential(
+                        os.environ.get("GROQ_API_KEY", "").strip()
+                    )
+                    if not checks["credential_matches"]:
+                        issues.append("free_credential_binding_mismatch")
                 try:
                     active_authorization(
                         connection, store.scope, authorization_ref, plan_ref.content_hash
@@ -330,10 +374,11 @@ def preflight(store, plan_ref, authorization_ref=None):
 
 
 def open_provider_pilot(
-    store, plan_ref, protocol_ref, authorization_ref, mock_transport, activate_paid
+    store, plan_ref, protocol_ref, authorization_ref, mock_transport, activate_paid, activate_free
 ):
     import httpx2
 
+    from agent_reliability_lab.research.groq_model import GroqHTTPModel
     from agent_reliability_lab.research.live_model import LiveHTTPModel
     from agent_reliability_lab.research.pilot_budget import PilotBudgetBroker
 
@@ -343,10 +388,23 @@ def open_provider_pilot(
         raise ActivationBlocked("provider_pilot_protocol_mismatch")
     authority = store.get(authorization_ref)
     validate_authorization(store, authority, plan)
+    groq = isinstance(authority.profile, GroqProfile)
     if authority.mode == "mock_http":
-        if activate_paid or not isinstance(mock_transport, httpx2.MockTransport):
+        if activate_paid or activate_free or not isinstance(mock_transport, httpx2.MockTransport):
             raise ActivationBlocked("offline_mock_transport_required")
-    elif not activate_paid or not PUBLIC_PROVIDER_NETWORK_ENABLED or mock_transport is not None:
+        if groq and type(mock_transport) is not httpx2.MockTransport:
+            raise ActivationBlocked("offline_mock_transport_required")
+    elif groq:
+        if not GROQ_FREE_NETWORK_ENABLED:
+            raise ActivationBlocked("groq_external_activation_locked")
+        if not activate_free or activate_paid or mock_transport is not None:
+            raise ActivationBlocked("explicit_free_activation_required")
+    elif (
+        not activate_paid
+        or activate_free
+        or not PUBLIC_PROVIDER_NETWORK_ENABLED
+        or mock_transport is not None
+    ):
         raise ActivationBlocked(
             "external_activation_locked"
             if not PUBLIC_PROVIDER_NETWORK_ENABLED
@@ -362,14 +420,17 @@ def open_provider_pilot(
     by_arm = {(arm.slot, arm.arm): arm for arm in arms}
 
     def make_model(run_ref, slot, arm, model_config):
-        return LiveHTTPModel(
+        adapter = GroqHTTPModel if groq else LiveHTTPModel
+        return adapter(
             broker, plan, by_arm[(slot, arm)], run_ref, model_config, authority, mock_transport
         )
 
     return authority, make_model
 
 
-async def run_provider_pilot(store, authorization_ref, *, mock_transport=None, activate_paid=False):
+async def run_provider_pilot(
+    store, authorization_ref, *, mock_transport=None, activate_paid=False, activate_free=False
+):
     from agent_reliability_lab.research.benchmark import execute_benchmark
     from agent_reliability_lab.research.pilot import publish_pilot
 
@@ -383,5 +444,6 @@ async def run_provider_pilot(store, authorization_ref, *, mock_transport=None, a
         live_authorization=authorization_ref,
         mock_transport=mock_transport,
         activate_paid=activate_paid,
+        activate_free=activate_free,
     )
     return publish_pilot(store, authority.pilot, result_ref)

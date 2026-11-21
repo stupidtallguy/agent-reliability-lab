@@ -115,6 +115,10 @@ reports. The pilot uses a synthetic provider fixture. Paid execution stays disab
 CP16 adds a [broker-gated OpenAI HTTP pathway and readiness preflight](docs/checkpoint-16-real-model-readiness.md).
 The SDK transport and paired workflow run against injected HTTP responses. Public provider egress is locked.
 
+CP18 adds a [broker-gated Groq Free-plan candidate](docs/checkpoint-18-free-tier-portability.md)
+with an offline HTTP pilot, a rolling quota and an operator authorization worksheet.
+External Groq inference remains locked.
+
 The research workflow includes composite dataset releases, preregistrations and
 amendments, pairing, and family-aware analysis. The optional Oracle Review workspace
 remains available. See the [preregistration draft](docs/preregistration-draft.md) and

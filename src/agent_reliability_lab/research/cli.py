@@ -119,6 +119,8 @@ async def execute(args):
                     raise ValueError("verification requires a frozen benchmark result")
                 result = verify_result(store, artifact)
         elif args.command.startswith("benchmark-live-"):
+            from pydantic import TypeAdapter
+
             from agent_reliability_lab.evaluation.contracts import PriceBook
             from agent_reliability_lab.research.live import (
                 draft_authorization,
@@ -126,15 +128,20 @@ async def execute(args):
                 preflight,
                 run_provider_pilot,
             )
-            from agent_reliability_lab.research.live_contracts import ProviderProfile
+            from agent_reliability_lab.research.live_contracts import GroqProfile, ProviderProfile
 
             ref = Reference.model_validate_json(args.file.read_bytes())
             if args.command == "benchmark-live-run":
-                if not args.activate_paid:
-                    raise ValueError("paid execution requires explicit operator activation")
-                result = (await run_provider_pilot(store, ref, activate_paid=True)).model_dump(
-                    mode="json"
-                )
+                if not (args.activate_paid or args.activate_free):
+                    raise ValueError("provider execution requires explicit operator activation")
+                result = (
+                    await run_provider_pilot(
+                        store,
+                        ref,
+                        activate_paid=args.activate_paid,
+                        activate_free=args.activate_free,
+                    )
+                ).model_dump(mode="json")
             else:
                 store = ResearchStore(
                     engine.execution_options(postgresql_readonly=True), args.scope
@@ -148,7 +155,9 @@ async def execute(args):
                     result = preflight(store, ref, authority)
                     print(json.dumps(result, indent=2, sort_keys=True))
                     return int(result["status"] == "blocked")
-                profile = ProviderProfile.model_validate_json(args.profile.read_bytes())
+                profile = TypeAdapter(ProviderProfile | GroqProfile).validate_json(
+                    args.profile.read_bytes()
+                )
                 if args.command == "benchmark-live-authorize-draft":
                     result = draft_authorization(
                         store, ref, profile, args.mode, args.deadline
@@ -355,13 +364,17 @@ def main():
     )
     live_auth.add_argument("file", type=Path)
     live_auth.add_argument("--profile", type=Path, required=True)
-    live_auth.add_argument("--mode", choices=("mock_http", "paid_openai"), required=True)
+    live_auth.add_argument(
+        "--mode", choices=("mock_http", "paid_openai", "groq_free"), required=True
+    )
     live_auth.add_argument("--deadline", type=datetime.fromisoformat, required=True)
     live_run = commands.add_parser(
-        "benchmark-live-run", help="Request a separately authorized paid pilot"
+        "benchmark-live-run", help="Request a separately authorized development pilot"
     )
     live_run.add_argument("file", type=Path)
-    live_run.add_argument("--activate-paid", action="store_true")
+    activation = live_run.add_mutually_exclusive_group()
+    activation.add_argument("--activate-paid", action="store_true")
+    activation.add_argument("--activate-free", action="store_true")
     pilot_draft = commands.add_parser(
         "benchmark-pilot-draft", help="Draft a frozen offline development pilot"
     )

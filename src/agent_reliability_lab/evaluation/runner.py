@@ -148,15 +148,21 @@ class ScenarioRunner:
             raise ValueError("live model execution is disabled in benchmark mode")
         if benchmark_context is not None and model_factory is not None:
             raise ValueError("arbitrary model factories are disabled in benchmark mode")
+        brokered_provider = False
         if benchmark_model is not None:
+            from agent_reliability_lab.research.groq_model import GroqHTTPModel
             from agent_reliability_lab.research.live_model import LiveHTTPModel
             from agent_reliability_lab.research.pilot_model import OfflinePilotModel
 
             if benchmark_context is None or type(benchmark_model) not in (
                 OfflinePilotModel,
                 LiveHTTPModel,
+                GroqHTTPModel,
             ):
                 raise ValueError("benchmark model must be the brokered offline adapter")
+            if (config.model.provider == "groq") != (type(benchmark_model) is GroqHTTPModel):
+                raise ValueError("brokered adapter differs from the benchmark model")
+            brokered_provider = type(benchmark_model) in (LiveHTTPModel, GroqHTTPModel)
 
             def offline_factory(_):
                 return benchmark_model
@@ -164,7 +170,8 @@ class ScenarioRunner:
             model_factory = offline_factory
         if demonstration and (config.model.provider != "fake" or config.study is not None):
             raise ValueError("a demonstration must use scripted infrastructure validation")
-        brokered_provider = benchmark_model is not None and type(benchmark_model) is LiveHTTPModel
+        if config.model.provider == "groq" and not brokered_provider:
+            raise ValueError("Groq requires the brokered development pilot")
         if (
             config.model.provider == "openai"
             and not brokered_provider
