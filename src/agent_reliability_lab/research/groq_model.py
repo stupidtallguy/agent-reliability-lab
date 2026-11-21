@@ -4,6 +4,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import time
 
 import httpx2
@@ -27,6 +28,10 @@ from agent_reliability_lab.research.pilot_model import BoundPilotModel, reply_fi
 _TIMINGS = {"queue_time", "prompt_time", "completion_time", "total_time"}
 
 
+def qualification_messages():
+    return [{"role": "user", "content": "Reply with OK."}]
+
+
 def groq_payload(profile, messages, tools, output_limit):
     if any("name" in message for message in messages):
         raise ModelFailure("groq_unsupported_message_name")
@@ -48,7 +53,7 @@ def _unique_fields(pairs):
     return fields
 
 
-def verify_groq_wire(profile, attempt, raw):
+def verify_groq_wire(profile, attempt, raw, *, purpose=None):
     """Independently bind the permit to a single allowed route and sealed input."""
     try:
         actual = json.loads(raw, object_pairs_hook=_unique_fields)
@@ -60,6 +65,8 @@ def verify_groq_wire(profile, attempt, raw):
             or not isinstance(tools, list)
             or digest([messages, tools]) != attempt.input_hash
             or actual != groq_payload(profile, messages, tools, attempt.maximum_output_tokens)
+            or purpose == "groq_fingerprint"
+            and (messages != qualification_messages() or tools or attempt.turn != 0)
         ):
             raise ModelFailure("groq_wire_policy_mismatch")
     except (ValueError, KeyError, TypeError, AttributeError):
@@ -98,6 +105,25 @@ def _failure_code(response, body):
         if error.get("code") == "tool_use_failed":
             return "unsupported_model_tool"
     return "provider_error"
+
+
+def _rate_headers(headers):
+    selected = {}
+    for window in ("requests", "tokens"):
+        for measure in ("limit", "remaining", "reset"):
+            name = f"x-ratelimit-{measure}-{window}"
+            value = headers.get(name, "")
+            if measure == "reset":
+                if len(value) <= 32 and re.fullmatch(
+                    r"(?:\d+(?:\.\d+)?(?:ms|s|m|h|d)){1,5}", value
+                ):
+                    selected[name] = value
+            elif re.fullmatch(r"[0-9]{1,9}", value):
+                selected[name] = int(value)
+    retry = headers.get("retry-after", "")
+    if re.fullmatch(r"[0-9]{1,9}", retry):
+        selected["retry-after"] = int(retry)
+    return selected or None
 
 
 def _parse_reply(body, request_id):
@@ -149,91 +175,104 @@ class GroqHTTPModel(BoundPilotModel):
             authorization_hash=self.broker.authorization.content_hash,
             wire_hash=digest(payload),
         )
-        self.broker.reserve(attempt)
-        if self.is_mock:
-            headers, backend = {}, self.mock_transport
-        else:
-            if not live.GROQ_FREE_NETWORK_ENABLED:
-                raise ModelFailure("groq_external_activation_locked")
-            credential = os.environ.get("GROQ_API_KEY", "").strip()
-            if not credential:
-                raise ModelFailure("pilot_credential_unavailable")
-            if not profile.matches_credential(credential):
-                raise ModelFailure("groq_credential_binding_mismatch")
-            headers = {"Authorization": "Bearer " + credential}
-            backend = httpx2.AsyncHTTPTransport(retries=0, trust_env=False)
-        transport = _PermitTransport(self.broker, attempt, self.authority, backend)
-        started = time.perf_counter()
-        async with httpx2.AsyncClient(
-            transport=transport, trust_env=False, follow_redirects=False
-        ) as client:
-            try:
-                response = await client.post(profile.endpoint, json=payload, headers=headers)
-            except (httpx2.RequestError, asyncio.CancelledError) as error:
-                code = "provider_unavailable"
-                if isinstance(error, httpx2.TimeoutException):
-                    code = "model_timeout"
-                if isinstance(error, asyncio.CancelledError):
-                    code = "dispatch_interrupted"
-                if transport.dispatched:
-                    self.broker.mark_uncertain(attempt, reason=code)
-                if isinstance(error, asyncio.CancelledError):
-                    raise
-                raise ModelFailure(code) from None
-        return self._record(attempt, response, started)
+        return await submit_groq(self.broker, self.authority, self.mock_transport, attempt, payload)
 
-    def _record(self, attempt, response, started):
+
+async def submit_groq(broker, authority, mock_transport, attempt, payload):
+    profile = authority.profile
+    broker.reserve(attempt)
+    if authority.mode == "mock_http":
+        headers, backend = {}, mock_transport
+    else:
+        if not live.GROQ_FREE_NETWORK_ENABLED:
+            raise ModelFailure("groq_external_activation_locked")
+        credential = os.environ.get("GROQ_API_KEY", "").strip()
+        if not credential:
+            raise ModelFailure("pilot_credential_unavailable")
+        if not profile.matches_credential(credential):
+            raise ModelFailure("groq_credential_binding_mismatch")
+        headers = {"Authorization": "Bearer " + credential}
+        backend = httpx2.AsyncHTTPTransport(retries=0, trust_env=False)
+    transport = _PermitTransport(broker, attempt, authority, backend)
+    async with httpx2.AsyncClient(
+        transport=transport, trust_env=False, follow_redirects=False
+    ) as client:
         try:
-            body = response.json()
-        except ValueError:
-            body = {}
-        body = body if isinstance(body, dict) else {}
-        profile = self.authority.profile
-        meta = body.get("x_groq")
-        raw_id = meta.get("id") if isinstance(meta, dict) else response.headers.get("x-request-id")
-        request_id = _safe_id(raw_id, r"[a-zA-Z0-9_.:-]{1,128}")
-        model = _safe_id(body.get("model"), r"[a-zA-Z0-9][a-zA-Z0-9_./:-]{0,127}")
-        fingerprint = _safe_id(body.get("system_fingerprint"), r"[a-zA-Z0-9_.:-]{1,128}")
-        route_mismatch = (
-            body.get("service_tier") not in (None, profile.service_tier, "default")
-            or body.get("provider") not in (None, profile.provider)
-            or body.get("fallback") not in (None, False)
-            or body.get("model") not in (None, profile.returned_model)
-            or (response.is_success or "system_fingerprint" in body)
+            response = await client.post(profile.endpoint, json=payload, headers=headers)
+        except (httpx2.RequestError, asyncio.CancelledError) as error:
+            code = "provider_unavailable"
+            if isinstance(error, httpx2.TimeoutException):
+                code = "model_timeout"
+            if isinstance(error, asyncio.CancelledError):
+                code = "dispatch_interrupted"
+            if transport.dispatched:
+                broker.mark_uncertain(attempt, reason=code)
+            if isinstance(error, asyncio.CancelledError):
+                raise
+            raise ModelFailure(code) from None
+    return _record_groq(broker, authority, attempt, response, transport.network_started)
+
+
+def _record_groq(broker, authority, attempt, response, started):
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    profile = authority.profile
+    qualification = authority.purpose == "groq_fingerprint"
+    meta = body.get("x_groq")
+    raw_id = meta.get("id") if isinstance(meta, dict) else response.headers.get("x-request-id")
+    request_id = _safe_id(raw_id, r"[a-zA-Z0-9_.:-]{1,128}")
+    model = _safe_id(body.get("model"), r"[a-zA-Z0-9][a-zA-Z0-9_./:-]{0,127}")
+    fingerprint = _safe_id(body.get("system_fingerprint"), r"[a-zA-Z0-9_.:-]{1,128}")
+    route_mismatch = (
+        body.get("service_tier") not in (None, profile.service_tier, "default")
+        or body.get("provider") not in (None, profile.provider)
+        or body.get("fallback") not in (None, False)
+        or body.get("model") not in (None, profile.returned_model)
+        or (response.is_success or "system_fingerprint" in body)
+        and (
+            fingerprint is None
+            or not qualification
             and fingerprint != profile.expected_system_fingerprint
         )
-        usage, invalid = _groq_metering(body)
-        code = _failure_code(response, body)
-        if route_mismatch:
-            code = "groq_route_mismatch"
-        elif invalid or (response.is_success and (request_id is None or model is None)):
-            code = "invalid_provider_usage_or_identity"
-            invalid = True
-        decision, reply = None, None
-        if code is None:
-            try:
-                decision = _parse_reply(body, request_id)
-                reply = reply_fingerprint(Redactor().clean(decision.model_dump(mode="json")))
-            except (ModelFailure, ValueError, TypeError, AttributeError) as error:
-                code = str(error) if isinstance(error, ModelFailure) else "invalid_model_response"
-        recorded = self.broker.observe(
-            attempt,
-            ProviderObservation(
-                outcome="failed" if code or usage["unpriced_usage"] else "completed",
-                error_code=code,
-                reported_model=model,
-                provider_request_id=request_id,
-                response_hash=reply,
-                elapsed_ms=round((time.perf_counter() - started) * 1000),
-                http_status=response.status_code,
-                system_fingerprint=fingerprint,
-                route_mismatch=True if route_mismatch else None,
-                invalid_metering=True if invalid else None,
-                **usage,
-            ),
-        )
-        if recorded["state"] == "breached":
-            raise ModelFailure("pilot_provider_bound_breach")
-        if code:
-            raise ModelFailure(code)
-        return decision
+    )
+    usage, invalid = _groq_metering(body)
+    code = _failure_code(response, body)
+    if route_mismatch:
+        code = "groq_route_mismatch"
+    elif invalid or (response.is_success and (request_id is None or model is None)):
+        code = "invalid_provider_usage_or_identity"
+        invalid = True
+    decision, reply = None, None
+    if code is None:
+        try:
+            decision = _parse_reply(body, request_id)
+            if qualification and decision.calls:
+                raise ModelFailure("qualification_tool_response")
+            reply = reply_fingerprint(Redactor().clean(decision.model_dump(mode="json")))
+        except (ModelFailure, ValueError, TypeError, AttributeError) as error:
+            code = str(error) if isinstance(error, ModelFailure) else "invalid_model_response"
+    recorded = broker.observe(
+        attempt,
+        ProviderObservation(
+            outcome="failed" if code or usage["unpriced_usage"] else "completed",
+            error_code=code,
+            reported_model=model,
+            provider_request_id=request_id,
+            response_hash=reply,
+            groq_rate_limits=_rate_headers(response.headers),
+            elapsed_ms=round((time.perf_counter() - started) * 1000),
+            http_status=response.status_code,
+            system_fingerprint=fingerprint,
+            route_mismatch=True if route_mismatch else None,
+            invalid_metering=True if invalid else None,
+            **usage,
+        ),
+    )
+    if recorded["state"] == "breached":
+        raise ModelFailure("pilot_provider_bound_breach")
+    if code:
+        raise ModelFailure(code)
+    return decision

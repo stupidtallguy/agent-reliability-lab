@@ -47,6 +47,48 @@ events = sa.Table(
 )
 
 
+class DispatchDeferred(Exception):
+    """A Groq permit needs a fresh admission check after the given wait."""
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+
+
+def _pacing_wait(history, request, pacing, now):
+    """Count reserved capacity, including requests with an unknown outcome."""
+    minute = timedelta(seconds=60)
+    recent = [event for event in history if now - event.recorded_at < minute]
+
+    def fits():
+        inputs = request["reserved_input_tokens"] + sum(
+            event.body["reserved_input_tokens"] for event in recent
+        )
+        outputs = (
+            request["reserved_tokens"]
+            - request["reserved_input_tokens"]
+            + sum(
+                event.body["reserved_tokens"] - event.body["reserved_input_tokens"]
+                for event in recent
+            )
+        )
+        return (
+            len(recent) + 1 <= pacing.requests_per_minute
+            and inputs + outputs <= pacing.tokens_per_minute
+            and (pacing.input_tokens_per_minute is None or inputs <= pacing.input_tokens_per_minute)
+            and (
+                pacing.output_tokens_per_minute is None
+                or outputs <= pacing.output_tokens_per_minute
+            )
+        )
+
+    wait = 0.0
+    while recent and not fits():
+        wait = (recent.pop(0).recorded_at + minute - now).total_seconds()
+    if not fits():
+        raise BudgetExceeded("groq_request_exceeds_minute_capacity")
+    return wait
+
+
 class PilotBudgetBroker:
     def __init__(self, engine, scope, plan, *, authorization=None):
         self.engine, self.scope = engine, scope
@@ -316,18 +358,35 @@ class PilotBudgetBroker:
                 # Keep simulation traffic separate from production quota accounting.
                 quota = "groq-free" if authority.mode != "mock_http" else f"groq-mock:{self.scope}"
                 lock(connection, "pilot-dispatch-quota:" + quota)
-                since = self._now(connection) - timedelta(hours=24)
-                consumed = connection.scalar(
-                    sa.select(sa.func.count())
-                    .select_from(events)
+                now = self._now(connection)
+                history = connection.execute(
+                    sa.select(events.c.recorded_at, events.c.body)
                     .where(
                         events.c.kind == "dispatched",
-                        events.c.recorded_at > since,
+                        events.c.recorded_at > now - timedelta(hours=24),
                         events.c.body["quota"].astext == quota,
                     )
+                    .order_by(events.c.recorded_at)
+                ).all()
+                pacing = authority.profile.pacing
+                day_calls = min(
+                    authority.profile.rolling_day_calls,
+                    pacing.requests_per_day if pacing else authority.profile.rolling_day_calls,
                 )
-                if consumed >= authority.profile.rolling_day_calls:
+                if len(history) >= day_calls:
                     raise BudgetExceeded("groq_rolling_day_calls")
+                if pacing:
+                    if (
+                        body["reserved_tokens"]
+                        + sum(event.body["reserved_tokens"] for event in history)
+                        > pacing.tokens_per_day
+                    ):
+                        raise BudgetExceeded("groq_rolling_day_tokens")
+                    wait = _pacing_wait(history, body, pacing, now)
+                    if wait > 0:
+                        if wait >= self._admit(connection, ledger):
+                            raise BudgetExceeded("groq_pacing_deadline")
+                        raise DispatchDeferred(wait)
                 body = body | {
                     "quota": quota,
                     "expected_system_fingerprint": authority.profile.expected_system_fingerprint,
@@ -394,7 +453,7 @@ class PilotBudgetBroker:
                 or (outputs is not None and outputs > request.maximum_output_tokens)
                 or (amount is not None and amount > Decimal(body["reserved_usd"]))
                 or (observation.reported_model is not None and model_mismatch)
-                or plan.mode == "future_live_requested"
+                or plan.mode != "offline_fixture"
                 and (
                     bool(observation.cache_write_tokens)
                     or observation.unpriced_usage is True
@@ -403,7 +462,8 @@ class PilotBudgetBroker:
                     and observation.outcome == "completed"
                     and (
                         observation.system_fingerprint is None
-                        or observation.system_fingerprint != body["expected_system_fingerprint"]
+                        or plan.mode != "groq_qualification"
+                        and observation.system_fingerprint != body["expected_system_fingerprint"]
                         or not observation.provider_request_id
                     )
                     or inputs is not None

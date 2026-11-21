@@ -19,6 +19,8 @@ Money = Annotated[Decimal, Field(ge=0, max_digits=20, decimal_places=12, allow_i
 GROQ_MODEL = "openai/gpt-oss-20b"
 GROQ_PILOT_CALLS = 16
 GROQ_CONTEXT = 131_072
+GROQ_QUALIFICATION_INPUT = 256
+GROQ_QUALIFICATION_OUTPUT = 256
 
 
 class PilotModel(Contract):
@@ -57,7 +59,7 @@ class PilotLimits(Contract):
 class PilotPlan(Artifact):
     kind: Literal["benchmark_pilot_plan"] = "benchmark_pilot_plan"
     authorization_version: Literal["development-pilot-1.0.0"] = "development-pilot-1.0.0"
-    mode: Literal["offline_fixture", "future_live_requested"]
+    mode: Literal["offline_fixture", "future_live_requested", "groq_qualification"]
     protocol: Reference
     supersedes: Reference | None = None
     schedule_hash: Hash
@@ -82,7 +84,7 @@ class PilotPlan(Artifact):
         rates = (price.input_rate, price.cached_input_rate or Decimal(0), price.output_rate)
         if self.model.provider == "groq":
             if (
-                self.mode != "future_live_requested"
+                self.mode not in {"future_live_requested", "groq_qualification"}
                 or self.model.model_id != GROQ_MODEL
                 or self.model.allowed_models != (GROQ_MODEL,)
                 or self.limits.total_calls > GROQ_PILOT_CALLS
@@ -97,6 +99,15 @@ class PilotPlan(Artifact):
                 raise ValueError("Groq requires the frozen Free-plan model and a zero-cost plan")
         elif self.limits.maximum_usd <= 0:
             raise ValueError("OpenAI pilot requires a positive USD ceiling")
+        if self.mode == "groq_qualification" and (
+            self.model.provider != "groq"
+            or self.limits.total_calls != 1
+            or self.limits.calls_per_scenario != 1
+            or self.limits.maximum_input_tokens != GROQ_QUALIFICATION_INPUT
+            or self.limits.maximum_output_tokens != GROQ_QUALIFICATION_OUTPUT
+            or self.limits.total_tokens != GROQ_QUALIFICATION_INPUT + GROQ_QUALIFICATION_OUTPUT
+        ):
+            raise ValueError("qualification requires exactly one bounded Groq text request")
         if any(rate > 1000000 or rate.normalize().as_tuple().exponent < -6 for rate in rates):
             raise ValueError("pilot price exceeds supported precision or range")
         if (
@@ -104,7 +115,7 @@ class PilotPlan(Artifact):
             or price.fixed_request_fee.normalize().as_tuple().exponent < -12
         ):
             raise ValueError("pilot request fee exceeds supported precision or range")
-        if self.mode == "future_live_requested" and self.fixture_fault != "none":
+        if self.mode != "offline_fixture" and self.fixture_fault != "none":
             raise ValueError("fixture faults are available only offline")
         if (
             (self.version == 1) != (self.supersedes is None)
@@ -180,6 +191,9 @@ class ProviderObservation(Contract):
     )
     system_fingerprint: ModelID | None = Field(default=None, exclude_if=lambda value: value is None)
     route_mismatch: Literal[True] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    groq_rate_limits: dict[str, int | str] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 

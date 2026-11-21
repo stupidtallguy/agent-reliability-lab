@@ -19,7 +19,12 @@ from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research import live
 from agent_reliability_lab.research.benchmark import starter_draft
 from agent_reliability_lab.research.groq_model import GroqHTTPModel, groq_payload
-from agent_reliability_lab.research.live_contracts import GroqProfile, groq_key_commitment
+from agent_reliability_lab.research.groq_qualification import qualification_evidence, qualify_groq
+from agent_reliability_lab.research.live_contracts import (
+    GroqPacing,
+    GroqProfile,
+    groq_key_commitment,
+)
 from agent_reliability_lab.research.live_model import _PermitTransport
 from agent_reliability_lab.research.persistence import ResearchStore
 from agent_reliability_lab.research.pilot import render_pilot, validate_plan, verify_pilot_report
@@ -58,14 +63,28 @@ def factory(manager, monkeypatch):
         input_ceiling=120000, output_ceiling=256, expected_system_fingerprint=FINGERPRINT
     )
 
-    def create(identity="groq_pilot", *, scenario=SCENARIO):
+    def create(
+        identity="groq_pilot",
+        *,
+        scenario=SCENARIO,
+        profile=profile,
+        qualification=False,
+        mode="mock_http",
+    ):
         protocol, plan = live.draft_live(
-            store, parent_ref, identity, profile, pricing, Decimal(0), scenario
+            store,
+            parent_ref,
+            identity,
+            profile,
+            pricing,
+            Decimal(0),
+            scenario,
+            qualification=qualification,
         )
         store.append(protocol)
         plan_ref = store.append(plan)
         authority = live.draft_authorization(
-            store, plan_ref, profile, "mock_http", datetime.now(UTC) + timedelta(minutes=15)
+            store, plan_ref, profile, mode, datetime.now(UTC) + timedelta(minutes=15)
         )
         return plan, plan_ref, authority
 
@@ -108,7 +127,10 @@ def _response(decision, index=1):
 
 def test_groq_development_pilot_reconstructs_score_pinned_pairs_and_usage(factory, monkeypatch):
     store, parent, create = factory
-    plan, plan_ref, authority = create()
+    profile = _qualification_profile().model_copy(
+        update={"input_ceiling": 7700, "expected_system_fingerprint": FINGERPRINT}
+    )
+    plan, plan_ref, authority = create(profile=profile)
     reference = store.append(authority)
     monkeypatch.setenv("GROQ_API_KEY", "test_environment_value")
     readonly = ResearchStore(store.engine.execution_options(postgresql_readonly=True), store.scope)
@@ -119,6 +141,16 @@ def test_groq_development_pilot_reconstructs_score_pinned_pairs_and_usage(factor
     assert readiness["checks"]["rolling_day_call_limit"] == 16
     script = ScriptedModel(ModelConfig(script=parent.scripts[SCENARIO]))
     sent = []
+    now = datetime.now(UTC)
+    waits = []
+
+    async def sleep(seconds):
+        nonlocal now
+        waits.append(seconds)
+        now += timedelta(seconds=seconds)
+
+    monkeypatch.setattr(PilotBudgetBroker, "_now", staticmethod(lambda connection: now))
+    monkeypatch.setattr("agent_reliability_lab.research.live_model.sleep", sleep)
 
     async def fake(request):
         assert request.method == "POST" and str(request.url) == authority.profile.endpoint
@@ -166,6 +198,7 @@ def test_groq_development_pilot_reconstructs_score_pinned_pairs_and_usage(factor
     assert doc["interpretation"] == "mock_http"
     assert doc["usage"]["physical_dispatches"] == doc["usage"]["settlements"] == len(sent)
     assert len(sent) <= plan.limits.total_calls == 16
+    assert waits and sum(waits) < plan.limits.duration_seconds
     assert Decimal(doc["usage"]["settled_conservative_usd"]) == 0
     assert doc["usage"]["provider_billed_observations"] == 0
     assert doc["financial_verification"]["invoice_status"] == "unverified"
@@ -288,13 +321,20 @@ def test_groq_http_never_retries_or_follows_fallback(factory, monkeypatch, varia
     assert "untrusted provider error" not in str(broker.snapshot())
 
 
-def test_groq_quota_is_atomic_across_ledgers_and_counts_uncertain_dispatches(factory):
+@pytest.mark.parametrize("isolation", ["READ COMMITTED", "REPEATABLE READ"])
+def test_groq_quota_is_atomic_across_ledgers_and_counts_uncertain_dispatches(factory, isolation):
     store, _, create = factory
     first, second = create("groq_first"), create("groq_second")
     ledger1, arm1, ref1, payload1, _ = _open(store, *first)
     ledger2, arm2, ref2, payload2, _ = _open(store, *second)
+    ledger1 = PilotBudgetBroker(
+        store.engine.execution_options(isolation_level=isolation),
+        store.scope,
+        first[0],
+        authorization=ref1,
+    )
     ledger2 = PilotBudgetBroker(
-        store.engine.execution_options(isolation_level="REPEATABLE READ"),
+        store.engine.execution_options(isolation_level=isolation),
         store.scope,
         second[0],
         authorization=ref2,
@@ -327,6 +367,13 @@ def test_groq_quota_is_atomic_across_ledgers_and_counts_uncertain_dispatches(fac
         sum(event["kind"] == "dispatched" for event in ledger1.snapshot() + ledger2.snapshot())
         == 16
     )
+    # A new plan and another worker still cannot acquire a seventeenth daily permit.
+    third = create("groq_third")
+    ledger3, arm3, ref3, payload3, _ = _open(store, *third)
+    extra = _request(third[0], arm3, ref3, payload3)
+    ledger3.reserve(extra)
+    with pytest.raises(BudgetExceeded, match="groq_rolling_day_calls"):
+        ledger3.begin_dispatch(extra)
 
 
 def test_groq_blocks_direct_http_changed_endpoint_and_future_activation(factory, monkeypatch):
@@ -353,9 +400,11 @@ def test_groq_blocks_direct_http_changed_endpoint_and_future_activation(factory,
     future_ref = store.append(future)
     monkeypatch.setattr(live, "PUBLIC_PROVIDER_NETWORK_ENABLED", True)
     monkeypatch.setenv("GROQ_API_KEY", "test_only")
-    assert live.preflight(store, plan_ref, future_ref)["issues"] == [
-        "groq_external_activation_locked"
-    ]
+    assert set(live.preflight(store, plan_ref, future_ref)["issues"]) == {
+        "groq_external_activation_locked",
+        "groq_account_quota_unverified",
+        "groq_live_fingerprint_qualification_required",
+    }
     with pytest.raises(live.ActivationBlocked, match="groq_external_activation_locked"):
         asyncio.run(live.run_provider_pilot(store, future_ref, activate_paid=True))
 
@@ -406,31 +455,40 @@ def test_future_free_transport_sends_only_one_approved_request_with_network_repl
     factory, monkeypatch
 ):
     store, _, create = factory
-    plan, plan_ref, draft = create()
-    authority = live.draft_authorization(
-        store,
-        plan_ref,
-        draft.profile.model_copy(
-            update={
-                "free_organization_evidence": "a" * 64,
-                "free_key_commitment": groq_key_commitment("fixture_only"),
-            }
-        ),
-        "groq_free",
-        draft.deadline,
+    profile = _qualification_profile()
+    _, qualification_plan, qualification = create(
+        "qualify_free", profile=profile, qualification=True
     )
-    auth_ref = store.append(authority)
+    qualification = live.draft_authorization(
+        store, qualification_plan, profile, "groq_free", qualification.deadline
+    )
+    qualification_ref = store.append(qualification)
     sent = []
 
     async def intercept(_, request):
         sent.append(request)
         assert request.headers["authorization"] == "Bearer fixture_only"
-        assert request.url == authority.profile.endpoint
+        assert request.url == profile.endpoint
+        if len(sent) == 1:
+            return httpx2.Response(200, json=_response(Decision(answer="OK")))
         return httpx2.Response(429, headers={"Retry-After": "0"})
 
     # Replace the network handler before exercising the dormant release branch.
     monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", intercept)
     monkeypatch.setattr(live, "GROQ_FREE_NETWORK_ENABLED", True)
+    monkeypatch.setenv("GROQ_API_KEY", "fixture_only")
+    result = asyncio.run(qualify_groq(store, qualification_ref, activate_free=True))
+    assert result["qualified"] and result["dispatches"] == 1
+    profile = profile.model_copy(
+        update={
+            "input_ceiling": 7000,
+            "expected_system_fingerprint": FINGERPRINT,
+            "fingerprint_qualification": qualification_ref,
+            "qualification_event_hash": result["event_hash"],
+        }
+    )
+    plan, plan_ref, authority = create(profile=profile, mode="groq_free")
+    auth_ref = store.append(authority)
     monkeypatch.setenv("GROQ_API_KEY", "different_account_fixture")
     assert live.preflight(store, plan_ref, auth_ref)["issues"] == [
         "free_credential_binding_mismatch"
@@ -438,7 +496,7 @@ def test_future_free_transport_sends_only_one_approved_request_with_network_repl
     monkeypatch.setenv("GROQ_API_KEY", "fixture_only")
     with pytest.raises(live.ActivationBlocked, match="explicit_free_activation_required"):
         asyncio.run(live.run_provider_pilot(store, auth_ref, activate_paid=True))
-    assert not sent
+    assert len(sent) == 1
 
     _, make_model = live.open_provider_pilot(
         store, plan_ref, plan.protocol, auth_ref, None, False, True
@@ -458,7 +516,7 @@ def test_future_free_transport_sends_only_one_approved_request_with_network_repl
                 attempt.execution_id, attempt.attempt_id, messages, [], 0, arm.maximum_output_tokens
             )
         )
-    assert not sent
+    assert len(sent) == 1
     monkeypatch.setenv("GROQ_API_KEY", "fixture_only")
     with pytest.raises(ModelFailure, match="rate_limited"):
         asyncio.run(
@@ -466,8 +524,149 @@ def test_future_free_transport_sends_only_one_approved_request_with_network_repl
                 attempt.execution_id, attempt.attempt_id, messages, [], 0, arm.maximum_output_tokens
             )
         )
-    assert len(sent) == 1 and digest(json.loads(sent[0].content)) == attempt.wire_hash
+    assert len(sent) == 2 and digest(json.loads(sent[1].content)) == attempt.wire_hash
     row = model.broker.snapshot()[-1]["body"]
     assert row["quota"] == "groq-free"
     assert row["state"] == "observed"
+    assert row["observation"]["groq_rate_limits"] == {"retry-after": 0}
     assert "fixture_only" not in str(model.broker.snapshot())
+
+
+def _qualification_profile():
+    return GroqProfile(
+        input_ceiling=256,
+        output_ceiling=256,
+        free_organization_evidence="a" * 64,
+        free_key_commitment=groq_key_commitment("fixture_only"),
+        pacing=GroqPacing(
+            requests_per_minute=30,
+            requests_per_day=1000,
+            tokens_per_minute=8000,
+            tokens_per_day=200000,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "variant", ["ok", "missing_fingerprint", "wrong_model", "timeout", "429", "missing_account"]
+)
+def test_groq_qualification_records_only_one_permit_and_never_becomes_a_trial(factory, variant):
+    store, _, create = factory
+    profile = _qualification_profile()
+    if variant == "missing_account":
+        profile = profile.model_copy(update={"free_organization_evidence": None})
+    _, plan_ref, auth = create("qualification", profile=profile, qualification=True)
+    ref = store.append(auth)
+    sent = []
+
+    async def intercept(request):
+        sent.append(request)
+        body = json.loads(request.content)
+        assert body["model"] == GROQ_MODEL
+        assert body["messages"] == [{"role": "user", "content": "Reply with OK."}]
+        assert "tools" not in body and "authorization" not in request.headers
+        if variant == "timeout":
+            raise httpx2.ReadTimeout("fixture")
+        if variant == "429":
+            return httpx2.Response(429, headers={"Retry-After": "5"})
+        result = _response(Decision(answer="OK"))
+        if variant == "missing_fingerprint":
+            del result["system_fingerprint"]
+        if variant == "wrong_model":
+            result["model"] = "wrong"
+        return httpx2.Response(200, json=result)
+
+    transport = httpx2.MockTransport(intercept)
+    if variant == "missing_account":
+        with pytest.raises(live.ActivationBlocked, match="free_organization_unverified"):
+            asyncio.run(qualify_groq(store, ref, mock_transport=transport))
+        assert not sent
+        return
+    with pytest.raises(live.ActivationBlocked, match="provider_pilot_protocol_mismatch"):
+        asyncio.run(live.run_provider_pilot(store, ref, mock_transport=transport))
+    result = asyncio.run(qualify_groq(store, ref, mock_transport=transport))
+    assert len(sent) == result["dispatches"] == 1
+    assert qualification_evidence(store, ref) == result
+    assert result["mode"] == "mock_http"
+    assert result["qualified"] == (variant == "ok")
+    if variant == "timeout":
+        assert result["state"] == "uncertain" and result["observation"] is None
+    if variant == "429":
+        assert result["observation"]["groq_rate_limits"] == {"retry-after": 5}
+    with pytest.raises(live.ActivationBlocked, match="pilot_ledger_already_opened"):
+        asyncio.run(qualify_groq(store, ref, mock_transport=transport))
+    assert len(sent) == 1
+    assert not store.list("benchmark_run")
+    if variant == "ok":
+        profile = profile.model_copy(
+            update={
+                "expected_system_fingerprint": FINGERPRINT,
+                "fingerprint_qualification": ref,
+                "qualification_event_hash": result["event_hash"],
+            }
+        )
+        _, pilot_ref, mock_pilot = create("separate_study", profile=profile)
+        assert store.append(mock_pilot)
+        with pytest.raises(live.ActivationBlocked, match="groq_fingerprint_evidence_mismatch"):
+            live.draft_authorization(store, pilot_ref, profile, "groq_free", mock_pilot.deadline)
+        with pytest.raises(live.ActivationBlocked, match="groq_fingerprint_evidence_mismatch"):
+            live.draft_authorization(
+                store,
+                pilot_ref,
+                profile.model_copy(update={"expected_system_fingerprint": "fp_changed"}),
+                "mock_http",
+                mock_pilot.deadline,
+            )
+
+
+@pytest.mark.parametrize("revoked", [False, True])
+def test_groq_token_pacing_rechecks_authorization_before_sending(factory, monkeypatch, revoked):
+    store, _, create = factory
+    profile = _qualification_profile().model_copy(
+        update={"input_ceiling": 4500, "expected_system_fingerprint": FINGERPRINT}
+    )
+    first = create("paced_first", profile=profile)
+    second = create("paced_second", profile=profile)
+    ledger1, arm1, ref1, payload1, _ = _open(store, *first)
+    ledger2, arm2, ref2, payload2, _ = _open(store, *second)
+    now = datetime.now(UTC)
+    monkeypatch.setattr(PilotBudgetBroker, "_now", staticmethod(lambda connection: now))
+    prior = _request(first[0], arm1, ref1, payload1)
+    ledger1.reserve(prior)
+    ledger1.begin_dispatch(prior)
+    ledger1.mark_uncertain(prior)
+    next_request = _request(second[0], arm2, ref2, payload2)
+    ledger2.reserve(next_request)
+    sent, waits = [], []
+
+    async def sleep(seconds):
+        nonlocal now
+        waits.append(seconds)
+        if revoked:
+            store.append(
+                second[2].model_copy(
+                    update={
+                        "version": 2,
+                        "supersedes": ref2,
+                        "decision": "revoked",
+                    }
+                )
+            )
+        now += timedelta(seconds=seconds)
+
+    async def intercept(request):
+        sent.append(request)
+        return httpx2.Response(200)
+
+    monkeypatch.setattr("agent_reliability_lab.research.live_model.sleep", sleep)
+    transport = _PermitTransport(ledger2, next_request, second[2], httpx2.MockTransport(intercept))
+    http_request = httpx2.Request("POST", profile.endpoint, json=payload2)
+    if revoked:
+        with pytest.raises(live.ActivationBlocked, match="authorization_missing_or_superseded"):
+            asyncio.run(transport.handle_async_request(http_request))
+        assert not sent
+        assert ledger2.snapshot()[-1]["kind"] == "reserved"
+    else:
+        assert asyncio.run(transport.handle_async_request(http_request)).status_code == 200
+        assert len(sent) == 1 and ledger2.snapshot()[-1]["kind"] == "dispatched"
+    assert waits == [60.0]
