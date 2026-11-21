@@ -155,7 +155,9 @@ class StatisticalPlan(Contract):
 
 class BenchmarkProtocol(Artifact):
     kind: Literal["benchmark_protocol"] = "benchmark_protocol"
-    mode: Literal["synthetic_exploratory"] = "synthetic_exploratory"
+    mode: Literal["synthetic_exploratory", "provider_development_exploratory"] = (
+        "synthetic_exploratory"
+    )
     benchmark_version: Version
     dataset: Reference
     supersedes: Reference | None = None
@@ -187,17 +189,28 @@ class BenchmarkProtocol(Artifact):
 
     @model_validator(mode="after")
     def valid_plan(self) -> Self:
-        if len(set(self.scenarios)) != len(self.scenarios) or set(self.scripts) != set(
-            self.scenarios
-        ):
+        if len(set(self.scenarios)) != len(self.scenarios):
+            raise ValueError("select unique development scenarios")
+        if self.mode == "synthetic_exploratory" and set(self.scripts) != set(self.scenarios):
             raise ValueError("select unique scenarios with exactly one script per scenario")
+        if self.mode == "provider_development_exploratory" and (
+            self.scripts
+            or len(self.scenarios) != 1
+            or self.repetitions != 2
+            or self.model.provider not in {"openai", "groq"}
+        ):
+            raise ValueError("provider feasibility requires two counterbalanced development pairs")
         if any(not script or len(script) > 100 for script in self.scripts.values()):
             raise ValueError("each scripted scenario requires a bounded nonempty plan")
         if self.planned_pairs != len(self.scenarios) * self.repetitions:
             raise ValueError("planned pair count differs from the allocation")
         if self.secondary_outcomes != list(OUTCOMES[1:]):
             raise ValueError("unsupported secondary outcome contract")
-        if self.model.provider != "fake" or self.model.script or self.model.repeat_last:
+        if (
+            (self.mode == "synthetic_exploratory" and self.model.provider != "fake")
+            or self.model.script
+            or self.model.repeat_last
+        ):
             raise ValueError("CP12 accepts only the fixed per-scenario scripted model")
         if any(
             x is not None
@@ -226,6 +239,9 @@ class BenchmarkRun(Artifact):
     schedule_hash: Hash
     allocation: Reference | None = Field(default=None, exclude_if=lambda value: value is None)
     pilot: Reference | None = Field(default=None, exclude_if=lambda value: value is None)
+    live_authorization: Reference | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class BenchmarkResult(Artifact):

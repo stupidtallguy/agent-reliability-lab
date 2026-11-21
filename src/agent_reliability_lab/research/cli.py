@@ -3,6 +3,8 @@
 import argparse
 import asyncio
 import json
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 from agent_reliability_lab.opsdesk.database import engine_from_env
@@ -116,6 +118,66 @@ async def execute(args):
                 if artifact.kind != "benchmark_result":
                     raise ValueError("verification requires a frozen benchmark result")
                 result = verify_result(store, artifact)
+        elif args.command.startswith("benchmark-live-"):
+            from pydantic import TypeAdapter
+
+            from agent_reliability_lab.evaluation.contracts import PriceBook
+            from agent_reliability_lab.research.live import (
+                draft_authorization,
+                draft_live,
+                preflight,
+                run_provider_pilot,
+            )
+            from agent_reliability_lab.research.live_contracts import GroqProfile, ProviderProfile
+
+            ref = Reference.model_validate_json(args.file.read_bytes())
+            if args.command == "benchmark-live-run":
+                if not (args.activate_paid or args.activate_free):
+                    raise ValueError("provider execution requires explicit operator activation")
+                result = (
+                    await run_provider_pilot(
+                        store,
+                        ref,
+                        activate_paid=args.activate_paid,
+                        activate_free=args.activate_free,
+                    )
+                ).model_dump(mode="json")
+            else:
+                store = ResearchStore(
+                    engine.execution_options(postgresql_readonly=True), args.scope
+                )
+                if args.command == "benchmark-live-preflight":
+                    authority = (
+                        Reference.model_validate_json(args.authorization.read_bytes())
+                        if args.authorization
+                        else None
+                    )
+                    result = preflight(store, ref, authority)
+                    print(json.dumps(result, indent=2, sort_keys=True))
+                    return int(result["status"] == "blocked")
+                profile = TypeAdapter(ProviderProfile | GroqProfile).validate_json(
+                    args.profile.read_bytes()
+                )
+                if args.command == "benchmark-live-authorize-draft":
+                    result = draft_authorization(
+                        store, ref, profile, args.mode, args.deadline
+                    ).model_dump(mode="json")
+                else:
+                    protocol, plan = draft_live(
+                        store,
+                        ref,
+                        args.identity,
+                        profile,
+                        PriceBook.model_validate_json(args.pricing.read_bytes()),
+                        args.maximum_usd,
+                        args.scenario,
+                    )
+                    args.output.mkdir(parents=True, exist_ok=False)
+                    for name, artifact in (("protocol", protocol), ("plan", plan)):
+                        (args.output / (name + ".json")).write_text(
+                            artifact.model_dump_json(indent=2) + "\n", encoding="utf-8"
+                        )
+                    return
         elif args.command.startswith("benchmark-pilot-"):
             from agent_reliability_lab.research.pilot import (
                 draft_pilot,
@@ -282,6 +344,37 @@ def main():
     )
     audit.add_argument("file", type=Path)
     audit.add_argument("--authorize-private-read", action="store_true")
+    live_preflight = commands.add_parser(
+        "benchmark-live-preflight", help="Check provider readiness without networking"
+    )
+    live_preflight.add_argument("file", type=Path)
+    live_preflight.add_argument("--authorization", type=Path)
+    live_draft = commands.add_parser(
+        "benchmark-live-draft", help="Freeze inputs for a two-pair development pilot"
+    )
+    live_draft.add_argument("file", type=Path)
+    live_draft.add_argument("output", type=Path)
+    live_draft.add_argument("--profile", type=Path, required=True)
+    live_draft.add_argument("--pricing", type=Path, required=True)
+    live_draft.add_argument("--maximum-usd", type=Decimal, required=True)
+    live_draft.add_argument("--identity", default="cp16_development")
+    live_draft.add_argument("--scenario", default="multi_step_resolve_task")
+    live_auth = commands.add_parser(
+        "benchmark-live-authorize-draft", help="Draft a scoped execution authorization"
+    )
+    live_auth.add_argument("file", type=Path)
+    live_auth.add_argument("--profile", type=Path, required=True)
+    live_auth.add_argument(
+        "--mode", choices=("mock_http", "paid_openai", "groq_free"), required=True
+    )
+    live_auth.add_argument("--deadline", type=datetime.fromisoformat, required=True)
+    live_run = commands.add_parser(
+        "benchmark-live-run", help="Request a separately authorized development pilot"
+    )
+    live_run.add_argument("file", type=Path)
+    activation = live_run.add_mutually_exclusive_group()
+    activation.add_argument("--activate-paid", action="store_true")
+    activation.add_argument("--activate-free", action="store_true")
     pilot_draft = commands.add_parser(
         "benchmark-pilot-draft", help="Draft a frozen offline development pilot"
     )

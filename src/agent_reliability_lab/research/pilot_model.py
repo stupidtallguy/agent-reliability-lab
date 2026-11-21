@@ -32,12 +32,10 @@ def reply_fingerprint(reply):
     )
 
 
-class OfflinePilotModel:
-    def __init__(self, broker, plan, arm, run_ref, script_config):
-        if plan.mode != "offline_fixture" or script_config.provider != "fake":
-            raise ValueError("live pilot execution is disabled")
+class BoundPilotModel:
+    def __init__(self, broker, plan, arm, run_ref, model_config):
         self.broker, self.plan, self.arm, self.run_ref = broker, plan, arm, run_ref
-        self.script = ScriptedModel(script_config)
+        self.model_config = model_config
         self.store = ExecutionStore(broker.engine)
 
     async def decide(self, messages, tools, turn, max_output_tokens):
@@ -70,8 +68,8 @@ class OfflinePilotModel:
         ):
             raise ModelFailure("pilot_trial_allocation_mismatch")
 
-    async def decide_for_request(
-        self, execution_id, request_id, messages, tools, turn, max_output_tokens
+    def _bound_request(
+        self, execution_id, request_id, messages, tools, turn, max_output_tokens, **extra
     ):
         input_hash = digest([messages, tools])
         execution = self.store.get(execution_id)
@@ -82,7 +80,7 @@ class OfflinePilotModel:
             or config["tenant_id"] != self.arm.tenant
             or config["actor_id"] != self.arm.actor
             or digest(config["model"]) != self.arm.script_config_hash
-            or digest(self.script.config.model_dump(mode="json")) != self.arm.script_config_hash
+            or digest(self.model_config.model_dump(mode="json")) != self.arm.script_config_hash
         ):
             raise ModelFailure("pilot_execution_configuration_mismatch")
         self._validate_execution(execution_id, config)
@@ -93,17 +91,26 @@ class OfflinePilotModel:
             for record in records
             if record["kind"] == "model_started" and record["reference"] == request_id
         ]
-        if len(starts) != 1 or any(
-            starts[0].get(key) != value
-            for key, value in dict(
-                request_id=request_id, execution_id=execution_id, input_hash=input_hash, turn=turn
-            ).items()
+        if (
+            len(starts) != 1
+            or any(
+                starts[0].get(key) != value
+                for key, value in dict(
+                    request_id=request_id,
+                    execution_id=execution_id,
+                    input_hash=input_hash,
+                    turn=turn,
+                    provider=self.model_config.provider,
+                    model=self.model_config.model_id,
+                ).items()
+            )
+            or starts[0]["context"].get("max_output_tokens") != max_output_tokens
         ):
             raise ModelFailure("pilot_sealed_request_mismatch")
         # This number is an offline fixture observation only. The independent upper
         # bound in the budget manifest determines reservation capacity.
         estimate = len(json.dumps([messages, tools], ensure_ascii=False).encode("utf-8"))
-        request = CallRequest(
+        return CallRequest(
             attempt_id=request_id,
             execution_id=execution_id,
             allocation=self.arm,
@@ -113,6 +120,22 @@ class OfflinePilotModel:
             input_hash=input_hash,
             estimated_input_tokens=estimate,
             maximum_output_tokens=max_output_tokens,
+            **extra,
+        )
+
+
+class OfflinePilotModel(BoundPilotModel):
+    def __init__(self, broker, plan, arm, run_ref, script_config):
+        if plan.mode != "offline_fixture" or script_config.provider != "fake":
+            raise ValueError("live pilot execution is disabled")
+        super().__init__(broker, plan, arm, run_ref, script_config)
+        self.script = ScriptedModel(script_config)
+
+    async def decide_for_request(
+        self, execution_id, request_id, messages, tools, turn, max_output_tokens
+    ):
+        request = self._bound_request(
+            execution_id, request_id, messages, tools, turn, max_output_tokens
         )
         self.broker.reserve(request)
         dispatch_started = time.monotonic()
