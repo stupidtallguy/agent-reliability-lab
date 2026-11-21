@@ -138,9 +138,24 @@ class ScenarioRunner:
         execution_options: dict | None = None,
         demonstration: bool = False,
         benchmark_context: dict | None = None,
+        benchmark_model=None,
     ) -> str:
         if not paths:
             raise ValueError("at least one scenario path is required")
+        if benchmark_context is not None and (live or config.model.provider != "fake"):
+            raise ValueError("live model execution is disabled in benchmark mode")
+        if benchmark_context is not None and model_factory is not None:
+            raise ValueError("arbitrary model factories are disabled in benchmark mode")
+        if benchmark_model is not None:
+            from agent_reliability_lab.research.pilot_model import OfflinePilotModel
+
+            if benchmark_context is None or type(benchmark_model) is not OfflinePilotModel:
+                raise ValueError("benchmark model must be the brokered offline adapter")
+
+            def offline_factory(_):
+                return benchmark_model
+
+            model_factory = offline_factory
         if demonstration and (config.model.provider != "fake" or config.study is not None):
             raise ValueError("a demonstration must use scripted infrastructure validation")
         if config.model.provider == "openai" and (

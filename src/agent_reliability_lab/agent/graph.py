@@ -13,7 +13,7 @@ from agent_reliability_lab.adversarial.runtime import Interceptor
 from agent_reliability_lab.agent.budgets import before_model_call
 from agent_reliability_lab.agent.config import AgentConfig
 from agent_reliability_lab.agent.errors import BudgetExceeded, ModelFailure
-from agent_reliability_lab.agent.models.base import ModelAdapter
+from agent_reliability_lab.agent.models.base import EvidenceBoundModel, ModelAdapter
 from agent_reliability_lab.agent.persistence import ExecutionStore, utcnow
 from agent_reliability_lab.agent.state import AgentState, Decision
 from agent_reliability_lab.agent.tool_adapter import ToolSession, provider_tools
@@ -152,12 +152,18 @@ class GraphRuntime:
                     async with asyncio.timeout(
                         min(self.remaining(), self.config.budgets.model_timeout_seconds)
                     ):
-                        decision = await self.model.decide(
+                        model_args = (
                             state["messages"],
                             tools,
                             state["turn"],
                             self.config.budgets.max_output_tokens,
                         )
+                        if isinstance(self.model, EvidenceBoundModel):
+                            decision = await self.model.decide_for_request(
+                                self.execution_id, request_id, *model_args
+                            )
+                        else:
+                            decision = await self.model.decide(*model_args)
                 except TimeoutError:
                     raise ModelFailure("model_timeout", True) from None
                 if len(decision.calls) > self.config.budgets.max_tool_calls:

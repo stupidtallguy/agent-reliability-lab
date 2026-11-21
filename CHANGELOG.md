@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add CP15's offline paired development pilot, atomic PostgreSQL provider budget
+  broker, simulated usage reconciliation, and reproducible score-pinned reports.
+  Live benchmark execution stays disabled.
+
+- Add CP14 audited allocations, preflight and score-pinned confirmatory
+  analysis. Correct independent pair loss and keep power designs separate by
+  repetition schedule.
+
 - Add CP13 private catalog commitments, redacted leakage audits, and frozen
   confirmatory design and cluster power planning. Held-out execution stays disabled.
 

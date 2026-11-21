@@ -68,7 +68,7 @@ class ResearchStore:
             content_hash=digest(artifact.model_dump(mode="json")),
         )
 
-    def append(self, artifact, *, human_attestation=False):
+    def append(self, artifact, *, human_attestation=False, authorized_private_read=False):
         value = artifact.model_dump(mode="json")
         artifact = parse_artifact(value)
         if self.evaluations.contains_sensitive(value):
@@ -81,7 +81,7 @@ class ResearchStore:
             raise ValueError("synthetic attestations require an isolated test/demo scope")
         with self.engine.begin() as connection:
             lock(connection, "research:" + self.scope)
-            self._validate_references(artifact)
+            self._validate_references(artifact, authorized_private_read=authorized_private_read)
             last = connection.execute(
                 sa.select(sa.func.max(artifacts.c.version)).where(
                     artifacts.c.scope == self.scope,
@@ -103,11 +103,11 @@ class ResearchStore:
             )
         return self.reference(artifact)
 
-    def _validate_references(self, item):
+    def _validate_references(self, item, *, authorized_private_read=False):
         if item.kind.startswith("benchmark_"):
             from agent_reliability_lab.research.benchmark import validate_references
 
-            validate_references(self, item)
+            validate_references(self, item, authorized_private_read=authorized_private_read)
         elif item.kind in {"attestation", "adjudication"}:
             oracle = self.get(item.oracle)
             reviewer = self.get(item.reviewer if item.kind == "attestation" else item.adjudicator)

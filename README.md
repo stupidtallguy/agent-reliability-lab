@@ -7,7 +7,8 @@ support tasks. No real customer records or production integrations are used.
 
 **Application 1.0.0 | evaluator 1.7.0 candidate | renderer 2.2.0.**
 The default experimental selector remains **1.1.0**. Candidate scoring requires
-explicit selection. The repository remains private.
+explicit selection. This repository is public. Keep private benchmark stimuli
+outside the tracked tree.
 
 ## Start the demonstration
 
@@ -103,6 +104,13 @@ CP13 adds [sealed-catalog auditing and cluster-level study planning](docs/checkp
 The planning workflow uses explicit sensitivity assumptions and can run without
 private stimuli. The audit opens a separately stored catalog only on explicit
 request. Held-out execution remains disabled.
+
+CP14 adds [confirmatory allocation, preflight, and evidence reconstruction](docs/checkpoint-14-confirmatory-preflight.md).
+Its analysis path is verified using scripted development runs.
+
+CP15 adds an [offline development feasibility pilot](docs/checkpoint-15-live-development-pilot.md)
+with PostgreSQL budget reservations, restart-safe usage reconciliation, and score-pinned
+reports. The pilot uses a synthetic provider fixture. Paid execution stays disabled.
 
 The research workflow includes composite dataset releases, preregistrations and
 amendments, pairing, and family-aware analysis. The optional Oracle Review workspace

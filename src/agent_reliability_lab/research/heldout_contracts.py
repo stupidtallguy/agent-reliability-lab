@@ -44,7 +44,7 @@ class PrivateCatalog(Contract):
 
 
 class LeakagePolicy(Contract):
-    audit_version: Literal["1.0.0"] = "1.0.0"
+    audit_version: Literal["1.0.0", "1.1.0"] = "1.1.0"
     lexical_threshold: float = Field(default=0.8, ge=0.5, le=1)
     structural_threshold: float = Field(default=0.92, ge=0.5, le=1)
     minimum_lexical_tokens: int = Field(default=6, ge=3, le=30)
@@ -77,8 +77,6 @@ class PowerScenario(Contract):
     def feasible(self) -> Self:
         if self.expected_difference >= self.discordance:
             raise ValueError("expected difference must be smaller than discordance")
-        if self.pair_missing + self.pair_excluded >= 1:
-            raise ValueError("pair loss probabilities must sum to less than one")
         return self
 
 
@@ -90,6 +88,9 @@ class PowerDesign(Contract):
     minimum_meaningful_difference: float | None = Field(default=None, gt=0, lt=1)
     planning_basis: Literal["illustrative", "externally_justified"] = "illustrative"
     justification: Text | None = None
+    minimum_effect_justification: Text | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     cluster_grid: list[Annotated[int, Field(ge=20, le=1500)]] = Field(
         default_factory=lambda: [20, 40, 60, 80, 120, 160, 240, 320, 480],
         min_length=1,
