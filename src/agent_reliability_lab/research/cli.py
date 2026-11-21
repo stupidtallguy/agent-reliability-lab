@@ -116,6 +116,34 @@ async def execute(args):
                 if artifact.kind != "benchmark_result":
                     raise ValueError("verification requires a frozen benchmark result")
                 result = verify_result(store, artifact)
+        elif args.command.startswith("benchmark-pilot-"):
+            from agent_reliability_lab.research.pilot import (
+                draft_pilot,
+                render_pilot,
+                run_pilot,
+                verify_pilot_report,
+            )
+
+            ref = Reference.model_validate_json(args.file.read_bytes())
+            if args.command == "benchmark-pilot-run":
+                result = (await run_pilot(store, ref)).model_dump(mode="json")
+            else:
+                store = ResearchStore(
+                    engine.execution_options(postgresql_readonly=True), args.scope
+                )
+                if args.command == "benchmark-pilot-draft":
+                    result = draft_pilot(store, ref, args.identity, args.fixture_fault).model_dump(
+                        mode="json"
+                    )
+                else:
+                    document = verify_pilot_report(store, store.get(ref))
+                    if args.output is not None:
+                        args.output.mkdir(parents=True, exist_ok=False)
+                        for extension, content in render_pilot(document).items():
+                            (args.output / ("pilot." + extension)).write_bytes(
+                                content.encode("utf-8")
+                            )
+                    result = document
         elif args.command in {"benchmark-design-draft", "benchmark-heldout-audit"}:
             from agent_reliability_lab.research.heldout_contracts import PowerDesign
             from agent_reliability_lab.research.heldout_design import audit_registered, draft_design
@@ -254,6 +282,25 @@ def main():
     )
     audit.add_argument("file", type=Path)
     audit.add_argument("--authorize-private-read", action="store_true")
+    pilot_draft = commands.add_parser(
+        "benchmark-pilot-draft", help="Draft a frozen offline development pilot"
+    )
+    pilot_draft.add_argument("file", type=Path)
+    pilot_draft.add_argument("--identity", default="cp15_pilot")
+    pilot_draft.add_argument(
+        "--fixture-fault",
+        choices=("none", "first_dispatch_timeout", "first_usage_missing"),
+        default="none",
+    )
+    pilot_run = commands.add_parser(
+        "benchmark-pilot-run", help="Run a registered offline development pilot"
+    )
+    pilot_run.add_argument("file", type=Path)
+    pilot_verify = commands.add_parser(
+        "benchmark-pilot-verify", help="Reconstruct a frozen pilot report read-only"
+    )
+    pilot_verify.add_argument("file", type=Path)
+    pilot_verify.add_argument("--output", type=Path)
     for name in (
         "benchmark-allocation-draft",
         "benchmark-preflight",
