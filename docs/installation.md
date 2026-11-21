@@ -1,8 +1,8 @@
 # Windows, Linux and macOS installation
 
 Supported: CPython 3.11/3.12, uv 0.13.7, Docker Desktop with Linux containers on
-Windows/macOS or Docker Engine with Compose on Linux. Use the private repository
-with your existing Git authentication; never paste credentials into commands.
+Windows/macOS or Docker Engine with Compose on Linux. Clone the public repository.
+Keep credentials and private benchmark inputs outside the tracked tree.
 
 ```console
 git clone https://github.com/stupidtallguy/agent-reliability-lab.git

@@ -53,6 +53,7 @@ jobs:
       - name: Research CLI and historical source integrity
         run: |
           uv run --locked opsdesk-research --help
+          uv run --locked opsdesk-research benchmark-guard
           uv run --locked opsdesk-research validate benchmarks/research/split-development.json
           uv run --locked opsdesk-research validate benchmarks/research/split-held_out.json
           uv run --locked opsdesk-research validate benchmarks/research/dataset-release.json

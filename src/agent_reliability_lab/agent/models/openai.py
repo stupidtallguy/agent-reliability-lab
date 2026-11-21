@@ -49,6 +49,17 @@ def parse_completion(response) -> Decision:
     )
 
 
+async def request_completion(client, model_id, messages, tools, max_output_tokens):
+    tool_options = {"tools": tools, "parallel_tool_calls": False} if tools else {}
+    return await client.chat.completions.create(
+        model=model_id,
+        messages=messages,
+        max_completion_tokens=max_output_tokens,
+        store=False,
+        **tool_options,
+    )
+
+
 class OpenAIModel:
     def __init__(self, model_id: str, *, live_opt_in: bool = False, client=None):
         if not live_opt_in:
@@ -60,13 +71,8 @@ class OpenAIModel:
         self, messages: list[dict], tools: list[dict], turn: int, max_output_tokens: int
     ) -> Decision:
         try:
-            tool_options = {"tools": tools, "parallel_tool_calls": False} if tools else {}
-            response = await self.client.chat.completions.create(
-                model=self.model_id,
-                messages=messages,
-                max_completion_tokens=max_output_tokens,
-                store=False,
-                **tool_options,
+            response = await request_completion(
+                self.client, self.model_id, messages, tools, max_output_tokens
             )
             return parse_completion(response)
         except ModelFailure:

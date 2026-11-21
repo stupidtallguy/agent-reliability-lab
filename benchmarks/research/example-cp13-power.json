@@ -1,0 +1,54 @@
+{
+  "planning_basis": "illustrative",
+  "minimum_meaningful_difference": 0.06,
+  "alpha": 0.05,
+  "seed": 34917,
+  "simulations": 1500,
+  "cluster_grid": [20, 40, 60, 80, 120, 160, 240, 320, 480],
+  "scenarios": [
+    {
+      "identity": "conservative_dependence",
+      "rationale": "Illustrative six percentage points with high template heterogeneity.",
+      "expected_difference": 0.06,
+      "discordance": 0.3,
+      "cluster_sign_icc": 0.4,
+      "repetitions_per_cluster": 4,
+      "pair_missing": 0.08,
+      "pair_excluded": 0.04,
+      "cluster_dropout": 0.04
+    },
+    {
+      "identity": "conservative_more_repeats",
+      "rationale": "Same effect and heterogeneity with twice the within-cluster replication.",
+      "expected_difference": 0.06,
+      "discordance": 0.3,
+      "cluster_sign_icc": 0.4,
+      "repetitions_per_cluster": 8,
+      "pair_missing": 0.08,
+      "pair_excluded": 0.04,
+      "cluster_dropout": 0.04
+    },
+    {
+      "identity": "moderate_lower_dependence",
+      "rationale": "Illustrative twelve percentage points with lower template heterogeneity.",
+      "expected_difference": 0.12,
+      "discordance": 0.3,
+      "cluster_sign_icc": 0.1,
+      "repetitions_per_cluster": 4,
+      "pair_missing": 0.08,
+      "pair_excluded": 0.04,
+      "cluster_dropout": 0.04
+    },
+    {
+      "identity": "moderate_higher_dependence",
+      "rationale": "Same moderate effect with a larger between-template variance.",
+      "expected_difference": 0.12,
+      "discordance": 0.3,
+      "cluster_sign_icc": 0.6,
+      "repetitions_per_cluster": 4,
+      "pair_missing": 0.08,
+      "pair_excluded": 0.04,
+      "cluster_dropout": 0.04
+    }
+  ]
+}

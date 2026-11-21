@@ -65,7 +65,8 @@ callers; database owners can bypass it. Services are not an authentication layer
 Only the explicitly opted-in model adapter uses its fixed provider endpoint;
 synthetic tool containers should have no Internet route. Pin images and review
 dependency changes. A future network policy must be tested rather than inferred
-from a Compose diagram. A private repository is not a secrets store.
+from a Compose diagram. Store secrets and private benchmark inputs outside the
+public repository.
 
 Output framing and model instructions alone cannot guarantee injection resistance.
 Local stdio binding/HMAC assumes a trusted OS account and host; it is not OAuth

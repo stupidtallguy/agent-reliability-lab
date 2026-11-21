@@ -138,9 +138,24 @@ class ScenarioRunner:
         execution_options: dict | None = None,
         demonstration: bool = False,
         benchmark_context: dict | None = None,
+        benchmark_model=None,
     ) -> str:
         if not paths:
             raise ValueError("at least one scenario path is required")
+        if benchmark_context is not None and (live or config.model.provider != "fake"):
+            raise ValueError("live model execution is disabled in benchmark mode")
+        if benchmark_context is not None and model_factory is not None:
+            raise ValueError("arbitrary model factories are disabled in benchmark mode")
+        if benchmark_model is not None:
+            from agent_reliability_lab.research.pilot_model import OfflinePilotModel
+
+            if benchmark_context is None or type(benchmark_model) is not OfflinePilotModel:
+                raise ValueError("benchmark model must be the brokered offline adapter")
+
+            def offline_factory(_):
+                return benchmark_model
+
+            model_factory = offline_factory
         if demonstration and (config.model.provider != "fake" or config.study is not None):
             raise ValueError("a demonstration must use scripted infrastructure validation")
         if config.model.provider == "openai" and (
@@ -148,8 +163,30 @@ class ScenarioRunner:
         ):
             raise ValueError("live evaluation requires --live and an explicit model ID")
         cases = [read_case(path) for path in paths]
+        withheld = {
+            case.scenario.scenario_id
+            for case, _, _ in cases
+            if case and case.scenario.metadata.split == "held_out"
+        }
+        if withheld:
+            visible = {
+                case.scenario.scenario_id
+                for case, _, _ in cases
+                if case and case.scenario.scenario_id not in withheld
+            }
+            if visible and config.model.script:
+                raise ValueError("held-out cases cannot share an unscoped development script")
+            scoped = {
+                name: {sid: value for sid, value in getattr(config, name).items() if sid in visible}
+                for name in ("scripts", "annotations", "harnesses", "write_scopes")
+            }
+            config = config.model_copy(
+                update={**scoped, "model": config.model.model_copy(update={"script": []})}
+            )
         cases = [
-            (None, fingerprint, "sensitive_scenario_rejected")
+            (None, fingerprint, "held_out_access_not_enabled")
+            if case and case.scenario.scenario_id in withheld
+            else (None, fingerprint, "sensitive_scenario_rejected")
             if case and self.store.contains_sensitive(case.model_dump(mode="json"))
             else (case, fingerprint, problem)
             for case, fingerprint, problem in cases
@@ -240,8 +277,6 @@ class ScenarioRunner:
                     experiment_id, scenario, fingerprint, oracle, trial_index, mode
                 )
                 reason = problem
-                if scenario and scenario.metadata.split != "development":
-                    reason = "held_out_access_not_enabled"
                 if oracle.scenario_hash is not None and oracle.scenario_hash != fingerprint:
                     reason = "oracle_scenario_hash_mismatch"
                 if scenario and scenario.injections and reason is None:
@@ -271,7 +306,7 @@ class ScenarioRunner:
                 if reason:
                     status = (
                         "invalid_scenario"
-                        if problem
+                        if (problem and problem != "held_out_access_not_enabled")
                         or reason
                         in {"oracle_scenario_hash_mismatch", "harness_scenario_binding_mismatch"}
                         else "not_executed"
