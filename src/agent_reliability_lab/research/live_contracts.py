@@ -59,6 +59,23 @@ class ProviderProfile(Contract):
         return issues
 
 
+class GroqPacing(Contract):
+    """Operator-observed ceilings, conservatively capped at public Free-plan limits."""
+
+    requests_per_minute: int = Field(ge=1, le=30)
+    requests_per_day: int = Field(ge=1, le=1000)
+    tokens_per_minute: int = Field(ge=1, le=8000)
+    tokens_per_day: int = Field(ge=1, le=200000)
+    input_tokens_per_minute: int | None = Field(default=None, ge=1, le=8000)
+    output_tokens_per_minute: int | None = Field(default=None, ge=1, le=8000)
+
+    @model_validator(mode="after")
+    def split_limits(self) -> Self:
+        if (self.input_tokens_per_minute is None) != (self.output_tokens_per_minute is None):
+            raise ValueError("record both split token ceilings when configured")
+        return self
+
+
 class GroqProfile(Contract):
     schema_version: Literal["groq-free-chat-1.0"] = "groq-free-chat-1.0"
     endpoint: Literal["https://api.groq.com/openai/v1/chat/completions"] = (
@@ -78,20 +95,43 @@ class GroqProfile(Contract):
     expected_system_fingerprint: ModelID | None = None
     free_organization_evidence: Hash | None = None
     free_key_commitment: Hash | None = None
+    pacing: GroqPacing | None = Field(default=None, exclude_if=lambda value: value is None)
+    fingerprint_qualification: Reference | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    qualification_event_hash: Hash | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def window(self) -> Self:
+        if (self.fingerprint_qualification is None) != (self.qualification_event_hash is None):
+            raise ValueError("a fingerprint pin requires the qualification and its event hash")
         if self.input_ceiling + self.output_ceiling > GROQ_CONTEXT:
             raise ValueError("Groq input and output limits exceed the published context window")
+        pacing = self.pacing
+        if pacing and (
+            self.input_ceiling + self.output_ceiling
+            > min(pacing.tokens_per_minute, pacing.tokens_per_day)
+            or pacing.input_tokens_per_minute is not None
+            and self.input_ceiling > pacing.input_tokens_per_minute
+            or pacing.output_tokens_per_minute is not None
+            and self.output_ceiling > pacing.output_tokens_per_minute
+        ):
+            raise ValueError("one reserved request must fit the frozen Groq token ceilings")
         return self
 
-    def incompatibilities(self, mode):
+    def incompatibilities(self, mode, *, qualification=False):
         if mode == "paid_openai":
             return ["groq_paid_route_forbidden"]
         issues = []
-        if self.expected_system_fingerprint is None:
+        if qualification and (
+            self.expected_system_fingerprint is not None or self.fingerprint_qualification
+        ):
+            issues.append("qualification_requires_unpinned_backend")
+        if not qualification and self.expected_system_fingerprint is None:
             issues.append("backend_fingerprint_not_pinned")
-        if mode == "groq_free":
+        if mode == "groq_free" or qualification:
             if self.free_organization_evidence is None:
                 issues.append("free_organization_unverified")
             if self.free_key_commitment is None:
@@ -132,10 +172,15 @@ class LiveAuthorization(Artifact):
     starts_at: AwareDatetime
     deadline: AwareDatetime
     supersedes: Reference | None = None
+    purpose: Literal["groq_fingerprint"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validity(self) -> Self:
         groq = isinstance(self.profile, GroqProfile)
+        if self.purpose and not groq:
+            raise ValueError("fingerprint qualification is available only for Groq")
         if groq != (self.authorization_version == "development-groq-free-1.0.0") or (
             self.mode != "mock_http" and groq != (self.mode == "groq_free")
         ):

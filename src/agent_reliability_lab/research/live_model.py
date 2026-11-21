@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+from asyncio import sleep
 
 import httpx2
 from openai import (
@@ -23,6 +24,7 @@ from agent_reliability_lab.agent.journal import Redactor
 from agent_reliability_lab.agent.models.openai import parse_completion
 from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research import live
+from agent_reliability_lab.research.pilot_budget import DispatchDeferred
 from agent_reliability_lab.research.pilot_contracts import ProviderObservation
 from agent_reliability_lab.research.pilot_model import BoundPilotModel, reply_fingerprint
 
@@ -55,6 +57,7 @@ class _PermitTransport(httpx2.AsyncBaseTransport):
             backend,
         )
         self.dispatched = False
+        self.network_started = None
         self.gate_error = None
 
     async def handle_async_request(self, request):
@@ -85,7 +88,9 @@ class _PermitTransport(httpx2.AsyncBaseTransport):
         if self.authority.profile.provider == "groq":
             from agent_reliability_lab.research.groq_model import verify_groq_wire
 
-            verify_groq_wire(self.authority.profile, self.attempt, raw)
+            verify_groq_wire(
+                self.authority.profile, self.attempt, raw, purpose=self.authority.purpose
+            )
         elif digest(json.loads(raw)) != self.attempt.wire_hash:
             raise ModelFailure("pilot_http_request_differs_from_reservation")
         if self.authority.mode == "paid_openai" and not live.PUBLIC_PROVIDER_NETWORK_ENABLED:
@@ -93,9 +98,14 @@ class _PermitTransport(httpx2.AsyncBaseTransport):
         if self.dispatched:
             raise ModelFailure("pilot_attempt_already_dispatched")
         # Avoid letting the SDK translate a gate failure into an ambiguous network error.
-        started = time.monotonic()
         try:
-            remaining = self.broker.begin_dispatch(self.attempt)
+            while True:
+                started = time.monotonic()
+                try:
+                    remaining = self.broker.begin_dispatch(self.attempt)
+                    break
+                except DispatchDeferred as deferred:
+                    await sleep(deferred.seconds)
             if remaining is None:
                 raise ModelFailure("pilot_attempt_already_dispatched")
         except (ValueError, BudgetExceeded, ModelFailure) as error:
@@ -107,6 +117,7 @@ class _PermitTransport(httpx2.AsyncBaseTransport):
             raise httpx2.ReadTimeout("pilot dispatch window expired", request=request)
         try:
             async with asyncio.timeout(remaining):
+                self.network_started = time.perf_counter()
                 response = await self.backend.handle_async_request(request)
                 await response.aread()
         except TimeoutError:

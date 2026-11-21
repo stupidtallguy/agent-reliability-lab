@@ -56,7 +56,8 @@ def validate_authorization(store, authorization, plan=None):
         or store.reference(plan) != authorization.pilot
         or authorization.scope != store.scope
         or authorization.identity != "auth_" + plan.ledger_id
-        or plan.mode != "future_live_requested"
+        or plan.mode not in {"future_live_requested", "groq_qualification"}
+        or (plan.mode == "groq_qualification") != (authorization.purpose == "groq_fingerprint")
         or protocol.kind != "benchmark_protocol"
         or protocol.mode != PROVIDER_PROTOCOL
         or authorization.protocol != plan.protocol
@@ -83,11 +84,32 @@ def validate_authorization(store, authorization, plan=None):
     ):
         raise ActivationBlocked("token_ceiling_mismatch")
     validate_plan(store, plan)
+    if isinstance(profile, GroqProfile) and profile.fingerprint_qualification is not None:
+        from agent_reliability_lab.research.groq_qualification import verify_qualification_pin
+
+        verify_qualification_pin(store, authorization)
     if authorization.supersedes:
         previous = store.get(authorization.supersedes)
         if previous.pilot != authorization.pilot or previous.scope != authorization.scope:
             raise ActivationBlocked("authorization_lineage_mismatch")
     return protocol
+
+
+def profile_issues(authority):
+    profile = authority.profile
+    if not isinstance(profile, GroqProfile):
+        return profile.incompatibilities(authority.mode)
+    qualification = authority.purpose == "groq_fingerprint"
+    issues = profile.incompatibilities(authority.mode, qualification=qualification)
+    if (qualification or authority.mode == "groq_free") and profile.pacing is None:
+        issues.append("groq_account_quota_unverified")
+    if (
+        authority.mode == "groq_free"
+        and not qualification
+        and not profile.fingerprint_qualification
+    ):
+        issues.append("groq_live_fingerprint_qualification_required")
+    return issues
 
 
 def active_authorization(connection, scope, reference, plan_hash):
@@ -127,17 +149,19 @@ def active_authorization(connection, scope, reference, plan_hash):
     now = connection.scalar(sa.select(sa.func.clock_timestamp()))
     if not authority.starts_at <= now < authority.deadline or authority.created_at > now:
         raise ActivationBlocked("authorization_outside_execution_window")
-    issues = authority.profile.incompatibilities(authority.mode)
+    if authority.mode == "groq_free" and not GROQ_FREE_NETWORK_ENABLED:
+        raise ActivationBlocked("groq_external_activation_locked")
+    issues = profile_issues(authority)
     if issues:
         raise ActivationBlocked(issues[0])
     if authority.mode == "paid_openai" and not PUBLIC_PROVIDER_NETWORK_ENABLED:
         raise ActivationBlocked("external_activation_locked")
-    if authority.mode == "groq_free" and not GROQ_FREE_NETWORK_ENABLED:
-        raise ActivationBlocked("groq_external_activation_locked")
     return authority
 
 
-def draft_live(store, parent_ref, identity, profile, pricing, maximum_usd, scenario):
+def draft_live(
+    store, parent_ref, identity, profile, pricing, maximum_usd, scenario, *, qualification=False
+):
     require_disposable(store)
     parent = store.get(parent_ref)
     if (
@@ -146,6 +170,8 @@ def draft_live(store, parent_ref, identity, profile, pricing, maximum_usd, scena
         or scenario not in parent.scenarios
     ):
         raise ActivationBlocked("existing_development_protocol_required")
+    if qualification and not isinstance(profile, GroqProfile):
+        raise ActivationBlocked("groq_qualification_profile_required")
     dataset = store.get(parent.dataset)
     source = provenance(ExperimentConfig(experimental_evaluator=parent.evaluator_version))
     protocol = type(parent).model_validate_json(
@@ -174,12 +200,11 @@ def draft_live(store, parent_ref, identity, profile, pricing, maximum_usd, scena
         ).model_dump_json()
     )
     if isinstance(profile, GroqProfile):
+        budgets = {"max_llm_calls": GROQ_PILOT_CALLS // 4}
+        if profile.pacing is not None:
+            budgets.update(model_timeout_seconds=120.0, max_wall_seconds=480.0)
         protocol = protocol.model_copy(
-            update={
-                "budgets": protocol.budgets.model_copy(
-                    update={"max_llm_calls": GROQ_PILOT_CALLS // 4}
-                )
-            }
+            update={"budgets": protocol.budgets.model_copy(update=budgets)}
         )
     slots, _ = schedule(dataset, protocol)
     model = PilotModel(
@@ -187,12 +212,12 @@ def draft_live(store, parent_ref, identity, profile, pricing, maximum_usd, scena
         model_id=profile.requested_model,
         allowed_models=(profile.requested_model,),
     )
-    calls = 4 * protocol.budgets.max_llm_calls
+    calls = 1 if qualification else 4 * protocol.budgets.max_llm_calls
     plan = PilotPlan(
         identity=identity,
         author=protocol.author,
         created_at=protocol.created_at,
-        mode="future_live_requested",
+        mode="groq_qualification" if qualification else "future_live_requested",
         protocol=store.reference(protocol),
         schedule_hash=digest(slots),
         ledger_id=uuid.uuid4().hex,
@@ -207,7 +232,9 @@ def draft_live(store, parent_ref, identity, profile, pricing, maximum_usd, scena
             maximum_output_tokens=profile.output_ceiling,
             total_tokens=calls * (profile.input_ceiling + profile.output_ceiling),
             maximum_usd=maximum_usd,
-            duration_seconds=900,
+            duration_seconds=180
+            if qualification
+            else (1200 if isinstance(profile, GroqProfile) and profile.pacing is not None else 900),
         ),
     )
     return protocol, plan
@@ -234,6 +261,7 @@ def draft_authorization(store, plan_ref, profile, mode, deadline):
         author=plan.author,
         decision="authorized",
         mode=mode,
+        purpose="groq_fingerprint" if plan.mode == "groq_qualification" else None,
         scope=store.scope,
         protocol=plan.protocol,
         pilot=plan_ref,
@@ -259,7 +287,10 @@ def preflight(store, plan_ref, authorization_ref=None):
         require_disposable(store)
         checks["disposable_database"] = True
         plan = store.get(plan_ref)
-        if plan.kind != "benchmark_pilot_plan" or plan.mode != "future_live_requested":
+        if plan.kind != "benchmark_pilot_plan" or plan.mode not in {
+            "future_live_requested",
+            "groq_qualification",
+        }:
             raise ActivationBlocked("provider_pilot_plan_required")
         protocol = store.get(plan.protocol)
         if protocol.kind != "benchmark_protocol" or protocol.mode != PROVIDER_PROTOCOL:
@@ -333,7 +364,7 @@ def preflight(store, plan_ref, authorization_ref=None):
                     and (price.effective_until - now).total_seconds() <= checks["available_seconds"]
                 ):
                     issues.append("price_expires_within_execution_window")
-                issues.extend(auth.profile.incompatibilities(auth.mode))
+                issues.extend(profile_issues(auth))
                 if auth.mode != "mock_http" and not checks["credential_configured"]:
                     issues.append("provider_credential_not_configured")
                 if auth.mode == "groq_free" and checks["credential_configured"]:
@@ -384,7 +415,11 @@ def open_provider_pilot(
 
     require_disposable(store)
     plan = store.get(plan_ref)
-    if plan.kind != "benchmark_pilot_plan" or plan.protocol != protocol_ref:
+    if (
+        plan.kind != "benchmark_pilot_plan"
+        or plan.mode != "future_live_requested"
+        or plan.protocol != protocol_ref
+    ):
         raise ActivationBlocked("provider_pilot_protocol_mismatch")
     authority = store.get(authorization_ref)
     validate_authorization(store, authority, plan)
