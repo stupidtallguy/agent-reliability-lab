@@ -57,7 +57,11 @@ def readonly_engine(url):
         hide_parameters=True,
         pool_pre_ping=True,
         execution_options={"postgresql_readonly": True},
-        connect_args={"options": "-c default_transaction_read_only=on -c statement_timeout=15000"},
+        connect_args={
+            "options": (
+                "-c timezone=UTC -c default_transaction_read_only=on -c statement_timeout=15000"
+            )
+        },
     )
 
 

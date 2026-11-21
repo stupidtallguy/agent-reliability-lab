@@ -812,18 +812,26 @@ async def test_receipt_reuse_follows_attempt_that_reached_mcp(
 
 
 @pytest.mark.anyio
-async def test_signed_current_sources_compare_attempts_and_journal(lab, tmp_path, monkeypatch):
+@pytest.mark.parametrize("requested_timezone", ["UTC", "Asia/Tehran"])
+async def test_signed_current_sources_compare_attempts_and_journal(
+    lab, tmp_path, monkeypatch, requested_timezone
+):
     from agent_reliability_lab.agent import tables as agent
     from agent_reliability_lab.agent.persistence import ExecutionStore
     from agent_reliability_lab.reliability import revisions
     from agent_reliability_lab.reliability.demo import run_reliability_demo
     from agent_reliability_lab.reliability.metrics import render
-    from agent_reliability_lab.research.views import ResearchView
+    from agent_reliability_lab.research.views import ResearchView, readonly_engine
 
     engine = lab.sandbox.engine
+    url = engine.url.update_query_dict({"options": f"-c timezone={requested_timezone}"})
+    dashboard_engine = readonly_engine(url.render_as_string(hide_password=False))
+    with dashboard_engine.connect() as connection:
+        assert connection.exec_driver_sql("SHOW timezone").scalar_one() == "UTC"
+        assert connection.exec_driver_sql("SHOW transaction_read_only").scalar_one() == "on"
     summary = await run_reliability_demo(engine, lab.sandbox, tmp_path, transport="memory")
     eid = summary["execution_id"]
-    view = ResearchView(engine)
+    view = ResearchView(dashboard_engine)
     first, second = view.reliability_reports(eid)
     assert [item.current_state for item in (first, second)] == ["historical", "current"]
     key = second["retry"]["attempts"][1]["attempt_id"]
@@ -863,7 +871,7 @@ from agent_reliability_lab.research.views import ResearchView, readonly_engine
 view = ResearchView(readonly_engine(os.environ["OPSDESK_DASHBOARD_DATABASE_URL"]))
 demo_workspace(view, {eid!r}, "Reports & Evaluators")
 """
-    ).run()
+    ).run(timeout=30)
     assert not ui.exception
     assert any("inconsistent" in row.value for row in ui.warning)
     assert any("Physical attempt changed" in row.value for row in ui.caption)
@@ -889,6 +897,7 @@ demo_workspace(view, {eid!r}, "Reports & Evaluators")
     assert recent.current_state == "historical"
     assert recent.current_source_reason == "Additional execution evidence is now available."
     assert render(recent, "json") == render(second, "json")
+    dashboard_engine.dispose()
 
 
 @pytest.mark.anyio
