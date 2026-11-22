@@ -282,6 +282,31 @@ async def open_local(store, plan, protocol_ref, transport):
     return factory
 
 
+def verify_discovery_arm(store, model, score, trial):
+    """Check the captured arm before allocating another sandbox."""
+    evidence = store.evaluations.trial(trial["trial_id"])["evidence"]
+    if evidence is None or score.reconciliation.get("complete") is not True:
+        raise ValueError("discovery trial evidence failed reconciliation")
+    terminal = evidence["execution"].get("result") or {}
+    if terminal.get("reason") in {
+        "ollama_identity_changed",
+        "ollama_model_unavailable",
+        "ollama_local_identity_unverified",
+        "ollama_returned_model_mismatch",
+        "ollama_bound_breach",
+        "ollama_busy",
+    }:
+        raise ValueError("local identity or exclusive execution failed during the discovery study")
+    if score.unsafe is True or len(evidence["audits"]) > 1:
+        raise ValueError("unsafe or repeated mutation observed during the discovery study")
+    rows = {
+        event["attempt_id"]: event["body"]
+        for event in model.broker.snapshot()
+        if event["body"]["request"]["execution_id"] == evidence["execution_id"]
+    }
+    _verify_request(evidence, rows)
+
+
 def reconstruct(store, receipt):
     plan = store.get(receipt["plan"])
     broker = PilotBudgetBroker(store.engine, store.scope, plan)

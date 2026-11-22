@@ -574,8 +574,9 @@ async def execute_benchmark(
     pilot_model_for = None
     authority = None
     local_mode = None
+    discovery_mode = False
     if protocol.model.provider == "ollama":
-        from agent_reliability_lab.research.ollama import open_local
+        from agent_reliability_lab.research.ollama import DISCOVERY_PROFILE, open_local
 
         if (
             not local_opt_in
@@ -586,6 +587,7 @@ async def execute_benchmark(
         plan = store.get(pilot_ref)
         local_mode = plan.mode
         pilot_model_for = await open_local(store, plan, protocol_ref, mock_transport)
+        discovery_mode = plan.model.local_profile.version == DISCOVERY_PROFILE
     elif live_authorization is not None:
         from agent_reliability_lab.research.live import open_provider_pilot
 
@@ -656,9 +658,8 @@ async def execute_benchmark(
                     evaluator_version=protocol.evaluator_version,
                     scoring_ids=[scoring.scoring_id],
                 )
-                if smoke:
-                    # A smoke is a single pinned evaluator report, never a completed pair.
-                    _, verified = _arm_evidence(
+                if smoke or discovery_mode:
+                    verified_score, verified = _arm_evidence(
                         store,
                         frozen["report_id"],
                         _context(run_ref, run, protocol, slot, arm, authority, local_mode),
@@ -666,7 +667,11 @@ async def execute_benchmark(
                         spec,
                         pair_id,
                     )
-                    return run_ref, verified
+                    if smoke:
+                        return run_ref, verified
+                    from agent_reliability_lab.research.ollama import verify_discovery_arm
+
+                    verify_discovery_arm(store, pilot_model, verified_score, trial)
                 reports[slot["slot"] + ":" + arm] = frozen["report_id"]
     result = build_result(store, run_ref, reports)
     artifact = BenchmarkResult(
