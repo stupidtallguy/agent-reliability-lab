@@ -48,3 +48,19 @@ uv run --locked python -m $module verify --pgdata $pgdata --receipt .local/pilot
 ```
 
 CI uses an injected HTTP mock with actual PostgreSQL and MCP. The mock has a distinct execution mode and its trials retain the scripted classification. Genuine local trials use the live evaluator classification and the `ollama_local` research interpretation. No credentials, model downloads or external inference are needed for CI.
+
+
+## Observed Windows smoke
+
+On 2026-11-22 source `1cedfbe3bad10235a5285060d84fd7a25e33a3b3` ran Qwen3.5 4B Q4_K_M through the native loopback endpoint. The GGUF manifest digest was `d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04`. The Ryzen 7 6800H host reported 15,987,896 KiB of visible RAM and an RTX 3050 Laptop GPU with 4096 MiB VRAM (driver 621.24). The frozen hardware fingerprint was `079bdc2f7c91cf23a6ae1a85a10092d8b0e8d1acd0673762efba112bbde7bdc3`. After the smoke the daemon reported 3,743,384,858 loaded bytes, 1,879,813,650 in VRAM, and a 4096-token context. A subsequent sample showed 262 MiB free GPU memory and 3,729,204 KiB available host RAM. These are point samples.
+
+| Request | Local input / generated tokens | HTTP wall time | Model load | Prompt evaluation | Generation |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Tool selection | 409 / 45 | 10.709 s | 7.619 s | 0.746 s | 2.337 s |
+| Final answer | 741 / 67 | 3.982 s | 0.006 s | 0.450 s | 3.520 s |
+
+The model selected `create_task(customer_id="customer_001", title="Shipment follow-up")`. The host accepted it. MCP took 76.36 ms and produced one receipt and one audited task creation. Total trial time was 15.224 s. The model answered “Task created successfully.” and supplied the resulting task ID, title, customer and status. The frozen response predicate requires the case-sensitive substring `Created`. The state and mutation checks passed, and the answer predicate failed. The independent evaluator recorded **incorrect_response**. No fault or refusal rubric applied. Zero retries, duplicate effects or unauthorized attempts were observed.
+
+The evaluator report is `531e3a4b3931446a924a66167a0dc9bd`, trial `9b086e290d324a1499425f8892f622eb`, score revision 1, scoring ID `7e5805a4f6604561a33f77e8507eeb26`. The score pins evidence digest `ddddfcbb81dc78a4441a37f16a488d8c4ec16ed8ede5a5ec3cc5896ebf1719e5`. On the experiment host, pass `.local/cp20-smoke-ref.json` to the verification command against the retained test-owned cluster. The original JSON and its separate reconstruction had identical SHA-256 `df264ea62c9918f1726de3a58d1b189cac9169957759dd7d0fc66176eca7417a`. Export bytes on other platforms may use different line endings.
+
+The four-trial study remained unexecuted after the unsuccessful objective smoke score. The paired-path results in CI come from mock HTTP. No real comparison between arms is available.

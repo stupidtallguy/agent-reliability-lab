@@ -35,6 +35,10 @@ pytestmark = pytest.mark.integration
         "duplicate_call_id",
         "missing_usage",
         "denied",
+        "guard_scope",
+        "tampered",
+        "cloud_tag",
+        "no_tools",
     ],
 )
 def test_local_pipeline(manager, monkeypatch, case):
@@ -50,7 +54,7 @@ def test_local_pipeline(manager, monkeypatch, case):
         quantization="Q4_K_M",
         template_hash=digest("template"),
         hardware={"cpu": "fixture"},
-        smoke=case != "paired",
+        smoke=case not in {"paired", "guard_scope"},
     )
     ref = register(store, profile, mock=True)
     plan = store.get(ref)
@@ -66,6 +70,10 @@ def test_local_pipeline(manager, monkeypatch, case):
                 "capabilities": ["tools"],
                 "template": "template",
             }
+            if case == "cloud_tag":
+                data["remote_host"] = "https://example.invalid"
+            if case == "no_tools":
+                data["capabilities"] = ["completion"]
         elif req.url.path == "/api/tags":
             data = {
                 "models": []
@@ -97,11 +105,14 @@ def test_local_pipeline(manager, monkeypatch, case):
             if not tools:
                 name = {"unknown_tool": "unlisted", "denied": "update_task"}.get(case, "get_order")
                 args = {"order_id": "order_001"}
-                if case in {"smoke", "missing_usage"}:
+                if case in {"smoke", "missing_usage", "tampered"}:
                     name = "create_task"
                     args = {"customer_id": "customer_001", "title": "Shipment follow-up"}
                 if case == "wrong_arguments":
                     args = {"unknown": False}
+                if case == "guard_scope":
+                    name = "update_task"
+                    args = {"task_id": "task_001", "patch": {"title": "outside scope"}}
                 if case == "denied":
                     args = {"task_id": "task_other", "patch": {"status": "resolved"}}
                 item = {"id": "fixture-call", "function": {"name": name, "arguments": args}}
@@ -126,20 +137,25 @@ def test_local_pipeline(manager, monkeypatch, case):
             mock_transport=httpx2.MockTransport(handler),
         )
 
-    if case in {"unavailable", "changed"}:
-        with pytest.raises((ValueError, ModelFailure), match="unavailable|differs"):
+    if case in {"unavailable", "changed", "cloud_tag", "no_tools"}:
+        with pytest.raises((ValueError, ModelFailure), match="unavailable|differs|unverified"):
             asyncio.run(run())
         assert not calls
         return
     run_ref, result = asyncio.run(run())
     receipt = {"plan": ref.model_dump(mode="json")}
-    if case == "paired":
+    if case in {"paired", "guard_scope"}:
         receipt["report"] = publish_pilot(store, ref, run_ref).model_dump(mode="json")
         doc = reconstruct(store, receipt)
         assert doc["interpretation"] == "ollama_mock"
         assert all(p["comparison"] == "verified" for p in doc["benchmark"]["pairs"])
         assert doc["usage"]["physical_dispatches"] == 8
         assert doc["usage"]["reported_input_tokens"]["sum_observed"] == 8 * 31
+        if case == "guard_scope":
+            for pair in doc["benchmark"]["pairs"]:
+                trial = store.evaluations.trial(pair["arms"]["guarded"]["trial_id"])
+                assert not trial["evidence"]["audits"]
+                assert any(e["event_type"] == "defense_block" for e in trial["evidence"]["events"])
         return
     receipt.update(run=run_ref.model_dump(mode="json"), report_id=result["report_id"])
     doc = reconstruct(store, receipt)
@@ -148,6 +164,11 @@ def test_local_pipeline(manager, monkeypatch, case):
     terminal = doc["provider_events"][-1]["body"]
     if case in {"connection", "timeout"}:
         assert terminal["state"] == "uncertain" and len(calls) == 1
+        recovered = reconstruct(
+            ResearchStore(manager.engine, store.scope), {"plan": receipt["plan"]}
+        )
+        assert recovered["status"] == "incomplete"
+        assert recovered["provider_events"] == doc["provider_events"] and len(calls) == 1
     elif case in {"context", "invalid_json", "redirect", "duplicate_call_id"}:
         assert terminal["observation"]["outcome"] == "failed" and len(calls) == 1
     else:
@@ -159,5 +180,16 @@ def test_local_pipeline(manager, monkeypatch, case):
             assert terminal["observation"]["input_tokens"] is None
         if case in {"unknown_tool", "wrong_arguments", "denied"}:
             assert not evidence["audits"]
+        if case == "tampered":
+            original = store.evaluations.trial
+
+            def altered(trial_id):
+                trial = original(trial_id)
+                trial["evidence"]["audits"].clear()
+                return trial
+
+            monkeypatch.setattr(store.evaluations, "trial", altered)
+            with pytest.raises(ValueError):
+                reconstruct(store, receipt)
         with pytest.raises(NoResultFound):
             reconstruct(store, receipt | {"report_id": "0" * 32})
