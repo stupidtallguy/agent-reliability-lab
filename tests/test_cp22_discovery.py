@@ -1,4 +1,3 @@
-import copy
 import json
 import subprocess
 
@@ -21,9 +20,10 @@ def test_native_schema_roundtrip_preserves_patch_type():
     original = wire["tools"][0]["function"]["parameters"]
     assert original == schema
     assert original["properties"]["patch"] == {"$ref": "#/$defs/TaskPatch"}
-    # Offline-only interface probe. The paired study keeps the original nested schema.
-    inline = copy.deepcopy(original)
-    inline["properties"]["patch"] = inline.pop("$defs")["TaskPatch"]
+    revised = profile.model_copy(update={"version": "local-ollama-discovery-1"})
+    inline = payload(revised, [], [tool])["tools"][0]["function"]["parameters"]
+    assert inline["properties"]["patch"] == original["$defs"]["TaskPatch"]
+    assert payload(profile, [], [tool])["tools"][0]["function"]["parameters"] == original
     examples = [
         ({"status": "resolved"}, True),
         ('{"status":"resolved"}', False),

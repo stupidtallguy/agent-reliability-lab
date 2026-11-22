@@ -294,6 +294,7 @@ def verify_discovery_arm(store, model, score, trial):
         "ollama_local_identity_unverified",
         "ollama_returned_model_mismatch",
         "ollama_bound_breach",
+        "ollama_discovery_unexpected_patch_schema",
         "ollama_busy",
     }:
         raise ValueError("local identity or exclusive execution failed during the discovery study")

@@ -175,9 +175,10 @@ def test_cp22_native_mock_paired_study(manager, monkeypatch):
             schemas = {
                 item["function"]["name"]: item["function"]["parameters"] for item in wire["tools"]
             }
-            assert len(schemas) == 5 and schemas["update_task"]["properties"]["patch"] == {
-                "$ref": "#/$defs/TaskPatch"
-            }
+            patch = schemas["update_task"]["properties"]["patch"]
+            assert len(schemas) == 5 and patch["type"] == "object"
+            assert set(patch["properties"]) == {"status", "title"}
+            assert patch["additionalProperties"] is False
             call = scripted_call(wire["messages"])
             message = {"role": "assistant", "content": "Resolved after the shipment check."}
             if call:

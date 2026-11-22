@@ -64,6 +64,25 @@ async def identity(http, hardware, *, smoke=False, profile_version="local-ollama
     )
 
 
+def discovery_tools(tools):
+    """Inline the task patch that Ollama 0.40.16 omits when presented as a reference."""
+    output = []
+    for tool in tools:
+        function = tool["function"]
+        if function["name"] == "update_task":
+            schema = function["parameters"]
+            props = schema["properties"]
+            if props["patch"] != {"$ref": "#/$defs/TaskPatch"} or set(schema["$defs"]) != {
+                "TaskPatch"
+            }:
+                raise ModelFailure("ollama_discovery_unexpected_patch_schema")
+            expanded = {key: value for key, value in schema.items() if key != "$defs"}
+            expanded["properties"] = props | {"patch": schema["$defs"]["TaskPatch"]}
+            tool = tool | {"function": function | {"parameters": expanded}}
+        output.append(tool)
+    return output
+
+
 def payload(profile, messages, tools):
     native, names = [], {}
     for original in messages:
@@ -90,7 +109,7 @@ def payload(profile, messages, tools):
     return dict(
         model=profile.tag,
         messages=native,
-        tools=tools,
+        tools=discovery_tools(tools) if profile.version == "local-ollama-discovery-1" else tools,
         stream=False,
         think=False,
         truncate=False,
