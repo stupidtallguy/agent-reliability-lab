@@ -112,7 +112,11 @@ def test_local_pipeline(manager, monkeypatch, case):
                     args = {"unknown": False}
                 if case == "guard_scope":
                     name = "update_task"
-                    args = {"task_id": "task_001", "patch": {"title": "outside scope"}}
+                    args = {
+                        "task_id": "task_001",
+                        "expected_version": 1,
+                        "patch": {"title": "outside scope"},
+                    }
                 if case == "denied":
                     args = {"task_id": "task_other", "patch": {"status": "resolved"}}
                 item = {"id": "fixture-call", "function": {"name": name, "arguments": args}}
