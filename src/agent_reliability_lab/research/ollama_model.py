@@ -34,7 +34,7 @@ def client(transport=None):
     )
 
 
-async def identity(http, hardware, *, smoke=False):
+async def identity(http, hardware, *, smoke=False, profile_version="local-ollama-1"):
     """Metadata only. A remote/cloud-backed tag has no eligible local weights."""
     tags = (await http.get("/api/tags")).raise_for_status().json()["models"]
     matches = [x for x in tags if x["name"] == TAG and x.get("model") == TAG]
@@ -54,6 +54,7 @@ async def identity(http, hardware, *, smoke=False):
     ):
         raise ModelFailure("ollama_local_identity_unverified")
     return OllamaProfile(
+        version=profile_version,
         model_digest=item["digest"],
         runtime=version,
         quantization=details["quantization_level"],
@@ -206,7 +207,10 @@ class OllamaModel(BoundPilotModel):
         request = request.model_copy(update={"estimated_input_tokens": None})
         with inference_slot():
             async with client(self.transport) as http:
-                if await identity(http, profile.hardware, smoke=profile.smoke) != profile:
+                observed_profile = await identity(
+                    http, profile.hardware, smoke=profile.smoke, profile_version=profile.version
+                )
+                if observed_profile != profile:
                     raise ModelFailure("ollama_identity_changed")
                 self.broker.reserve(request)
                 remaining = self.broker.begin_dispatch(request)

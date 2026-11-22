@@ -7,7 +7,7 @@ from pydantic import Field, model_validator
 from agent_reliability_lab.adversarial.contracts import HarnessSpec, WriteScope
 from agent_reliability_lab.agent.config import Budgets, ModelConfig
 from agent_reliability_lab.benchmarks.scenario import Contract, Identifier, Text
-from agent_reliability_lab.evaluation.contracts import Case
+from agent_reliability_lab.evaluation.contracts import Case, SourceMethod
 from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research.contracts import Artifact, Reference
 
@@ -179,6 +179,7 @@ class BenchmarkProtocol(Artifact):
     transport: Literal["memory", "stdio"] = "memory"
     evaluator_version: Literal["1.7.0"] = "1.7.0"
     source_commit: Annotated[str, Field(pattern=r"^[a-f0-9]{40}$")]
+    source_method: SourceMethod | None = Field(default=None, exclude_if=lambda value: value is None)
     source_hash: Hash
     lock_hash: Hash
     budgets: Budgets

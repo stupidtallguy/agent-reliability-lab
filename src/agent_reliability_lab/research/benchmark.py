@@ -309,6 +309,7 @@ def _config(protocol, spec, arm, pairing_id):
         pairing_id=pairing_id,
         defense=arm,
         source_commit=protocol.source_commit,
+        source_method=protocol.source_method,
         model=protocol.model,
         budgets=protocol.budgets,
         transport=protocol.transport,
@@ -323,7 +324,7 @@ def _config(protocol, spec, arm, pairing_id):
 def _source_matches(protocol, observed):
     return all(
         observed.get(key) == getattr(protocol, key)
-        for key in ("source_commit", "source_hash", "lock_hash")
+        for key in ("source_commit", "source_method", "source_hash", "lock_hash")
     )
 
 
@@ -514,6 +515,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
         },
         evaluator_version=protocol.evaluator_version,
         source_commit=protocol.source_commit,
+        **({"source_method": protocol.source_method} if protocol.source_method else {}),
         source_hash=protocol.source_hash,
         lock_hash=protocol.lock_hash,
         arms=list(protocol.arms),
@@ -562,7 +564,11 @@ async def execute_benchmark(
         raise ValueError("run requires a preregistered benchmark protocol reference")
     dataset = store.get(protocol.dataset)
     slots, catalog = schedule(dataset, protocol)
-    runtime = provenance(ExperimentConfig(experimental_evaluator=protocol.evaluator_version))
+    runtime = provenance(
+        ExperimentConfig(
+            experimental_evaluator=protocol.evaluator_version, source_method=protocol.source_method
+        )
+    )
     if not _source_matches(protocol, runtime):
         raise ValueError("checked-out source or dependency lock differs from preregistration")
     pilot_model_for = None

@@ -25,6 +25,7 @@ from agent_reliability_lab.evaluation.demo import development_script
 from agent_reliability_lab.evaluation.evidence import capture_initial, collect
 from agent_reliability_lab.evaluation.persistence import EvaluationStore, now
 from agent_reliability_lab.evaluation.scoring import excluded, score
+from agent_reliability_lab.evaluation.source import committed_source
 from agent_reliability_lab.opsdesk.database import SandboxManager
 from agent_reliability_lab.opsdesk.fixtures import digest, from_scenario
 
@@ -50,12 +51,18 @@ def provenance(config: ExperimentConfig) -> dict:
     lock = Path("uv.lock")
     if config.experimental_evaluator == "1.7.0" and not lock.is_file():
         lock = source / "resources/uv.lock"
+    lock_hash = hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else None
+    versioned = {}
+    if config.source_method:
+        code_hash, lock_hash = committed_source(source, commit)
+        versioned["source_method"] = config.source_method
     status = git("status", "--porcelain")
     return {
         "source_commit": commit,
         "working_tree_dirty": bool(status) if status is not None else None,
         "source_hash": code_hash,
-        "lock_hash": hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else None,
+        "lock_hash": lock_hash,
+        **versioned,
         "python": platform.python_version(),
         "platform": platform.system(),
         "sdk_versions": {name: version(name) for name in ("langgraph", "mcp", "openai", "psycopg")},

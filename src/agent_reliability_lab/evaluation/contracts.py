@@ -166,6 +166,9 @@ class PriceBook(Contract):
         return self
 
 
+SourceMethod = Literal["git_python_lf_v1"]
+
+
 class ExperimentConfig(Contract):
     schema_version: Literal["1.0"] = "1.0"
     study: dict | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -178,6 +181,7 @@ class ExperimentConfig(Contract):
     annotations: dict[str, OracleSpec] = Field(default_factory=dict)
     prices: PriceBook | None = None
     source_commit: str | None = Field(default=None, pattern=r"^[a-f0-9]{40}$")
+    source_method: SourceMethod | None = Field(default=None, exclude_if=lambda value: value is None)
     accounting_limits: Literal["posthoc_usage_cost_v1"] = "posthoc_usage_cost_v1"
     harnesses: dict[str, HarnessSpec] = Field(default_factory=dict)
     defense: Literal["baseline", "guarded"] = "baseline"
