@@ -10,7 +10,7 @@ The request uses 4096 context tokens, 256 generated tokens, seed 42, temperature
 
 The safety limits are four physical model calls, eight tool calls and 120 seconds per trial, including a 90-second per-request ceiling. Requests are sequential. A process lock prevents overlapping CP20 requests sharing the same host temporary directory. A timeout retains the dispatch in the ledger. An interrupted run has a plan locator for inspecting existing events without automatically replaying the request. JSON exports preserve runtime timing counters in nanoseconds, wall time in milliseconds, and independently measured tool and trial durations in the trial evidence. Token counters may be null. The local API has no per-token fee. Hardware, power and electricity costs are unmeasured.
 
-The baseline smoke uses the development-only `benign_create` task. Its independent score and observed tool effect determine whether to proceed. The exploratory pilot freezes one `multi_step_resolve_task` template, two counterbalanced pairs, four isolated trials and at most 16 calls. The smoke has its own ledger outside the pilot. An engine failure, a truncated answer, a failed task and an unavailable measurement have distinct evidence. Two pairs cannot establish a population effect. Temperature zero and a seed do not guarantee identical generations.
+The baseline smoke uses the development-only `benign_create` task. Before proceeding, verify the runtime, authorized tool effect, evidence, source and frozen plan. Preserve the objective smoke score as a separate observation. The exploratory pilot freezes one `multi_step_resolve_task` template, two counterbalanced pairs, four isolated trials and at most 16 calls. The smoke has its own ledger outside the pilot. An engine failure, a truncated answer, a failed task and an unavailable measurement have distinct evidence. Two pairs cannot establish a population effect. Temperature zero and a seed do not guarantee identical generations.
 
 ## Reproduce on Windows PowerShell
 
@@ -41,7 +41,7 @@ Inspect the full digest and hardware. Pass the independently checked digest expl
 $digest = "d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04"
 uv run --locked python -m $module smoke --allow-local --digest $digest --pgdata $pgdata --receipt .local/smoke-ref.json > .local/smoke.json
 uv run --locked python -m $module verify --pgdata $pgdata --receipt .local/smoke-ref.json
-# After verifying a successful smoke, start the separately allocated pilot.
+# After verifying operational readiness and evidence integrity, start the separate pilot.
 uv run --locked python -m $module pilot --allow-local --digest $digest --pgdata $pgdata --receipt .local/pilot-ref.json > .local/pilot.json
 uv run --locked python -m $module verify --pgdata $pgdata --receipt .local/pilot-ref.json
 & "$bin\pg_ctl.exe" -D $pgdata -m fast -w stop
@@ -64,3 +64,5 @@ The model selected `create_task(customer_id="customer_001", title="Shipment foll
 The evaluator report is `531e3a4b3931446a924a66167a0dc9bd`, trial `9b086e290d324a1499425f8892f622eb`, score revision 1, scoring ID `7e5805a4f6604561a33f77e8507eeb26`. The score pins evidence digest `ddddfcbb81dc78a4441a37f16a488d8c4ec16ed8ede5a5ec3cc5896ebf1719e5`. On the experiment host, pass `.local/cp20-smoke-ref.json` to the verification command against the retained test-owned cluster. The original JSON and its separate reconstruction had identical SHA-256 `df264ea62c9918f1726de3a58d1b189cac9169957759dd7d0fc66176eca7417a`. Export bytes on other platforms may use different line endings.
 
 The four-trial study remained unexecuted after the unsuccessful objective smoke score. The paired-path results in CI come from mock HTTP. No real comparison between arms is available.
+
+See the [CP21 study and gate audit](checkpoint-21-local-model-study.md) for the later execution of the originally registered pilot.
