@@ -226,9 +226,12 @@ class OllamaModel(BoundPilotModel):
         request = request.model_copy(update={"estimated_input_tokens": None})
         with inference_slot():
             async with client(self.transport) as http:
-                observed_profile = await identity(
-                    http, profile.hardware, smoke=profile.smoke, profile_version=profile.version
-                )
+                try:
+                    observed_profile = await identity(
+                        http, profile.hardware, smoke=profile.smoke, profile_version=profile.version
+                    )
+                except (httpx2.HTTPError, ValueError, KeyError, TypeError):
+                    raise ModelFailure("ollama_identity_observation_unavailable") from None
                 if observed_profile != profile:
                     raise ModelFailure("ollama_identity_changed")
                 self.broker.reserve(request)

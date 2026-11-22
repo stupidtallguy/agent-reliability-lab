@@ -153,7 +153,10 @@ def test_observation_driven_discovery_and_write_guards(manager, tmp_path, failur
             assert not score.objective_success
 
 
-def test_cp22_native_mock_paired_study(manager, monkeypatch):
+@pytest.mark.parametrize("identity_drift", [False, True])
+def test_cp22_native_mock_paired_study(manager, monkeypatch, identity_drift):
+    dispatched = []
+
     async def deny(*args):
         pytest.fail("the discovery control attempted real networking")
 
@@ -172,6 +175,7 @@ def test_cp22_native_mock_paired_study(manager, monkeypatch):
         else:
             assert path == "/api/chat"
             wire = json.loads(request.content)
+            dispatched.append(wire)
             schemas = {
                 item["function"]["name"]: item["function"]["parameters"] for item in wire["tools"]
             }
@@ -189,7 +193,7 @@ def test_cp22_native_mock_paired_study(manager, monkeypatch):
                     "tool_calls": [{"function": {"name": name, "arguments": arguments}}],
                 }
             body = dict(
-                model=TAG,
+                model="changed" if identity_drift else TAG,
                 done=True,
                 done_reason="stop",
                 message=message,
@@ -212,15 +216,24 @@ def test_cp22_native_mock_paired_study(manager, monkeypatch):
     plan_ref = register(store, profile, mock=True)
     plan = store.get(plan_ref)
     assert plan.limits.total_calls == 28
-    result_ref, _ = asyncio.run(
-        execute_benchmark(
+
+    async def execute():
+        return await execute_benchmark(
             store,
             plan.protocol,
             pilot_ref=plan_ref,
             local_opt_in=True,
             mock_transport=httpx2.MockTransport(response),
         )
-    )
+
+    if identity_drift:
+        with pytest.raises(ValueError, match="identity or exclusive execution"):
+            asyncio.run(execute())
+        assert len(dispatched) == 1
+        assert len(store.list("benchmark_run")) == 1
+        assert not store.list("benchmark_result")
+        return
+    result_ref, _ = asyncio.run(execute())
     report = store.get(publish_pilot(store, plan_ref, result_ref))
     document = verify_pilot_report(store, report)
     assert document["benchmark"]["source_method"] == "git_python_lf_v1"

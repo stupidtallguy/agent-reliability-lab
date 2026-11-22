@@ -290,6 +290,7 @@ def verify_discovery_arm(store, model, score, trial):
     terminal = evidence["execution"].get("result") or {}
     if terminal.get("reason") in {
         "ollama_identity_changed",
+        "ollama_identity_observation_unavailable",
         "ollama_model_unavailable",
         "ollama_local_identity_unverified",
         "ollama_returned_model_mismatch",
