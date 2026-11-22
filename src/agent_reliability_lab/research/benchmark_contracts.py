@@ -197,7 +197,7 @@ class BenchmarkProtocol(Artifact):
             self.scripts
             or len(self.scenarios) != 1
             or self.repetitions != 2
-            or self.model.provider not in {"openai", "groq"}
+            or self.model.provider not in {"openai", "groq", "ollama"}
         ):
             raise ValueError("provider feasibility requires two counterbalanced development pairs")
         if any(not script or len(script) > 100 for script in self.scripts.values()):

@@ -304,6 +304,20 @@ def _document(store, plan_ref, result_ref, event_count=None):
         usage=_usage(rows),
         benchmark=result,
     )
+    if plan.model.provider == "ollama":
+        if any(
+            row["request"].get("authorization_hash") != plan_ref.content_hash
+            or not row["request"].get("wire_hash")
+            for row in rows.values()
+        ):
+            raise ValueError("local model event differs from frozen plan")
+        document.update(
+            schema_version="development-ollama-report-1",
+            interpretation=plan.mode,
+            methodology="Two counterbalanced development pairs on one template. "
+            "Objective scores pin independent sandbox evidence. Local runtime token "
+            "counts and timings exclude electricity costs. Mode: " + plan.mode,
+        )
     if run.live_authorization is not None:
         authority = store.get(run.live_authorization)
         if any(

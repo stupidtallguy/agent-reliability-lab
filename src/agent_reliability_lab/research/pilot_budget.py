@@ -90,7 +90,8 @@ def _pacing_wait(history, request, pacing, now):
 
 
 class PilotBudgetBroker:
-    def __init__(self, engine, scope, plan, *, authorization=None):
+    def __init__(self, engine, scope, plan, *, authorization=None, local_opt_in=False):
+        self.local_opt_in = local_opt_in
         self.engine, self.scope = engine, scope
         self.ledger_id = plan.ledger_id
         self.plan_hash = digest(plan.model_dump(mode="json"))
@@ -98,6 +99,17 @@ class PilotBudgetBroker:
         self.provider = plan.model.provider
 
     def _authorize(self, connection, mode, request=None):
+        if mode in {"ollama_mock", "ollama_local"}:
+            if (
+                not self.local_opt_in
+                or self.provider != "ollama"
+                or (
+                    request is not None
+                    and (not request.wire_hash or request.authorization_hash != self.plan_hash)
+                )
+            ):
+                raise ValueError("local development opt-in and bound request required")
+            return None
         if mode == "offline_fixture":
             if (
                 self.authorization is not None
@@ -270,7 +282,11 @@ class PilotBudgetBroker:
                 raise ValueError("request differs from frozen pilot allocation, model or pricing")
             if (
                 request.maximum_output_tokens > limits.maximum_output_tokens
-                or request.estimated_input_tokens > limits.maximum_input_tokens
+                or (request.estimated_input_tokens is None and self.provider != "ollama")
+                or (
+                    request.estimated_input_tokens is not None
+                    and request.estimated_input_tokens > limits.maximum_input_tokens
+                )
             ):
                 raise BudgetExceeded("pilot_per_request_tokens")
             rows = connection.scalars(

@@ -201,6 +201,12 @@ def run_inputs(store, run):
         ):
             raise ValueError("provider run differs from frozen authorization")
         validate_authorization(store, authority, store.get(run.pilot))
+    elif protocol.model.provider == "ollama":
+        from agent_reliability_lab.research.ollama import validate_local_plan
+
+        if not run.pilot or run.allocation:
+            raise ValueError("local development run requires its frozen pilot")
+        validate_local_plan(store, store.get(run.pilot), run.protocol)
     elif protocol.mode != "synthetic_exploratory":
         raise ValueError("provider development run requires a registered authorization")
     elif run.pilot is not None:
@@ -276,7 +282,7 @@ def validate_references(store, artifact, *, authorized_private_read=False):
         validate_design_references(store, artifact)
 
 
-def _context(run_ref, run, protocol, slot, arm, authority=None):
+def _context(run_ref, run, protocol, slot, arm, authority=None, local_mode=None):
     context = dict(
         schema_version="1.0",
         run=run_ref.model_dump(mode="json"),
@@ -291,6 +297,8 @@ def _context(run_ref, run, protocol, slot, arm, authority=None):
             execution_mode=authority.mode,
             live_authorization=run.live_authorization.model_dump(mode="json"),
         )
+    if local_mode:
+        context.update(execution_mode=local_mode, pilot=run.pilot.model_dump(mode="json"))
     return context
 
 
@@ -348,7 +356,11 @@ def _arm_evidence(store, report_id, expected, protocol, spec, pairing_id):
         result.experiment_id != document["experiment_id"]
         or trial["experiment_id"] != result.experiment_id
         or result.mode
-        != ("live" if expected.get("execution_mode") == "paid_openai" else "scripted")
+        != (
+            "live"
+            if expected.get("execution_mode") in {"paid_openai", "ollama_local"}
+            else "scripted"
+        )
         or (result.eligible and result.evaluator_version != protocol.evaluator_version)
         or result.scenario_hash != spec.scenario_hash
         or trial["scenario_hash"] != spec.scenario_hash
@@ -404,6 +416,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
         raise ValueError("benchmark result requires a frozen run")
     protocol, dataset, slots, catalog = run_inputs(store, run)
     authority = store.get(run.live_authorization) if run.live_authorization else None
+    local_mode = store.get(run.pilot).mode if protocol.model.provider == "ollama" else None
     expected_keys = {slot["slot"] + ":" + arm for slot in slots for arm in protocol.arms}
     if (
         partial
@@ -425,7 +438,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
             result, item = _arm_evidence(
                 store,
                 report_id,
-                _context(run_ref, run, protocol, slot, arm, authority),
+                _context(run_ref, run, protocol, slot, arm, authority, local_mode),
                 protocol,
                 spec,
                 pair_id,
@@ -490,7 +503,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
         raise ValueError("benchmark sandbox identity reused")
     return dict(
         schema_version="1.0",
-        interpretation=authority.mode if authority else "synthetic_exploratory",
+        interpretation=authority.mode if authority else local_mode or "synthetic_exploratory",
         run=run_ref.model_dump(mode="json"),
         protocol=run.protocol.model_dump(mode="json"),
         dataset=protocol.dataset.model_dump(mode="json"),
@@ -540,6 +553,7 @@ async def execute_benchmark(
     mock_transport=None,
     activate_paid=False,
     activate_free=False,
+    local_opt_in=False,
 ):
     if os.environ.get("OPSDESK_TEST_OWNED") != "1":
         raise ValueError("CP12 runs require an explicitly owned synthetic database")
@@ -553,7 +567,20 @@ async def execute_benchmark(
         raise ValueError("checked-out source or dependency lock differs from preregistration")
     pilot_model_for = None
     authority = None
-    if live_authorization is not None:
+    local_mode = None
+    if protocol.model.provider == "ollama":
+        from agent_reliability_lab.research.ollama import open_local
+
+        if (
+            not local_opt_in
+            or not pilot_ref
+            or any((allocation_ref, live_authorization, activate_paid, activate_free))
+        ):
+            raise ValueError("local development opt-in and a dedicated plan required")
+        plan = store.get(pilot_ref)
+        local_mode = plan.mode
+        pilot_model_for = await open_local(store, plan, protocol_ref, mock_transport)
+    elif live_authorization is not None:
         from agent_reliability_lab.research.live import open_provider_pilot
 
         if allocation_ref is not None or pilot_ref is None:
@@ -599,7 +626,8 @@ async def execute_benchmark(
             path = Path(temporary) / (slot["scenario_id"] + ".json")
             path.write_text(spec.case.model_dump_json(), encoding="utf-8")
             pair_id = digest([run_ref.content_hash, slot["slot"]])[:32]
-            for arm in slot["order"]:
+            smoke = bool(local_mode and plan.model.local_profile.smoke)
+            for arm in ["baseline"] if smoke else slot["order"]:
                 pilot_model = None
                 if pilot_model_for is not None:
                     script_config = protocol.model.model_copy(
@@ -609,7 +637,9 @@ async def execute_benchmark(
                 identifier = await runner.run(
                     [path],
                     _config(protocol, spec, arm, pair_id),
-                    benchmark_context=_context(run_ref, run, protocol, slot, arm, authority),
+                    benchmark_context=_context(
+                        run_ref, run, protocol, slot, arm, authority, local_mode
+                    ),
                     benchmark_model=pilot_model,
                 )
                 (trial,) = runner.store.list_trials(experiment_id=identifier)
@@ -620,6 +650,17 @@ async def execute_benchmark(
                     evaluator_version=protocol.evaluator_version,
                     scoring_ids=[scoring.scoring_id],
                 )
+                if smoke:
+                    # A smoke is a single pinned evaluator report, never a completed pair.
+                    _, verified = _arm_evidence(
+                        store,
+                        frozen["report_id"],
+                        _context(run_ref, run, protocol, slot, arm, authority, local_mode),
+                        protocol,
+                        spec,
+                        pair_id,
+                    )
+                    return run_ref, verified
                 reports[slot["slot"] + ":" + arm] = frozen["report_id"]
     result = build_result(store, run_ref, reports)
     artifact = BenchmarkResult(
