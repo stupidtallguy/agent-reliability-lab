@@ -196,7 +196,8 @@ class BenchmarkProtocol(Artifact):
             raise ValueError("select unique scenarios with exactly one script per scenario")
         if self.mode == "provider_development_exploratory" and (
             self.scripts
-            or len(self.scenarios) != (4 if self.intervention == "guard_multifamily_v1" else 1)
+            or len(self.scenarios)
+            not in ((4, 10) if self.intervention == "guard_multifamily_v1" else (1,))
             or self.repetitions != 2
             or self.model.provider not in {"openai", "groq", "ollama"}
         ):
