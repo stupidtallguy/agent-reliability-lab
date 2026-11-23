@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -194,9 +195,14 @@ def test_multiblock_uses_one_frozen_deadline_across_processes(plan, monkeypatch)
     assert read(store, scarce)["broker_events"] == []
 
 
-def test_concurrent_mock_workers_are_isolated_from_the_real_lock(plan, monkeypatch):
+def test_concurrent_mock_workers_are_isolated_from_the_real_lock(plan, monkeypatch, tmp_path):
     store, original = plan
     refs = [multiblock(store, original), multiblock(store, original)]
+    # Exercise a shared production-style lock across this test's children without
+    # competing with an independently running suite's lock assertion or the operator.
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(name, str(tmp_path))
     monkeypatch.setenv(
         "OPSDESK_DATABASE_URL", store.engine.url.render_as_string(hide_password=False)
     )
