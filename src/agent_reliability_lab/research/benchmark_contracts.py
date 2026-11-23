@@ -260,7 +260,32 @@ class BenchmarkResult(Artifact):
     result: dict
 
 
+class BenchmarkBlockEvent(Artifact):
+    kind: Literal["benchmark_block_event"] = "benchmark_block_event"
+    policy: Literal["local_memory_blocks_v1"] = "local_memory_blocks_v1"
+    run: Reference
+    slot: Identifier
+    arm: Literal["baseline", "guarded"]
+    action: Literal["claim", "capture", "memory_stop"]
+    available_bytes: int | None = Field(default=None, ge=0)
+    report_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        if self.identity != self.run.identity or self.run.kind != "benchmark_run":
+            raise ValueError("block event must identify its frozen run")
+        if (self.report_id is not None) != (self.action == "capture"):
+            raise ValueError("only a capture pins an evaluator report")
+        return self
+
+
 CONTRACTS = {
     model.model_fields["kind"].default: model
-    for model in (BenchmarkDataset, BenchmarkProtocol, BenchmarkRun, BenchmarkResult)
+    for model in (
+        BenchmarkDataset,
+        BenchmarkProtocol,
+        BenchmarkRun,
+        BenchmarkResult,
+        BenchmarkBlockEvent,
+    )
 }

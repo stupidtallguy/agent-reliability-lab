@@ -275,6 +275,10 @@ def validate_references(store, artifact, *, authorized_private_read=False):
         run_inputs(store, artifact)
     elif artifact.kind == "benchmark_result":
         verify_result(store, artifact)
+    elif artifact.kind == "benchmark_block_event":
+        from agent_reliability_lab.research.local_blocks import validate_event
+
+        validate_event(store, artifact)
     elif artifact.kind == "benchmark_allocation":
         from agent_reliability_lab.research.confirmatory import verify_allocation
 
@@ -533,7 +537,9 @@ def build_result(store, run_ref, report_ids, *, partial=False):
     summary = None
     if not partial:
         if protocol.intervention == MULTIFAMILY_INTERVENTION:
-            summary = descriptive_families(rows, stratified=len(protocol.scenarios) == 10)
+            summary = descriptive_families(
+                rows, stratified=any(spec.harness.benign_control for spec in catalog.values())
+            )
         elif protocol.intervention == INTERVENTION:
             summary = descriptive_cells(rows)
         else:
@@ -581,6 +587,24 @@ def verify_result(store, artifact):
     return actual
 
 
+async def run_benchmark_arm(runner, path, protocol, spec, arm, pair_id, slot, context, pilot_model):
+    identifier = await runner.run(
+        [path],
+        _config(protocol, spec, arm, pair_id, slot),
+        benchmark_context=context,
+        benchmark_model=pilot_model,
+    )
+    (trial,) = runner.store.list_trials(experiment_id=identifier)
+    (scoring,) = runner.store.scores(trial["trial_id"])
+    frozen = report(
+        runner.store,
+        identifier,
+        evaluator_version=protocol.evaluator_version,
+        scoring_ids=[scoring.scoring_id],
+    )
+    return trial, frozen
+
+
 async def execute_benchmark(
     store,
     protocol_ref,
@@ -621,6 +645,8 @@ async def execute_benchmark(
         ):
             raise ValueError("local development opt-in and a dedicated plan required")
         plan = store.get(pilot_ref)
+        if plan.model.local_profile.blocks:
+            raise ValueError("CP26 requires the preregistered one-pair block executor")
         local_mode = plan.mode
         pilot_model_for = await open_local(store, plan, protocol_ref, mock_transport)
         discovery_mode = plan.model.local_profile.uses_discovery
@@ -678,21 +704,9 @@ async def execute_benchmark(
                         update={"script": protocol.scripts.get(spec.scenario_id, [])}
                     )
                     pilot_model = pilot_model_for(run_ref, slot["slot"], arm, script_config)
-                identifier = await runner.run(
-                    [path],
-                    _config(protocol, spec, arm, pair_id, slot),
-                    benchmark_context=_context(
-                        run_ref, run, protocol, slot, arm, authority, local_mode
-                    ),
-                    benchmark_model=pilot_model,
-                )
-                (trial,) = runner.store.list_trials(experiment_id=identifier)
-                (scoring,) = runner.store.scores(trial["trial_id"])
-                frozen = report(
-                    runner.store,
-                    identifier,
-                    evaluator_version=protocol.evaluator_version,
-                    scoring_ids=[scoring.scoring_id],
+                context = _context(run_ref, run, protocol, slot, arm, authority, local_mode)
+                trial, frozen = await run_benchmark_arm(
+                    runner, path, protocol, spec, arm, pair_id, slot, context, pilot_model
                 )
                 if smoke or discovery_mode:
                     verified_score, verified = _arm_evidence(

@@ -1,5 +1,6 @@
 """Serial, isolated scenario trials with trusted configuration and independent scoring."""
 
+import asyncio
 import hashlib
 import json
 import platform
@@ -417,6 +418,12 @@ class ScenarioRunner:
             result = await host.run(
                 execution_id, agent_config, model=model, live_opt_in=live, **options
             )
+            if result.status == "interrupted":
+                from agent_reliability_lab.research.ollama_model import OllamaModel
+
+                if isinstance(model, OllamaModel) and model.plan.model.local_profile.blocks:
+                    # Preserve the sandbox and journal. The block reservation is single-use.
+                    raise asyncio.CancelledError
             duration = time.perf_counter() - started
             evidence = collect(self.engine, sandbox, execution_id, initial, catalog, duration)
             evidence.trial_binding = dict(

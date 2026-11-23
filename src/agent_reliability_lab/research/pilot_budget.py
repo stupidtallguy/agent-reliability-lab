@@ -160,7 +160,7 @@ class PilotBudgetBroker:
             """)
             )
 
-    def open(self, plan, arms):
+    def open(self, plan, arms, *, resume_blocks=False):
         self._require_disposable()
         body = plan.model_dump(mode="json")
         if digest(body) != self.plan_hash:
@@ -193,7 +193,14 @@ class PilotBudgetBroker:
                 .returning(ledgers.c.ledger_id)
             ).scalar_one_or_none()
             if created is None:
-                raise ValueError("pilot ledger was already opened")
+                if not resume_blocks or not (
+                    plan.model.local_profile and plan.model.local_profile.blocks
+                ):
+                    raise ValueError("pilot ledger was already opened")
+                existing = self._ledger(connection)
+                if existing["arms"] != inventory:
+                    raise ValueError("reopened block ledger has a different allocation")
+                self._admit(connection, existing)
 
     @staticmethod
     def _now(connection):
