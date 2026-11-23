@@ -68,7 +68,11 @@ def task_recovery(case, evidence, score):
         and op["operation_id"] in score.reconciliation["committed"]
     ]
     corrective = any(r["turn"] < w["turn"] for r in reads for w in matched_writes)
-    restored = bool(matched_writes) if fault.tool == "update_task" else bool(reads)
+    restored = (
+        any(op["status"] == "succeeded" for op in matched_writes)
+        if fault.tool == "update_task"
+        else bool(reads)
+    )
     result.update(
         exposure="verified",
         valid_tool_response_restored=restored,

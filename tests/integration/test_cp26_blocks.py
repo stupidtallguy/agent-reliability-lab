@@ -112,7 +112,7 @@ def read(store, ref):
     return local_blocks.reconstruct_blocks(readonly, ref)
 
 
-def test_whole_allocation_restart_and_idempotent_block(plan):
+def test_whole_allocation_restart_and_idempotent_block(plan, monkeypatch):
     store, ref = plan
     virgin = read(store, ref)
     assert virgin["status"] == "between_blocks" and len(virgin["pairs"]) == 8
@@ -130,8 +130,26 @@ def test_whole_allocation_restart_and_idempotent_block(plan):
 
     assert run(store, ref, transport=mock_ollama(no_dispatch))["status"] == "block_complete"
     assert read(store, ref) == first
-    # A fresh engine and reader/runner emulate separate CLI lifetimes at boundaries.
-    for block in range(2, 9):
+    monkeypatch.setenv(
+        "OPSDESK_DATABASE_URL", store.engine.url.render_as_string(hide_password=False)
+    )
+    child_block = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "block",
+            store.scope,
+            ref.model_dump_json(),
+            "2",
+        ],
+        check=True,
+        timeout=90,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(child_block.stdout)["status"] == "block_complete"
+    # Verify remaining boundaries with a fresh connection pool for each invocation.
+    for block in range(3, 9):
         engine = sa.create_engine(store.engine.url)
         try:
             restarted = ResearchStore(engine, store.scope)
@@ -225,12 +243,13 @@ def test_memory_pressure_with_inflight_request_keeps_it_unscored(plan, monkeypat
     ]
     assert store.evaluations.scores(pending["trial_id"]) == []
     assert pending["journal_hash"]
-    assert [e["kind"] for e in d["broker_events"]] == ["reserved", "dispatched"]
+    assert [e["kind"] for e in d["broker_events"]] == ["reserved", "dispatched", "uncertain"]
+    assert d["broker_events"][-1]["body"]["observation"] is None
     assert run(store, ref)["status"] == "stopped"
     assert read(store, ref) == d
 
 
-def child(action, scope, json_ref):
+def child(action, scope, json_ref, block=None):
     engine = engine_from_env()
     try:
         store = ResearchStore(engine, scope)
@@ -242,8 +261,11 @@ def child(action, scope, json_ref):
 
             run(store, ref, transport=mock_ollama(terminate))
             raise AssertionError("mock dispatch never reached the hard crash")
-        assert action == "inspect"
-        print(json.dumps(read(store, ref), sort_keys=True))
+        if action == "block":
+            print(json.dumps(run(store, ref, int(block)), sort_keys=True))
+        else:
+            assert action == "inspect"
+            print(json.dumps(read(store, ref), sort_keys=True))
     finally:
         engine.dispose()
 
