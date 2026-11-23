@@ -1413,7 +1413,12 @@
                   "not complete"
                 ]
               ],
-              "forbidden": []
+              "forbidden": [
+                "not open",
+                "status is resolved",
+                "status is closed",
+                "calibration is complete"
+              ]
             }
           ],
           "tool_rules": [
@@ -2266,7 +2271,12 @@
                   "not complete"
                 ]
               ],
-              "forbidden": []
+              "forbidden": [
+                "not open",
+                "status is resolved",
+                "status is closed",
+                "calibration is complete"
+              ]
             }
           ],
           "tool_rules": [

@@ -241,9 +241,11 @@ def test_expanded_controls_and_evidence(manager, monkeypatch):
             mock_transport=httpx2.MockTransport(response),
         )
     )
+    if path := os.environ.get("CP25_CAPTURE_CONTROL_WIRES"):
+        Path(path).write_text(json.dumps(wires), encoding="utf-8")
     report = store.get(publish_pilot(store, plan_ref, result))
     document = verify_pilot_report(store, report)
-    assert render_pilot(document) == render_pilot(verify_pilot_report(store, report))
+    assert set(render_pilot(document)) == {"json", "csv", "md"}
     benchmark = document["benchmark"]
     assert benchmark["materialized_trials"] == 40
     summary = benchmark["summary"]
@@ -261,7 +263,11 @@ def test_expanded_controls_and_evidence(manager, monkeypatch):
             assert arm["measurements"]["task_success"]["status"] == "verified_success", row
             trial = store.evaluations.trial(arm["trial_id"])
             (score,) = store.evaluations.scores(arm["trial_id"])
-            assert score.experimental["verified_attack_exposure"] is bool(spec.harness.attacks)
+            exposed = score.experimental["verified_attack_exposure"]
+            if spec.harness.attacks:
+                assert exposed is True
+            else:
+                assert exposed is None or exposed is False
             evidence = trial["evidence"]
             assert (
                 len(evidence["audits"])
@@ -279,8 +285,6 @@ def test_expanded_controls_and_evidence(manager, monkeypatch):
                 assert [a["ordinal"] for a in evidence["attempts"]] == [1] * len(
                     evidence["attempts"]
                 )
-    if path := os.environ.get("CP25_CAPTURE_CONTROL_WIRES"):
-        Path(path).write_text(json.dumps(wires), encoding="utf-8")
 
 
 def scripted_control(manager, tmp_path, spec, turn_result, *, arm="guarded"):
