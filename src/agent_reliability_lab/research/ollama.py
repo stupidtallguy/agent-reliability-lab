@@ -31,6 +31,7 @@ from agent_reliability_lab.research.benchmark import (
 )
 from agent_reliability_lab.research.benchmark_contracts import BenchmarkDataset, BenchmarkProtocol
 from agent_reliability_lab.research.multifamily import (
+    BLOCK_CASE_LIMITS,
     CASE_LIMITS,
     EXPANDED_CASE_LIMITS,
     INTERVENTION,
@@ -54,6 +55,7 @@ DISCOVERY_PROFILE = "local-ollama-discovery-1"
 ABLATION_PROFILE = "local-ollama-ablation-1"
 MULTIFAMILY_PROFILE = "local-ollama-multifamily-1"
 EXPANDED_PROFILE = "local-ollama-expanded-1"
+BLOCK_PROFILE = "local-ollama-blocks-1"
 DISCOVERY_CASE = "benchmarks/controls/revisions/multi_step_resolve_task-discovery-v2.json"
 
 
@@ -148,6 +150,8 @@ def guard_database(store):
 
 
 def case_limits(profile):
+    if profile.blocks:
+        return BLOCK_CASE_LIMITS
     return EXPANDED_CASE_LIMITS if profile.expanded else CASE_LIMITS
 
 
@@ -172,7 +176,8 @@ def validate_local_plan(store, plan, protocol_ref):
         raise ValueError("incompatible local development plan")
     if profile.multifamily:
         if (
-            store.get(protocol.dataset) != reviewed_dataset(expanded=profile.expanded)
+            store.get(protocol.dataset)
+            != reviewed_dataset(expanded=profile.expanded, blocks=profile.blocks)
             or protocol.source_method != "git_python_lf_v1"
         ):
             raise ValueError("multifamily plan does not pin the reviewed cases and source method")
@@ -196,7 +201,7 @@ def register(store, profile, *, mock=False):
     updates = {}
     if profile.uses_discovery:
         dataset = (
-            reviewed_dataset(expanded=profile.expanded)
+            reviewed_dataset(expanded=profile.expanded, blocks=profile.blocks)
             if profile.multifamily
             else discovery_dataset(dataset)
         )
@@ -239,13 +244,17 @@ def register(store, profile, *, mock=False):
                 model=ModelConfig(provider="ollama", model_id=TAG),
                 budgets=budgets,
                 hypothesis=(
-                    "Compare combined guarding on task completion, boundary compliance, "
+                    "Validate conservative one-pair blocks and evidence recovery."
+                    if profile.blocks
+                    else "Compare combined guarding on task completion, boundary compliance, "
                     "and model-directed recovery across eight development templates."
                     if profile.expanded
                     else "A local tool-calling model can attempt the existing development task."
                 ),
                 allocation_rationale=(
-                    "Eight primary templates and two matched benign conditions, "
+                    "One counterbalanced pair per process block with a fixed 512 MiB RAM floor."
+                    if profile.blocks
+                    else "Eight primary templates and two matched benign conditions, "
                     "two counterbalanced pairs per condition."
                     if profile.expanded
                     else "Four distinct development families in two counterbalanced blocks."
@@ -298,7 +307,13 @@ def register(store, profile, *, mock=False):
             maximum_output_tokens=256,
             total_tokens=calls * 4352,
             maximum_usd=Decimal(0),
-            duration_seconds=120 * (profile.trials + 1) if profile.explicit_factors else 600,
+            duration_seconds=(
+                3600
+                if profile.blocks
+                else 120 * (profile.trials + 1)
+                if profile.explicit_factors
+                else 600
+            ),
         ),
     )
     return store.append(plan)
@@ -322,7 +337,7 @@ async def open_local(store, plan, protocol_ref, transport):
         arms = [next(a for a in arms if a.slot == "slot_0001" and a.arm == "baseline")]
     broker = PilotBudgetBroker(store.engine, store.scope, plan, local_opt_in=True)
     broker.initialize()
-    broker.open(plan, arms)
+    broker.open(plan, arms, resume_blocks=profile.blocks)
     by_arm = {(a.slot, a.arm): a for a in arms}
 
     def factory(run_ref, slot, arm, config):
@@ -431,8 +446,35 @@ async def command(args):
             actual = conn.exec_driver_sql("SHOW data_directory").scalar_one()
             if Path(actual).resolve() != args.pgdata.resolve():
                 raise ValueError("server storage differs from declared disposable PGDATA")
-        if args.action == "verify":
-            return reconstruct(store, json.loads(args.receipt.read_text(encoding="utf-8")))
+        if args.action in {"verify", "block"}:
+            from agent_reliability_lab.research.contracts import Reference
+            from agent_reliability_lab.research.local_blocks import (
+                execute_block,
+                reconstruct_blocks,
+            )
+
+            receipt = json.loads(args.receipt.read_text(encoding="utf-8"))
+            ref = Reference.model_validate(receipt["plan"])
+            plan = store.get(ref)
+            if args.action == "block":
+                if (
+                    not args.allow_local
+                    or not plan.model.local_profile
+                    or args.digest != plan.model.local_profile.model_digest
+                ):
+                    raise ValueError("local opt-in and matching full model digest required")
+                return await execute_block(store, ref, args.block, local_opt_in=True)
+            if plan.model.local_profile and plan.model.local_profile.blocks:
+                readonly = ResearchStore(
+                    store.engine.execution_options(postgresql_readonly=True), store.scope
+                )
+                return reconstruct_blocks(readonly, ref)
+            return reconstruct(store, receipt)
+        if args.action == "freeze-blocks":
+            from agent_reliability_lab.research.local_blocks import MEMORY_FLOOR, available_memory
+
+            if available_memory() < MEMORY_FLOOR:
+                raise ValueError("available physical memory is below the 512 MiB floor")
         verify_listener()
         hardware, pressure = machine()
         async with client() as http:
@@ -441,7 +483,9 @@ async def command(args):
                 hardware,
                 smoke=args.action == "smoke",
                 profile_version=(
-                    EXPANDED_PROFILE
+                    BLOCK_PROFILE
+                    if args.action == "freeze-blocks"
+                    else EXPANDED_PROFILE
                     if args.expanded
                     else MULTIFAMILY_PROFILE
                     if args.multifamily
@@ -478,6 +522,8 @@ async def command(args):
             # Save the plan locator before the first inference, including on interruption.
             output.write(json.dumps(receipt))
             output.flush()
+            if args.action == "freeze-blocks":
+                return receipt
             run_ref, result = await execute_benchmark(
                 store, plan.protocol, pilot_ref=ref, local_opt_in=True
             )
@@ -495,7 +541,9 @@ async def command(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["preflight", "smoke", "pilot", "verify"])
+    parser.add_argument(
+        "action", choices=["preflight", "smoke", "pilot", "verify", "freeze-blocks", "block"]
+    )
     parser.add_argument("--pgdata", type=Path, required=True)
     parser.add_argument("--allow-local", action="store_true")
     profiles = parser.add_mutually_exclusive_group()
@@ -506,7 +554,14 @@ def main():
 
     parser.add_argument("--digest")
     parser.add_argument("--receipt", type=Path)
+    parser.add_argument("--block", type=int)
     args = parser.parse_args()
+    if (args.action == "block") != (args.block is not None):
+        parser.error("--block is required only for the block action")
+    if args.action in {"freeze-blocks", "block"} and any(
+        (args.expanded, args.multifamily, args.ablation, args.discoverable)
+    ):
+        parser.error("the block policy sets its own frozen profile")
     if args.action != "preflight" and not args.receipt:
         parser.error("--receipt is required")
     print(json.dumps(asyncio.run(command(args)), ensure_ascii=True, sort_keys=True, indent=2))

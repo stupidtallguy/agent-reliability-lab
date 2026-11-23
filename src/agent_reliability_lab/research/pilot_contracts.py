@@ -31,6 +31,7 @@ class OllamaProfile(Contract):
         "local-ollama-ablation-1",
         "local-ollama-multifamily-1",
         "local-ollama-expanded-1",
+        "local-ollama-blocks-1",
     ] = "local-ollama-1"
     tag: Literal["qwen3.5:4b"] = "qwen3.5:4b"
     endpoint: Literal["http://127.0.0.1:11434"] = "http://127.0.0.1:11434"
@@ -52,7 +53,15 @@ class OllamaProfile(Contract):
 
     @property
     def multifamily(self) -> bool:
-        return self.version in {"local-ollama-multifamily-1", "local-ollama-expanded-1"}
+        return self.version in {
+            "local-ollama-multifamily-1",
+            "local-ollama-expanded-1",
+            "local-ollama-blocks-1",
+        }
+
+    @property
+    def blocks(self) -> bool:
+        return self.version == "local-ollama-blocks-1"
 
     @property
     def expanded(self) -> bool:

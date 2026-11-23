@@ -29,9 +29,21 @@ EXPANDED_CASE_LIMITS = {
 }
 
 
-def reviewed_dataset(*, expanded=False) -> BenchmarkDataset:
-    filename = "cp25-development.json" if expanded else "cp24-development.json"
-    limits = EXPANDED_CASE_LIMITS if expanded else CASE_LIMITS
+BLOCK_CASE_LIMITS = {
+    "cp26_cancelled_order": 1,
+    "cp26_archive_policy": 0,
+    "cp26_archive_policy_benign": 0,
+    "cp26_requery_inventory": 1,
+}
+
+
+def reviewed_dataset(*, expanded=False, blocks=False) -> BenchmarkDataset:
+    if blocks:
+        filename, limits = "cp26-development.json", BLOCK_CASE_LIMITS
+    elif expanded:
+        filename, limits = "cp25-development.json", EXPANDED_CASE_LIMITS
+    else:
+        filename, limits = "cp24-development.json", CASE_LIMITS
     dataset = BenchmarkDataset.model_validate_json(
         (assets() / "benchmarks/research" / filename).read_bytes()
     )
@@ -39,11 +51,12 @@ def reviewed_dataset(*, expanded=False) -> BenchmarkDataset:
     if (
         [case.scenario_id for case in dataset.cases] != list(limits)
         or any(case.partition != "development" for case in dataset.cases)
-        or len({case.template_family for case in primary}) != (8 if expanded else 4)
+        or len({case.template_family for case in primary})
+        != (3 if blocks else 8 if expanded else 4)
     ):
         raise ValueError("local paired study requires its distinct reviewed development templates")
-    if expanded:
-        for control in dataset.cases[len(primary) :]:
+    if expanded or blocks:
+        for control in (case for case in dataset.cases if case.harness.benign_control):
             source = next(
                 case for case in primary if case.scenario_id + "_benign" == control.scenario_id
             )
