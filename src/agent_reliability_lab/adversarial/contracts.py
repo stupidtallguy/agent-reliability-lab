@@ -188,9 +188,30 @@ class WriteScope(Contract):
         return self
 
 
+class GuardFactors(Contract):
+    version: Literal["guard_factorial_v1"] = "guard_factorial_v1"
+    system_policy: bool
+    observation_framing: bool
+    task_scope_filter: bool
+
+
 class Defense(Contract):
     configuration: Literal["baseline", "guarded"] = "baseline"
     policy_version: Literal["task_scope_v1"] = "task_scope_v1"
+    factors: GuardFactors | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @property
+    def adds_system_policy(self) -> bool:
+        return self.factors.system_policy if self.factors else self.configuration == "guarded"
+
+    @property
+    def frames_observations(self) -> bool:
+        return self.factors.observation_framing if self.factors else self.configuration == "guarded"
+
+    @property
+    def filters_task_writes(self) -> bool:
+        return self.factors.task_scope_filter if self.factors else self.configuration == "guarded"
+
     write_scopes: list[WriteScope] = Field(default_factory=list, max_length=30)
 
 

@@ -6,7 +6,7 @@ from typing import Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
-from agent_reliability_lab.adversarial.contracts import HarnessSpec, WriteScope
+from agent_reliability_lab.adversarial.contracts import GuardFactors, HarnessSpec, WriteScope
 from agent_reliability_lab.agent.config import Budgets, ModelConfig
 from agent_reliability_lab.benchmarks.scenario import Contract, Identifier, Scenario, StateChange
 
@@ -170,6 +170,8 @@ SourceMethod = Literal["git_python_lf_v1"]
 
 
 class ExperimentConfig(Contract):
+    guard_factors: GuardFactors | None = Field(default=None, exclude_if=lambda value: value is None)
+
     schema_version: Literal["1.0"] = "1.0"
     study: dict | None = Field(default=None, exclude_if=lambda value: value is None)
     configuration_id: Identifier = "development_default"

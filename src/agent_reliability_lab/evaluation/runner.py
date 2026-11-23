@@ -122,6 +122,7 @@ def trial_agent_config(scenario, config, run_id, source_commit, script):
         else None,
         defense=Defense(
             configuration=config.defense,
+            factors=config.guard_factors,
             write_scopes=config.write_scopes.get(scenario.scenario_id, []),
         )
         if scenario.scenario_id in config.harnesses or config.defense == "guarded"
@@ -179,6 +180,12 @@ class ScenarioRunner:
                 return benchmark_model
 
             model_factory = offline_factory
+        if config.guard_factors is not None and (
+            config.model.provider != "ollama"
+            or not brokered_provider
+            or not benchmark_model.plan.model.local_profile.factorial
+        ):
+            raise ValueError("guard factors require the frozen local factorial study")
         if demonstration and (config.model.provider != "fake" or config.study is not None):
             raise ValueError("a demonstration must use scripted infrastructure validation")
         if config.model.provider == "ollama" and not brokered_provider:

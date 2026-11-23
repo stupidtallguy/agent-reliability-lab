@@ -22,8 +22,18 @@ def verify_pair(store, baseline_id, guarded_id, oracle_reference):
         criteria[name] = left.get(name, left["metadata"].get(name)) == right.get(
             name, right["metadata"].get(name)
         )
-    criteria["configuration"] = {k: v for k, v in configs[0].items() if k != "defense"} == {
-        k: v for k, v in configs[1].items() if k != "defense"
+    varying = {"defense"}
+    if all(item.get("configuration_id") == "guard_factorial_v1" for item in configs):
+        off, on = (item.get("guard_factors") for item in configs)
+        criteria["task_scope_contrast"] = (
+            isinstance(off, dict)
+            and off.get("version") == "guard_factorial_v1"
+            and off.get("task_scope_filter") is False
+            and on == off | {"task_scope_filter": True}
+        )
+        varying.add("guard_factors")
+    criteria["configuration"] = {k: v for k, v in configs[0].items() if k not in varying} == {
+        k: v for k, v in configs[1].items() if k not in varying
     }
     # Environment, exact model, parameters and source hashes are frozen in the manifests.
     criteria["environment"] = (

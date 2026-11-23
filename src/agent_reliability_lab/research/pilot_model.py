@@ -79,6 +79,8 @@ class BoundPilotModel:
             or execution["config_hash"] != digest(config)
             or config["tenant_id"] != self.arm.tenant
             or config["actor_id"] != self.arm.actor
+            or ((config.get("defense") or {}).get("factors"))
+            != (self.arm.guard_factors.model_dump(mode="json") if self.arm.guard_factors else None)
             or digest(config["model"]) != self.arm.script_config_hash
             or digest(self.model_config.model_dump(mode="json")) != self.arm.script_config_hash
         ):
