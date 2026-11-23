@@ -40,6 +40,10 @@ from agent_reliability_lab.research.guard_ablation import (
     factorial_orders,
 )
 from agent_reliability_lab.research.identity import require_compatible
+from agent_reliability_lab.research.multifamily import (
+    INTERVENTION as MULTIFAMILY_INTERVENTION,
+)
+from agent_reliability_lab.research.multifamily import balanced_slots, descriptive_families
 from agent_reliability_lab.research.pairing import verify_pair
 from agent_reliability_lab.research.units import validate_units
 from agent_reliability_lab.research.views import trial_matches_score
@@ -190,6 +194,8 @@ def schedule(dataset, protocol):
                     **({"factors": factors} if factors is not None else {}),
                 )
             )
+    if protocol.intervention == MULTIFAMILY_INTERVENTION:
+        slots = balanced_slots(slots, protocol.order_seed)
     return slots, catalog
 
 
@@ -317,11 +323,17 @@ def _context(run_ref, run, protocol, slot, arm, authority=None, local_mode=None)
 
 def _config(protocol, spec, arm, pairing_id, slot=None):
     name = spec.scenario_id
+    factors = None
+    if protocol.intervention == INTERVENTION:
+        factors = GuardFactors.model_validate(slot["factors"][arm])
+    if protocol.intervention == MULTIFAMILY_INTERVENTION:
+        enabled = arm == "guarded"
+        factors = GuardFactors(
+            system_policy=enabled, observation_framing=enabled, task_scope_filter=enabled
+        )
     return ExperimentConfig(
         configuration_id=protocol.intervention,
-        guard_factors=GuardFactors.model_validate(slot["factors"][arm])
-        if protocol.intervention == INTERVENTION
-        else None,
+        guard_factors=factors,
         pairing_id=pairing_id,
         defense=arm,
         source_commit=protocol.source_commit,
@@ -520,11 +532,12 @@ def build_result(store, run_ref, report_ids, *, partial=False):
         raise ValueError("benchmark sandbox identity reused")
     summary = None
     if not partial:
-        summary = (
-            descriptive_cells(rows)
-            if protocol.intervention == INTERVENTION
-            else summarize_pairs(rows, protocol.statistics)
-        )
+        if protocol.intervention == MULTIFAMILY_INTERVENTION:
+            summary = descriptive_families(rows)
+        elif protocol.intervention == INTERVENTION:
+            summary = descriptive_cells(rows)
+        else:
+            summary = summarize_pairs(rows, protocol.statistics)
     return dict(
         schema_version="1.0",
         interpretation=authority.mode if authority else local_mode or "synthetic_exploratory",

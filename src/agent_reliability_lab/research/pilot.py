@@ -316,7 +316,9 @@ def _document(store, plan_ref, result_ref, event_count=None):
             schema_version="development-ollama-report-1",
             interpretation=plan.mode,
             methodology=(
-                "Two counterbalanced factorial blocks on one development template. "
+                "Four distinct development families in two counterbalanced blocks. "
+                if plan.model.local_profile.multifamily
+                else "Two counterbalanced factorial blocks on one development template. "
                 if plan.model.local_profile.factorial
                 else "Two counterbalanced development pairs on one template. "
             )
