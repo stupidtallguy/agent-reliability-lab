@@ -31,7 +31,7 @@ class Budgets(Contract):
 
 
 class ModelConfig(Contract):
-    provider: Literal["fake", "openai", "groq"] = "fake"
+    provider: Literal["fake", "openai", "groq", "ollama"] = "fake"
     model_id: str = Field(default="scripted-v1", min_length=1, max_length=256)
     script: list[dict] = Field(default_factory=list, max_length=100)
     repeat_last: bool = False

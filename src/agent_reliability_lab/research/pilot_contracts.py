@@ -23,17 +23,41 @@ GROQ_QUALIFICATION_INPUT = 256
 GROQ_QUALIFICATION_OUTPUT = 256
 
 
+class OllamaProfile(Contract):
+    version: Literal["local-ollama-1"] = "local-ollama-1"
+    tag: Literal["qwen3.5:4b"] = "qwen3.5:4b"
+    endpoint: Literal["http://127.0.0.1:11434"] = "http://127.0.0.1:11434"
+    model_digest: Hash
+    runtime: Literal["0.40.16"] = "0.40.16"
+    quantization: str = Field(min_length=1, max_length=64)
+    template_hash: Hash
+    hardware: dict[str, str | int | None]
+    num_ctx: Literal[4096] = 4096
+    num_predict: Literal[256] = 256
+    temperature: Literal[0] = 0
+    seed: Literal[42] = 42
+    think: Literal[False] = False
+    smoke: bool = False
+
+
 class PilotModel(Contract):
-    provider: Literal["openai", "groq"] = "openai"
+    provider: Literal["openai", "groq", "ollama"] = "openai"
     model_id: PilotModelID
     allowed_models: tuple[PilotModelID, ...] = Field(min_length=1, max_length=16)
-    endpoint: Literal["chat_completions"] = "chat_completions"
+    local_profile: OllamaProfile | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    endpoint: Literal["chat_completions", "ollama_chat"] = "chat_completions"
     parallel_tool_calls: Literal[False] = False
     store: Literal[False] = False
     sdk_retries: Literal[0] = 0
 
     @model_validator(mode="after")
     def allowlist(self) -> Self:
+        if (self.provider == "ollama") != (self.local_profile is not None) or (
+            self.provider == "ollama"
+        ) != (self.endpoint == "ollama_chat"):
+            raise ValueError("native endpoint requires a local Ollama profile")
         if (
             self.model_id not in self.allowed_models
             or len(set(self.allowed_models)) != len(self.allowed_models)
@@ -59,7 +83,13 @@ class PilotLimits(Contract):
 class PilotPlan(Artifact):
     kind: Literal["benchmark_pilot_plan"] = "benchmark_pilot_plan"
     authorization_version: Literal["development-pilot-1.0.0"] = "development-pilot-1.0.0"
-    mode: Literal["offline_fixture", "future_live_requested", "groq_qualification"]
+    mode: Literal[
+        "offline_fixture",
+        "future_live_requested",
+        "groq_qualification",
+        "ollama_local",
+        "ollama_mock",
+    ]
     protocol: Reference
     supersedes: Reference | None = None
     schedule_hash: Hash
@@ -82,7 +112,25 @@ class PilotPlan(Artifact):
         if (price.provider, price.model_id) != (self.model.provider, self.model.model_id):
             raise ValueError("pricing and model configuration differ")
         rates = (price.input_rate, price.cached_input_rate or Decimal(0), price.output_rate)
-        if self.model.provider == "groq":
+        local = self.mode in {"ollama_local", "ollama_mock"}
+        if local != (self.model.provider == "ollama"):
+            raise ValueError("local plan and model must agree")
+        if local:
+            profile = self.model.local_profile
+            if (
+                self.model.allowed_models != (profile.tag,)
+                or self.model.model_id != profile.tag
+                or self.limits.total_calls != (4 if profile.smoke else 16)
+                or self.limits.retries_per_turn
+                or self.limits.total_retries
+                or self.limits.maximum_output_tokens != profile.num_predict
+                or self.limits.maximum_input_tokens != profile.num_ctx
+                or self.limits.maximum_usd
+                or any(rates)
+                or price.fixed_request_fee
+            ):
+                raise ValueError("invalid local development budget")
+        elif self.model.provider == "groq":
             if (
                 self.mode not in {"future_live_requested", "groq_qualification"}
                 or self.model.model_id != GROQ_MODEL
@@ -157,7 +205,7 @@ class CallRequest(Contract):
     model_config_hash: Hash
     pricing_hash: Hash
     input_hash: Hash
-    estimated_input_tokens: int = Field(ge=0)
+    estimated_input_tokens: int | None = Field(ge=0)
     maximum_output_tokens: int = Field(ge=1, le=16384)
     authorization_hash: Hash | None = Field(default=None, exclude_if=lambda value: value is None)
     wire_hash: Hash | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -191,6 +239,9 @@ class ProviderObservation(Contract):
     )
     system_fingerprint: ModelID | None = Field(default=None, exclude_if=lambda value: value is None)
     route_mismatch: Literal[True] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    ollama_duration_ns: dict[str, Annotated[int, Field(ge=0)]] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     groq_rate_limits: dict[str, int | str] | None = Field(

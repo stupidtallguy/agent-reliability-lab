@@ -152,17 +152,21 @@ class ScenarioRunner:
         if benchmark_model is not None:
             from agent_reliability_lab.research.groq_model import GroqHTTPModel
             from agent_reliability_lab.research.live_model import LiveHTTPModel
+            from agent_reliability_lab.research.ollama_model import OllamaModel
             from agent_reliability_lab.research.pilot_model import OfflinePilotModel
 
             if benchmark_context is None or type(benchmark_model) not in (
                 OfflinePilotModel,
+                OllamaModel,
                 LiveHTTPModel,
                 GroqHTTPModel,
             ):
                 raise ValueError("benchmark model must be the brokered offline adapter")
             if (config.model.provider == "groq") != (type(benchmark_model) is GroqHTTPModel):
                 raise ValueError("brokered adapter differs from the benchmark model")
-            brokered_provider = type(benchmark_model) in (LiveHTTPModel, GroqHTTPModel)
+            if (config.model.provider == "ollama") != (type(benchmark_model) is OllamaModel):
+                raise ValueError("local adapter differs from the benchmark model")
+            brokered_provider = type(benchmark_model) in (LiveHTTPModel, GroqHTTPModel, OllamaModel)
 
             def offline_factory(_):
                 return benchmark_model
@@ -170,6 +174,8 @@ class ScenarioRunner:
             model_factory = offline_factory
         if demonstration and (config.model.provider != "fake" or config.study is not None):
             raise ValueError("a demonstration must use scripted infrastructure validation")
+        if config.model.provider == "ollama" and not brokered_provider:
+            raise ValueError("Ollama requires the local development pilot")
         if config.model.provider == "groq" and not brokered_provider:
             raise ValueError("Groq requires the brokered development pilot")
         if (

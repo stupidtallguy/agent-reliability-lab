@@ -60,6 +60,11 @@ class AgentExecution:
         pause_before_tools: bool = False,
         after_dispatch=None,
     ) -> AgentResult:
+        if config.model.provider == "ollama":
+            from agent_reliability_lab.research.ollama_model import OllamaModel
+
+            if type(model) is not OllamaModel:
+                raise ModelFailure("ollama_requires_local_development_opt_in")
         if config.model.provider == "groq":
             from agent_reliability_lab.research.groq_model import GroqHTTPModel
 
