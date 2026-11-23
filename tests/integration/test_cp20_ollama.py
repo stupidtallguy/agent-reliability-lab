@@ -155,6 +155,13 @@ def test_local_pipeline(manager, monkeypatch, case):
         assert all(p["comparison"] == "verified" for p in doc["benchmark"]["pairs"])
         assert doc["usage"]["physical_dispatches"] == 8
         assert doc["usage"]["reported_input_tokens"]["sum_observed"] == 8 * 31
+        if case == "paired":
+            # Operationally verified pairs can contain determinately unsuccessful tasks.
+            for pair in doc["benchmark"]["pairs"]:
+                assert all(
+                    arm["measurements"]["task_success"]["status"] == "verified_failure"
+                    for arm in pair["arms"].values()
+                )
         if case == "guard_scope":
             for pair in doc["benchmark"]["pairs"]:
                 trial = store.evaluations.trial(pair["arms"]["guarded"]["trial_id"])
