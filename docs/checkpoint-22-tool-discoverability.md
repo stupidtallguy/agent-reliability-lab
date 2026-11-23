@@ -91,7 +91,9 @@ from agent_reliability_lab.research.pilot import render_pilot
 root = Path(".local")
 receipt = json.loads((root / "cp22-pilot-ref.json").read_bytes())
 engine = engine_from_env().execution_options(postgresql_readonly=True)
-for extension, output in render_pilot(reconstruct(ResearchStore(engine, "cp22_local"), receipt)).items():
+for extension, output in render_pilot(
+    reconstruct(ResearchStore(engine, "cp22_local"), receipt)
+).items():
     assert output.encode("utf-8") == (root / f"cp22-pilot.{extension}").read_bytes()
 ```
 
