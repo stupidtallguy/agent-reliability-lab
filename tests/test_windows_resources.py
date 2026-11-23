@@ -1,3 +1,6 @@
+import json
+
+from agent_reliability_lab.research import windows_resources
 from agent_reliability_lab.research.windows_resources import ProcessTracker
 
 
@@ -49,3 +52,13 @@ def test_inaccessible_creation_is_unknown_then_original_identity_departs():
     (departed,) = tracker.observe([process(6, 0, 4)])
     assert departed["status"] == "departed"
     assert tracker.observe([process(6, 0, 4)]) == []
+
+
+def test_inaccessible_windows_metrics_normalize_to_unknown(monkeypatch):
+    raw = json.dumps(
+        [process(6, 0, 1, "wslservice.exe") | {"working_set_bytes": {}, "private_bytes": 0}]
+    )
+    monkeypatch.setattr(windows_resources, "_command", lambda *args: raw)
+    (row,) = windows_resources.process_inventory()
+    assert row["working_set_bytes"] is None
+    assert row["private_bytes"] == 0

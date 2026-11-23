@@ -58,9 +58,17 @@ def process_inventory():
         "[Console]::OutputEncoding = [Text.Encoding]::UTF8\n" + PROCESS_COMMAND,
     )
     try:
-        return json.loads(raw) if raw is not None else None
+        inventory = json.loads(raw) if raw is not None else None
     except ValueError:
         return None
+    if not isinstance(inventory, list):
+        return None
+    for process in inventory:
+        for name in ("working_set_bytes", "private_bytes"):
+            value = process[name]
+            if type(value) is not int or value < 0:
+                process[name] = None
+    return inventory
 
 
 def system_memory():
