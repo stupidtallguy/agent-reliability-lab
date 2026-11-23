@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from agent_reliability_lab.adversarial.contracts import HarnessSpec, WriteScope
+from agent_reliability_lab.adversarial.contracts import GuardFactors, HarnessSpec, WriteScope
 from agent_reliability_lab.evaluation.contracts import Case, EvaluationResult, ExperimentConfig
 from agent_reliability_lab.evaluation.demo import development_script
 from agent_reliability_lab.evaluation.evidence import config_projection
@@ -34,6 +34,11 @@ from agent_reliability_lab.research.benchmark_measurements import (
     trial_measurements,
 )
 from agent_reliability_lab.research.contracts import Reference, parse_artifact
+from agent_reliability_lab.research.guard_ablation import (
+    INTERVENTION,
+    descriptive_cells,
+    factorial_orders,
+)
 from agent_reliability_lab.research.identity import require_compatible
 from agent_reliability_lab.research.pairing import verify_pair
 from agent_reliability_lab.research.units import validate_units
@@ -158,8 +163,15 @@ def schedule(dataset, protocol):
         if spec is None or spec.partition != "development":
             raise ValueError("CP12 execution requires a frozen development scenario")
         flip = int(digest([protocol.order_seed, scenario_id])[-1], 16) % 2
-        for index in range(protocol.repetitions):
-            arms = protocol.arms if (index + flip) % 2 == 0 else protocol.arms[::-1]
+        orders = (
+            factorial_orders(protocol.order_seed)
+            if protocol.intervention == INTERVENTION
+            else [
+                (index + 1, protocol.arms if (index + flip) % 2 == 0 else protocol.arms[::-1], None)
+                for index in range(protocol.repetitions)
+            ]
+        )
+        for repetition, arms, factors in orders:
             slots.append(
                 dict(
                     slot=f"slot_{len(slots) + 1:04d}",
@@ -172,9 +184,10 @@ def schedule(dataset, protocol):
                     family_version=dataset.family_versions[spec.family],
                     attack_family=spec.attack_family,
                     partition=spec.partition,
-                    repetition=index + 1,
+                    repetition=repetition,
                     fixture_seed=spec.case.scenario.fixture.seed,
                     order=list(arms),
+                    **({"factors": factors} if factors is not None else {}),
                 )
             )
     return slots, catalog
@@ -302,10 +315,13 @@ def _context(run_ref, run, protocol, slot, arm, authority=None, local_mode=None)
     return context
 
 
-def _config(protocol, spec, arm, pairing_id):
+def _config(protocol, spec, arm, pairing_id, slot=None):
     name = spec.scenario_id
     return ExperimentConfig(
         configuration_id=protocol.intervention,
+        guard_factors=GuardFactors.model_validate(slot["factors"][arm])
+        if protocol.intervention == INTERVENTION
+        else None,
         pairing_id=pairing_id,
         defense=arm,
         source_commit=protocol.source_commit,
@@ -331,7 +347,7 @@ def _source_matches(protocol, observed):
 def _arm_evidence(store, report_id, expected, protocol, spec, pairing_id):
     document = reproduce(store.evaluations, report_id)
     manifest = document["manifest"]
-    config = _config(protocol, spec, expected["arm"], pairing_id)
+    config = _config(protocol, spec, expected["arm"], pairing_id, expected["slot"])
     if (
         manifest.get("benchmark") != expected
         or manifest.get("config") != config.model_dump(mode="json")
@@ -502,6 +518,13 @@ def build_result(store, run_ref, report_ids, *, partial=False):
     ]
     if len(sandbox_ids) != len(set(sandbox_ids)):
         raise ValueError("benchmark sandbox identity reused")
+    summary = None
+    if not partial:
+        summary = (
+            descriptive_cells(rows)
+            if protocol.intervention == INTERVENTION
+            else summarize_pairs(rows, protocol.statistics)
+        )
     return dict(
         schema_version="1.0",
         interpretation=authority.mode if authority else local_mode or "synthetic_exploratory",
@@ -530,7 +553,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
         order_seed=protocol.order_seed,
         budgets=protocol.budgets.model_dump(mode="json"),
         pairs=rows,
-        summary=None if partial else summarize_pairs(rows, protocol.statistics),
+        summary=summary,
     )
 
 
@@ -576,7 +599,7 @@ async def execute_benchmark(
     local_mode = None
     discovery_mode = False
     if protocol.model.provider == "ollama":
-        from agent_reliability_lab.research.ollama import DISCOVERY_PROFILE, open_local
+        from agent_reliability_lab.research.ollama import open_local
 
         if (
             not local_opt_in
@@ -587,7 +610,7 @@ async def execute_benchmark(
         plan = store.get(pilot_ref)
         local_mode = plan.mode
         pilot_model_for = await open_local(store, plan, protocol_ref, mock_transport)
-        discovery_mode = plan.model.local_profile.version == DISCOVERY_PROFILE
+        discovery_mode = plan.model.local_profile.uses_discovery
     elif live_authorization is not None:
         from agent_reliability_lab.research.live import open_provider_pilot
 
@@ -644,7 +667,7 @@ async def execute_benchmark(
                     pilot_model = pilot_model_for(run_ref, slot["slot"], arm, script_config)
                 identifier = await runner.run(
                     [path],
-                    _config(protocol, spec, arm, pair_id),
+                    _config(protocol, spec, arm, pair_id, slot),
                     benchmark_context=_context(
                         run_ref, run, protocol, slot, arm, authority, local_mode
                     ),

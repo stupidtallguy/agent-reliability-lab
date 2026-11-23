@@ -172,7 +172,7 @@ class BenchmarkProtocol(Artifact):
     allocation_rationale: Text
     order_seed: int = Field(ge=0)
     arms: tuple[Literal["baseline"], Literal["guarded"]] = ("baseline", "guarded")
-    intervention: Literal["task_scope_and_observation_framing_v1"] = (
+    intervention: Literal["task_scope_and_observation_framing_v1", "guard_factorial_v1"] = (
         "task_scope_and_observation_framing_v1"
     )
     model: ModelConfig
@@ -203,7 +203,12 @@ class BenchmarkProtocol(Artifact):
             raise ValueError("provider feasibility requires two counterbalanced development pairs")
         if any(not script or len(script) > 100 for script in self.scripts.values()):
             raise ValueError("each scripted scenario requires a bounded nonempty plan")
-        if self.planned_pairs != len(self.scenarios) * self.repetitions:
+        factorial = self.intervention == "guard_factorial_v1"
+        if factorial and (
+            self.model.provider != "ollama" or self.mode != "provider_development_exploratory"
+        ):
+            raise ValueError("guard ablation is available only to local development")
+        if self.planned_pairs != len(self.scenarios) * self.repetitions * (4 if factorial else 1):
             raise ValueError("planned pair count differs from the allocation")
         if self.secondary_outcomes != list(OUTCOMES[1:]):
             raise ValueError("unsupported secondary outcome contract")

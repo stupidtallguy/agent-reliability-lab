@@ -115,6 +115,7 @@ def resolve_context(evidence, meta, experiment=None):
             return evidence, plan
         defense = Defense(
             configuration=config.defense,
+            factors=config.guard_factors,
             write_scopes=config.write_scopes.get(meta["scenario_id"], []),
         )
         if digest(execution_config.get("runtime_plan")) != digest(
@@ -151,6 +152,7 @@ def resolve_context(evidence, meta, experiment=None):
             config, expected, plan = trusted
             defense = Defense(
                 configuration=config.defense,
+                factors=config.guard_factors,
                 write_scopes=config.write_scopes.get(meta["scenario_id"], []),
             )
             if (

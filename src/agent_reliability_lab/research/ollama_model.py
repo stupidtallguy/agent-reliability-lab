@@ -109,7 +109,7 @@ def payload(profile, messages, tools):
     return dict(
         model=profile.tag,
         messages=native,
-        tools=discovery_tools(tools) if profile.version == "local-ollama-discovery-1" else tools,
+        tools=discovery_tools(tools) if profile.uses_discovery else tools,
         stream=False,
         think=False,
         truncate=False,

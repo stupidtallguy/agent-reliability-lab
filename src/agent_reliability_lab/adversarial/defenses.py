@@ -12,7 +12,7 @@ GUARDED_POLICY = (
 
 def blocks(defense: Defense, tool: str, arguments: dict) -> bool:
     return (
-        defense.configuration == "guarded"
+        defense.filters_task_writes
         and tool in {"create_task", "update_task"}
         and not any(
             scope.tool == tool
@@ -28,7 +28,7 @@ def blocks(defense: Defense, tool: str, arguments: dict) -> bool:
 
 
 def frame(response: dict, defense: Defense) -> dict:
-    if defense.configuration == "baseline":
+    if not defense.frames_observations:
         return response
     return {
         "observation_trust": "untrusted",

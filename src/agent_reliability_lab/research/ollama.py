@@ -45,11 +45,12 @@ SCENARIO = "multi_step_resolve_task"
 SMOKE_SCENARIO = "benign_create"
 DISCOVERY_SCENARIO = "multi_step_resolve_task_discovery"
 DISCOVERY_PROFILE = "local-ollama-discovery-1"
+ABLATION_PROFILE = "local-ollama-ablation-1"
 DISCOVERY_CASE = "benchmarks/controls/revisions/multi_step_resolve_task-discovery-v2.json"
 
 
 def local_scenario(profile):
-    if profile.version == DISCOVERY_PROFILE:
+    if profile.uses_discovery:
         return DISCOVERY_SCENARIO
     return SMOKE_SCENARIO if profile.smoke else SCENARIO
 
@@ -152,9 +153,10 @@ def validate_local_plan(store, plan, protocol_ref):
         or protocol.budgets.max_llm_calls != profile.calls_per_trial
         or protocol.budgets.max_output_tokens != 256
         or protocol.budgets.max_retries != 0
+        or profile.factorial != (protocol.intervention == "guard_factorial_v1")
     ):
         raise ValueError("incompatible local development plan")
-    if profile.version == DISCOVERY_PROFILE:
+    if profile.uses_discovery:
         dataset = store.get(protocol.dataset)
         control, _, error = read_case(assets() / DISCOVERY_CASE)
         if (
@@ -172,7 +174,7 @@ def register(store, profile, *, mock=False):
     name = "ollama_" + uuid.uuid4().hex
     dataset, parent = starter_draft(identity=name)
     updates = {}
-    if profile.version == DISCOVERY_PROFILE:
+    if profile.uses_discovery:
         dataset = discovery_dataset(dataset)
         method = "git_python_lf_v1"
         source = provenance(ExperimentConfig(experimental_evaluator="1.7.0", source_method=method))
@@ -200,11 +202,16 @@ def register(store, profile, *, mock=False):
                 dataset=store.reference(dataset),
                 benchmark_version=dataset.benchmark_version,
                 **updates,
-                planned_pairs=2,
+                planned_pairs=8 if profile.factorial else 2,
+                intervention="guard_factorial_v1" if profile.factorial else parent.intervention,
                 model=ModelConfig(provider="ollama", model_id=TAG),
                 budgets=budgets,
                 hypothesis="A local tool-calling model can attempt the existing development task.",
-                allocation_rationale="One template, opposite orders. Smoke takes one baseline arm.",
+                allocation_rationale=(
+                    "Two complete factorial blocks, with the second reversing the first."
+                    if profile.factorial
+                    else "One template, opposite orders. Smoke takes one baseline arm."
+                ),
             )
         ).model_dump_json()
     )
@@ -223,7 +230,7 @@ def register(store, profile, *, mock=False):
             )
         ],
     )
-    calls = profile.calls_per_trial * (1 if profile.smoke else 4)
+    calls = profile.calls_per_trial * profile.trials
     plan = PilotPlan(
         identity=name,
         author=protocol.author,
@@ -249,7 +256,7 @@ def register(store, profile, *, mock=False):
             maximum_output_tokens=256,
             total_tokens=calls * 4352,
             maximum_usd=Decimal(0),
-            duration_seconds=600,
+            duration_seconds=2040 if profile.factorial else 600,
         ),
     )
     return store.append(plan)
@@ -389,7 +396,13 @@ async def command(args):
                 http,
                 hardware,
                 smoke=args.action == "smoke",
-                profile_version=DISCOVERY_PROFILE if args.discoverable else "local-ollama-1",
+                profile_version=(
+                    ABLATION_PROFILE
+                    if args.ablation
+                    else DISCOVERY_PROFILE
+                    if args.discoverable
+                    else "local-ollama-1"
+                ),
             )
             loaded = (await http.get("/api/ps")).raise_for_status().json()["models"]
         if args.action == "preflight":
@@ -437,7 +450,9 @@ def main():
     parser.add_argument("action", choices=["preflight", "smoke", "pilot", "verify"])
     parser.add_argument("--pgdata", type=Path, required=True)
     parser.add_argument("--allow-local", action="store_true")
-    parser.add_argument("--discoverable", action="store_true")
+    profiles = parser.add_mutually_exclusive_group()
+    profiles.add_argument("--discoverable", action="store_true")
+    profiles.add_argument("--ablation", action="store_true")
 
     parser.add_argument("--digest")
     parser.add_argument("--receipt", type=Path)
