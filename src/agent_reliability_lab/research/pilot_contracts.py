@@ -25,9 +25,12 @@ GROQ_QUALIFICATION_OUTPUT = 256
 
 
 class OllamaProfile(Contract):
-    version: Literal["local-ollama-1", "local-ollama-discovery-1", "local-ollama-ablation-1"] = (
-        "local-ollama-1"
-    )
+    version: Literal[
+        "local-ollama-1",
+        "local-ollama-discovery-1",
+        "local-ollama-ablation-1",
+        "local-ollama-multifamily-1",
+    ] = "local-ollama-1"
     tag: Literal["qwen3.5:4b"] = "qwen3.5:4b"
     endpoint: Literal["http://127.0.0.1:11434"] = "http://127.0.0.1:11434"
     model_digest: Hash
@@ -47,12 +50,20 @@ class OllamaProfile(Contract):
         return self.version == "local-ollama-ablation-1"
 
     @property
+    def multifamily(self) -> bool:
+        return self.version == "local-ollama-multifamily-1"
+
+    @property
+    def explicit_factors(self) -> bool:
+        return self.factorial or self.multifamily
+
+    @property
     def uses_discovery(self) -> bool:
         return self.version != "local-ollama-1"
 
     @property
     def trials(self) -> int:
-        return 1 if self.smoke else 16 if self.factorial else 4
+        return 1 if self.smoke else 16 if self.explicit_factors else 4
 
     @property
     def calls_per_trial(self) -> int:

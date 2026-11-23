@@ -183,9 +183,9 @@ class ScenarioRunner:
         if config.guard_factors is not None and (
             config.model.provider != "ollama"
             or not brokered_provider
-            or not benchmark_model.plan.model.local_profile.factorial
+            or not benchmark_model.plan.model.local_profile.explicit_factors
         ):
-            raise ValueError("guard factors require the frozen local factorial study")
+            raise ValueError("guard factors require a frozen study with explicit local factors")
         if demonstration and (config.model.provider != "fake" or config.study is not None):
             raise ValueError("a demonstration must use scripted infrastructure validation")
         if config.model.provider == "ollama" and not brokered_provider:

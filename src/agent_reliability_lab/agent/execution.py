@@ -68,7 +68,7 @@ class AgentExecution:
             factors = config.defense.factors if config.defense else None
             if (
                 model.arm.guard_factors != factors
-                or bool(factors) != model.plan.model.local_profile.factorial
+                or bool(factors) != model.plan.model.local_profile.explicit_factors
             ):
                 raise ModelFailure("ollama_guard_factors_do_not_match_allocation")
         if config.model.provider == "groq":

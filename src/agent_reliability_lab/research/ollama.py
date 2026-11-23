@@ -30,6 +30,7 @@ from agent_reliability_lab.research.benchmark import (
     starter_draft,
 )
 from agent_reliability_lab.research.benchmark_contracts import BenchmarkDataset, BenchmarkProtocol
+from agent_reliability_lab.research.multifamily import CASE_LIMITS, INTERVENTION, reviewed_dataset
 from agent_reliability_lab.research.ollama_model import TAG, OllamaModel, client, identity
 from agent_reliability_lab.research.persistence import ResearchStore
 from agent_reliability_lab.research.pilot import (
@@ -46,6 +47,7 @@ SMOKE_SCENARIO = "benign_create"
 DISCOVERY_SCENARIO = "multi_step_resolve_task_discovery"
 DISCOVERY_PROFILE = "local-ollama-discovery-1"
 ABLATION_PROFILE = "local-ollama-ablation-1"
+MULTIFAMILY_PROFILE = "local-ollama-multifamily-1"
 DISCOVERY_CASE = "benchmarks/controls/revisions/multi_step_resolve_task-discovery-v2.json"
 
 
@@ -149,14 +151,22 @@ def validate_local_plan(store, plan, protocol_ref):
         or plan.mode not in {"ollama_local", "ollama_mock"}
         or protocol.mode != live.PROVIDER_PROTOCOL
         or protocol.model != ModelConfig(provider="ollama", model_id=TAG)
-        or protocol.scenarios != [local_scenario(profile)]
+        or protocol.scenarios
+        != (list(CASE_LIMITS) if profile.multifamily else [local_scenario(profile)])
         or protocol.budgets.max_llm_calls != profile.calls_per_trial
         or protocol.budgets.max_output_tokens != 256
         or protocol.budgets.max_retries != 0
         or profile.factorial != (protocol.intervention == "guard_factorial_v1")
+        or profile.multifamily != (protocol.intervention == INTERVENTION)
     ):
         raise ValueError("incompatible local development plan")
-    if profile.uses_discovery:
+    if profile.multifamily:
+        if (
+            store.get(protocol.dataset) != reviewed_dataset()
+            or protocol.source_method != "git_python_lf_v1"
+        ):
+            raise ValueError("multifamily plan does not pin the reviewed cases and source method")
+    elif profile.uses_discovery:
         dataset = store.get(protocol.dataset)
         control, _, error = read_case(assets() / DISCOVERY_CASE)
         if (
@@ -175,7 +185,7 @@ def register(store, profile, *, mock=False):
     dataset, parent = starter_draft(identity=name)
     updates = {}
     if profile.uses_discovery:
-        dataset = discovery_dataset(dataset)
+        dataset = reviewed_dataset() if profile.multifamily else discovery_dataset(dataset)
         method = "git_python_lf_v1"
         source = provenance(ExperimentConfig(experimental_evaluator="1.7.0", source_method=method))
         updates = {
@@ -198,17 +208,25 @@ def register(store, profile, *, mock=False):
             update=dict(
                 mode=live.PROVIDER_PROTOCOL,
                 scripts={},
-                scenarios=[local_scenario(profile)],
+                scenarios=list(CASE_LIMITS) if profile.multifamily else [local_scenario(profile)],
                 dataset=store.reference(dataset),
                 benchmark_version=dataset.benchmark_version,
                 **updates,
-                planned_pairs=8 if profile.factorial else 2,
-                intervention="guard_factorial_v1" if profile.factorial else parent.intervention,
+                planned_pairs=8 if profile.explicit_factors else 2,
+                intervention=(
+                    INTERVENTION
+                    if profile.multifamily
+                    else "guard_factorial_v1"
+                    if profile.factorial
+                    else parent.intervention
+                ),
                 model=ModelConfig(provider="ollama", model_id=TAG),
                 budgets=budgets,
                 hypothesis="A local tool-calling model can attempt the existing development task.",
                 allocation_rationale=(
-                    "Two complete factorial blocks, with the second reversing the first."
+                    "Four distinct development families in two counterbalanced blocks."
+                    if profile.multifamily
+                    else "Two complete factorial blocks, with the second reversing the first."
                     if profile.factorial
                     else "One template, opposite orders. Smoke takes one baseline arm."
                 ),
@@ -250,13 +268,13 @@ def register(store, profile, *, mock=False):
         pricing_hash=digest(price.model_dump(mode="json")),
         limits=PilotLimits(
             total_calls=calls,
-            calls_per_scenario=calls,
+            calls_per_scenario=4 * profile.calls_per_trial if profile.multifamily else calls,
             retries_per_turn=0,
             maximum_input_tokens=4096,
             maximum_output_tokens=256,
             total_tokens=calls * 4352,
             maximum_usd=Decimal(0),
-            duration_seconds=2040 if profile.factorial else 600,
+            duration_seconds=2040 if profile.explicit_factors else 600,
         ),
     )
     return store.append(plan)
@@ -306,7 +324,8 @@ def verify_discovery_arm(store, model, score, trial):
         "ollama_busy",
     }:
         raise ValueError("local identity or exclusive execution failed during the discovery study")
-    if score.unsafe is True or len(evidence["audits"]) > 1:
+    cap = CASE_LIMITS[model.arm.scenario] if model.plan.model.local_profile.multifamily else 1
+    if score.unsafe is True or len(evidence["audits"]) > cap:
         raise ValueError("unsafe or repeated mutation observed during the discovery study")
     rows = {
         event["attempt_id"]: event["body"]
@@ -397,7 +416,9 @@ async def command(args):
                 hardware,
                 smoke=args.action == "smoke",
                 profile_version=(
-                    ABLATION_PROFILE
+                    MULTIFAMILY_PROFILE
+                    if args.multifamily
+                    else ABLATION_PROFILE
                     if args.ablation
                     else DISCOVERY_PROFILE
                     if args.discoverable
@@ -453,6 +474,7 @@ def main():
     profiles = parser.add_mutually_exclusive_group()
     profiles.add_argument("--discoverable", action="store_true")
     profiles.add_argument("--ablation", action="store_true")
+    profiles.add_argument("--multifamily", action="store_true")
 
     parser.add_argument("--digest")
     parser.add_argument("--receipt", type=Path)

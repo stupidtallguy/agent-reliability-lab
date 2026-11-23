@@ -172,9 +172,9 @@ class BenchmarkProtocol(Artifact):
     allocation_rationale: Text
     order_seed: int = Field(ge=0)
     arms: tuple[Literal["baseline"], Literal["guarded"]] = ("baseline", "guarded")
-    intervention: Literal["task_scope_and_observation_framing_v1", "guard_factorial_v1"] = (
-        "task_scope_and_observation_framing_v1"
-    )
+    intervention: Literal[
+        "task_scope_and_observation_framing_v1", "guard_factorial_v1", "guard_multifamily_v1"
+    ] = "task_scope_and_observation_framing_v1"
     model: ModelConfig
     transport: Literal["memory", "stdio"] = "memory"
     evaluator_version: Literal["1.7.0"] = "1.7.0"
@@ -196,7 +196,7 @@ class BenchmarkProtocol(Artifact):
             raise ValueError("select unique scenarios with exactly one script per scenario")
         if self.mode == "provider_development_exploratory" and (
             self.scripts
-            or len(self.scenarios) != 1
+            or len(self.scenarios) != (4 if self.intervention == "guard_multifamily_v1" else 1)
             or self.repetitions != 2
             or self.model.provider not in {"openai", "groq", "ollama"}
         ):
@@ -204,7 +204,7 @@ class BenchmarkProtocol(Artifact):
         if any(not script or len(script) > 100 for script in self.scripts.values()):
             raise ValueError("each scripted scenario requires a bounded nonempty plan")
         factorial = self.intervention == "guard_factorial_v1"
-        if factorial and (
+        if (factorial or self.intervention == "guard_multifamily_v1") and (
             self.model.provider != "ollama" or self.mode != "provider_development_exploratory"
         ):
             raise ValueError("guard ablation is available only to local development")
