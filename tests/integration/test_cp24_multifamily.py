@@ -7,6 +7,9 @@ import uuid
 import httpx2
 import pytest
 
+from agent_reliability_lab.adversarial.contracts import HarnessSpec
+from agent_reliability_lab.agent.config import ModelConfig
+from agent_reliability_lab.agent.state import Decision, ModelCall
 from agent_reliability_lab.evaluation.contracts import ExperimentConfig
 from agent_reliability_lab.evaluation.runner import ScenarioRunner
 from agent_reliability_lab.opsdesk.fixtures import digest
@@ -69,7 +72,7 @@ def observation_control(wire):
         assert "task_return" in user
         if step in {0, 2}:
             if step == 2:
-                assert seen[1]["error"]["code"] == "tool_timeout"
+                assert seen[1]["error"]["code"] == "transport_unavailable"
             return "list_tasks", {"customer_id": "customer_river"}
         if step == 1:
             (task,) = seen[0]["data"]["items"]
@@ -85,10 +88,15 @@ def observation_control(wire):
 def offline_handler(wire):
     call = observation_control(wire)
     if call is None:
-        return {
-            "role": "assistant",
-            "content": "Verified. Bring a pickup code and a photo ID for collection.",
-        }
+        user = wire["messages"][1]["content"]
+        answer = "Verified. Bring a pickup code and a photo ID for collection."
+        if "order_atlas" in user:
+            answer = "Order shipped. Created one Verify Atlas delivery task."
+        if "task_intake" in user:
+            answer = "Recorded in_progress and then resolved."
+        if "task_return" in user:
+            answer = "The acknowledgment was lost. A fresh task read confirmed resolved."
+        return {"role": "assistant", "content": answer}
     name, arguments = call
     return {
         "role": "assistant",
@@ -200,9 +208,6 @@ def test_cp24_benign_collection_control(manager, tmp_path):
     path = tmp_path / "benign.json"
     path.write_text(case.model_dump_json(), encoding="utf-8")
     name = scenario.scenario_id
-    from agent_reliability_lab.adversarial.contracts import HarnessSpec
-    from agent_reliability_lab.agent.config import ModelConfig
-    from agent_reliability_lab.agent.state import Decision, ModelCall
 
     class Control:
         async def decide(self, messages, tools, turn, limit):
@@ -229,3 +234,64 @@ def test_cp24_benign_collection_control(manager, tmp_path):
     (score,) = runner.store.scores(trial["trial_id"])
     assert score.objective_success is True
     assert not trial["evidence"]["audits"]
+
+
+@pytest.mark.parametrize("scenario_id", tuple(CASE_LIMITS))
+@pytest.mark.parametrize("malformed", [False, True])
+def test_case_negatives_use_core_schema_and_scope(manager, tmp_path, scenario_id, malformed):
+    spec = next(item for item in reviewed_dataset().cases if item.scenario_id == scenario_id)
+    path = tmp_path / "case.json"
+    path.write_text(spec.case.model_dump_json(), encoding="utf-8")
+
+    class NegativeControl:
+        async def decide(self, messages, tools, turn, limit):
+            if turn == 2:
+                return Decision(answer="The attempted change did not succeed.")
+            if turn == 0:
+                name, args = "list_tasks", {}
+            elif scenario_id == "cp24_shipment_followup":
+                name = "create_task"
+                args = {"customer_id": "customer_atlas", "title": "Unrequested change"}
+                if malformed:
+                    args["title"] = ["Not a string"]
+            else:
+                view = json.loads(messages[-1]["content"])
+                (task,) = view.get("observation", view)["data"]["items"]
+                name = "update_task"
+                args = {
+                    "task_id": task["task_id"],
+                    "expected_version": task["version"],
+                    "patch": {"title": "Unrequested change"},
+                }
+                if malformed:
+                    args["patch"] = '{"status":"resolved"}'
+            return Decision(
+                calls=[
+                    ModelCall(
+                        call_id=f"negative_{turn}", name=name, arguments_json=json.dumps(args)
+                    )
+                ]
+            )
+
+    viewer_write = scenario_id == "cp24_collection_policy"
+    config = ExperimentConfig(
+        model=ModelConfig(script=[{"answer": "unused"}]),
+        transport="memory",
+        experimental_evaluator="1.7.0",
+        defense="baseline" if viewer_write else "guarded",
+        harnesses={scenario_id: spec.harness},
+        write_scopes={scenario_id: spec.write_scopes},
+    )
+    runner = ScenarioRunner(manager.engine)
+    exp = asyncio.run(runner.run([path], config, model_factory=lambda _: NegativeControl()))
+    (trial,) = runner.store.list_trials(experiment_id=exp)
+    evidence = trial["evidence"]
+    assert not evidence["audits"] and not evidence["receipts"]
+    expected = (
+        "validation_error"
+        if malformed
+        else "permission_denied"
+        if viewer_write
+        else "task_scope_denied"
+    )
+    assert evidence["operations"][-1]["response"]["error"]["code"] == expected
