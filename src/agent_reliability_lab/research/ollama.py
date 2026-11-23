@@ -29,12 +29,18 @@ from agent_reliability_lab.research.benchmark import (
     schedule,
     starter_draft,
 )
-from agent_reliability_lab.research.benchmark_contracts import BenchmarkDataset, BenchmarkProtocol
+from agent_reliability_lab.research.benchmark_contracts import (
+    MULTIFAMILY_INTERVENTION,
+    QUALIFICATION_INTERVENTION,
+    BenchmarkDataset,
+    BenchmarkProtocol,
+)
 from agent_reliability_lab.research.multifamily import (
     BLOCK_CASE_LIMITS,
     CASE_LIMITS,
     EXPANDED_CASE_LIMITS,
-    INTERVENTION,
+    QUALIFICATION_CASE,
+    qualification_dataset,
     reviewed_dataset,
 )
 from agent_reliability_lab.research.ollama_model import TAG, OllamaModel, client, identity
@@ -56,6 +62,7 @@ ABLATION_PROFILE = "local-ollama-ablation-1"
 MULTIFAMILY_PROFILE = "local-ollama-multifamily-1"
 EXPANDED_PROFILE = "local-ollama-expanded-1"
 BLOCK_PROFILE = "local-ollama-blocks-1"
+QUALIFICATION_PROFILE = "local-ollama-qualification-1"
 DISCOVERY_CASE = "benchmarks/controls/revisions/multi_step_resolve_task-discovery-v2.json"
 
 
@@ -150,6 +157,8 @@ def guard_database(store):
 
 
 def case_limits(profile):
+    if profile.qualification:
+        return {QUALIFICATION_CASE: BLOCK_CASE_LIMITS[QUALIFICATION_CASE]}
     if profile.blocks:
         return BLOCK_CASE_LIMITS
     return EXPANDED_CASE_LIMITS if profile.expanded else CASE_LIMITS
@@ -171,13 +180,19 @@ def validate_local_plan(store, plan, protocol_ref):
         or protocol.budgets.max_output_tokens != 256
         or protocol.budgets.max_retries != 0
         or profile.factorial != (protocol.intervention == "guard_factorial_v1")
-        or profile.multifamily != (protocol.intervention == INTERVENTION)
+        or profile.qualification != (protocol.intervention == QUALIFICATION_INTERVENTION)
+        or (profile.multifamily and not profile.qualification)
+        != (protocol.intervention == MULTIFAMILY_INTERVENTION)
     ):
         raise ValueError("incompatible local development plan")
     if profile.multifamily:
         if (
             store.get(protocol.dataset)
-            != reviewed_dataset(expanded=profile.expanded, blocks=profile.blocks)
+            != (
+                qualification_dataset()
+                if profile.qualification
+                else reviewed_dataset(expanded=profile.expanded, blocks=profile.blocks)
+            )
             or protocol.source_method != "git_python_lf_v1"
         ):
             raise ValueError("multifamily plan does not pin the reviewed cases and source method")
@@ -201,7 +216,9 @@ def register(store, profile, *, mock=False):
     updates = {}
     if profile.uses_discovery:
         dataset = (
-            reviewed_dataset(expanded=profile.expanded, blocks=profile.blocks)
+            qualification_dataset()
+            if profile.qualification
+            else reviewed_dataset(expanded=profile.expanded, blocks=profile.blocks)
             if profile.multifamily
             else discovery_dataset(dataset)
         )
@@ -233,9 +250,12 @@ def register(store, profile, *, mock=False):
                 dataset=store.reference(dataset),
                 benchmark_version=dataset.benchmark_version,
                 **updates,
+                repetitions=1 if profile.qualification else parent.repetitions,
                 planned_pairs=profile.trials // 2 if not profile.smoke else 2,
                 intervention=(
-                    INTERVENTION
+                    QUALIFICATION_INTERVENTION
+                    if profile.qualification
+                    else MULTIFAMILY_INTERVENTION
                     if profile.multifamily
                     else "guard_factorial_v1"
                     if profile.factorial
@@ -244,7 +264,9 @@ def register(store, profile, *, mock=False):
                 model=ModelConfig(provider="ollama", model_id=TAG),
                 budgets=budgets,
                 hypothesis=(
-                    "Validate conservative one-pair blocks and evidence recovery."
+                    "Qualify genuine block execution and evidence reconstruction on one pair."
+                    if profile.qualification
+                    else "Validate conservative one-pair blocks and evidence recovery."
                     if profile.blocks
                     else "Compare combined guarding on task completion, boundary compliance, "
                     "and model-directed recovery across eight development templates."
@@ -252,7 +274,10 @@ def register(store, profile, *, mock=False):
                     else "A local tool-calling model can attempt the existing development task."
                 ),
                 allocation_rationale=(
-                    "One counterbalanced pair per process block with a fixed 512 MiB RAM floor."
+                    "One pair with seed-selected arm order. No cross-pair counterbalancing."
+                    if profile.qualification
+                    else "One counterbalanced pair per process block with a fixed "
+                    "512 MiB RAM floor."
                     if profile.blocks
                     else "Eight primary templates and two matched benign conditions, "
                     "two counterbalanced pairs per condition."
@@ -301,14 +326,20 @@ def register(store, profile, *, mock=False):
         pricing_hash=digest(price.model_dump(mode="json")),
         limits=PilotLimits(
             total_calls=calls,
-            calls_per_scenario=4 * profile.calls_per_trial if profile.multifamily else calls,
+            calls_per_scenario=(
+                4 * profile.calls_per_trial
+                if profile.multifamily and not profile.qualification
+                else calls
+            ),
             retries_per_turn=0,
             maximum_input_tokens=4096,
             maximum_output_tokens=256,
             total_tokens=calls * 4352,
             maximum_usd=Decimal(0),
             duration_seconds=(
-                3600
+                300
+                if profile.qualification
+                else 3600
                 if profile.blocks
                 else 120 * (profile.trials + 1)
                 if profile.explicit_factors
@@ -483,7 +514,9 @@ async def command(args):
                 hardware,
                 smoke=args.action == "smoke",
                 profile_version=(
-                    BLOCK_PROFILE
+                    QUALIFICATION_PROFILE
+                    if args.qualify_single_pair
+                    else BLOCK_PROFILE
                     if args.action == "freeze-blocks"
                     else EXPANDED_PROFILE
                     if args.expanded
@@ -551,6 +584,7 @@ def main():
     profiles.add_argument("--ablation", action="store_true")
     profiles.add_argument("--multifamily", action="store_true")
     profiles.add_argument("--expanded", action="store_true")
+    profiles.add_argument("--qualify-single-pair", action="store_true")
 
     parser.add_argument("--digest")
     parser.add_argument("--receipt", type=Path)
@@ -558,6 +592,8 @@ def main():
     args = parser.parse_args()
     if (args.action == "block") != (args.block is not None):
         parser.error("--block is required only for the block action")
+    if args.qualify_single_pair and args.action != "freeze-blocks":
+        parser.error("--qualify-single-pair requires freeze-blocks")
     if args.action in {"freeze-blocks", "block"} and any(
         (args.expanded, args.multifamily, args.ablation, args.discoverable)
     ):

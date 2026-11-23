@@ -17,6 +17,8 @@ UUID = Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
 Family = Literal["tool_use", "policy_resilience", "external_recovery"]
 Partition = Literal["training", "development", "held_out"]
 FAMILIES = ("tool_use", "policy_resilience", "external_recovery")
+MULTIFAMILY_INTERVENTION = "guard_multifamily_v1"
+QUALIFICATION_INTERVENTION = "guard_single_pair_qualification_v1"
 OUTCOMES = (
     "task_success",
     "attack_success",
@@ -173,7 +175,10 @@ class BenchmarkProtocol(Artifact):
     order_seed: int = Field(ge=0)
     arms: tuple[Literal["baseline"], Literal["guarded"]] = ("baseline", "guarded")
     intervention: Literal[
-        "task_scope_and_observation_framing_v1", "guard_factorial_v1", "guard_multifamily_v1"
+        "task_scope_and_observation_framing_v1",
+        "guard_factorial_v1",
+        "guard_multifamily_v1",
+        "guard_single_pair_qualification_v1",
     ] = "task_scope_and_observation_framing_v1"
     model: ModelConfig
     transport: Literal["memory", "stdio"] = "memory"
@@ -190,6 +195,7 @@ class BenchmarkProtocol(Artifact):
 
     @model_validator(mode="after")
     def valid_plan(self) -> Self:
+        qualification = self.intervention == QUALIFICATION_INTERVENTION
         if len(set(self.scenarios)) != len(self.scenarios):
             raise ValueError("select unique development scenarios")
         if self.mode == "synthetic_exploratory" and set(self.scripts) != set(self.scenarios):
@@ -197,15 +203,17 @@ class BenchmarkProtocol(Artifact):
         if self.mode == "provider_development_exploratory" and (
             self.scripts
             or len(self.scenarios)
-            not in ((4, 10) if self.intervention == "guard_multifamily_v1" else (1,))
-            or self.repetitions != 2
+            not in ((4, 10) if self.intervention == MULTIFAMILY_INTERVENTION else (1,))
+            or self.repetitions != (1 if qualification else 2)
             or self.model.provider not in {"openai", "groq", "ollama"}
         ):
-            raise ValueError("provider feasibility requires two counterbalanced development pairs")
+            raise ValueError(
+                "provider feasibility requires the registered development pair schedule"
+            )
         if any(not script or len(script) > 100 for script in self.scripts.values()):
             raise ValueError("each scripted scenario requires a bounded nonempty plan")
         factorial = self.intervention == "guard_factorial_v1"
-        if (factorial or self.intervention == "guard_multifamily_v1") and (
+        if (factorial or qualification or self.intervention == MULTIFAMILY_INTERVENTION) and (
             self.model.provider != "ollama" or self.mode != "provider_development_exploratory"
         ):
             raise ValueError("guard ablation is available only to local development")

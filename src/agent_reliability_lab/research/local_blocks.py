@@ -32,6 +32,7 @@ from agent_reliability_lab.research.pilot_budget import PilotBudgetBroker, ledge
 from agent_reliability_lab.research.recovery_observations import task_recovery
 
 MEMORY_FLOOR = 512 * 1024 * 1024
+QUALIFICATION_START_MEMORY = 2 * 1024 * 1024 * 1024
 POLL_SECONDS = 1
 
 
@@ -84,7 +85,7 @@ def _plan(store, reference):
         or not plan.model.local_profile.blocks
         or plan.mode not in {"ollama_local", "ollama_mock"}
     ):
-        raise ValueError("frozen CP26 local block plan required")
+        raise ValueError("frozen local block plan required")
     return plan
 
 
@@ -252,6 +253,10 @@ async def execute_block(store, plan_ref, block, *, local_opt_in=False, transport
         return {"status": "stopped", "block": block, "run": ref.model_dump(mode="json")}
     if len(captured) != (block - 1) * 2:
         raise ValueError("prior blocks must complete before this block")
+    if plan.model.local_profile.qualification and (
+        (headroom := _sample(probe)) is None or headroom < QUALIFICATION_START_MEMORY
+    ):
+        raise ValueError("qualification requires at least 2 GiB available RAM before starting")
     factory = None
     runner = ScenarioRunner(store.engine)
     case = catalog[slot["scenario_id"]]
@@ -337,9 +342,10 @@ def reconstruct_blocks(store, plan_ref):
         captured, pending, stop = _state(progress, slots, ref)
         records = _persisted_arms(store, run)
         with store.engine.connect() as conn:
-            present = conn.scalar(
-                sa.select(ledgers.c.ledger_id).where(ledgers.c.ledger_id == plan.ledger_id)
-            )
+            if sa.inspect(conn).has_table(ledgers.name, schema=ledgers.schema):
+                present = conn.scalar(
+                    sa.select(ledgers.c.ledger_id).where(ledgers.c.ledger_id == plan.ledger_id)
+                )
         if present:
             broker_events = PilotBudgetBroker(store.engine, store.scope, plan).snapshot()
     latest = {item["attempt_id"]: item["body"] for item in broker_events}
