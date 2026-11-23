@@ -2,6 +2,10 @@
 
 from agent_reliability_lab.adversarial.contracts import GuardFactors
 from agent_reliability_lab.opsdesk.fixtures import digest
+from agent_reliability_lab.research.benchmark_contracts import (
+    MULTIFAMILY_INTERVENTION,
+    QUALIFICATION_INTERVENTION,
+)
 
 
 def verify_pair(store, baseline_id, guarded_id, oracle_reference):
@@ -33,7 +37,11 @@ def verify_pair(store, baseline_id, guarded_id, oracle_reference):
             and on == off | {"task_scope_filter": True}
         )
         varying.add("guard_factors")
-    if all(item.get("configuration_id") == "guard_multifamily_v1" for item in configs):
+    left_configuration = configs[0].get("configuration_id")
+    if left_configuration in {
+        MULTIFAMILY_INTERVENTION,
+        QUALIFICATION_INTERVENTION,
+    } and left_configuration == configs[1].get("configuration_id"):
         expected = [
             GuardFactors(
                 system_policy=enabled, observation_framing=enabled, task_scope_filter=enabled

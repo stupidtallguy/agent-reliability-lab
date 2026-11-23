@@ -22,6 +22,8 @@ from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.platform.demo import assets, case_path
 from agent_reliability_lab.research.benchmark_contracts import (
     FAMILIES,
+    MULTIFAMILY_INTERVENTION,
+    QUALIFICATION_INTERVENTION,
     BenchmarkCase,
     BenchmarkDataset,
     BenchmarkProtocol,
@@ -40,9 +42,6 @@ from agent_reliability_lab.research.guard_ablation import (
     factorial_orders,
 )
 from agent_reliability_lab.research.identity import require_compatible
-from agent_reliability_lab.research.multifamily import (
-    INTERVENTION as MULTIFAMILY_INTERVENTION,
-)
 from agent_reliability_lab.research.multifamily import balanced_slots, descriptive_families
 from agent_reliability_lab.research.pairing import verify_pair
 from agent_reliability_lab.research.units import validate_units
@@ -330,7 +329,7 @@ def _config(protocol, spec, arm, pairing_id, slot=None):
     factors = None
     if protocol.intervention == INTERVENTION:
         factors = GuardFactors.model_validate(slot["factors"][arm])
-    if protocol.intervention == MULTIFAMILY_INTERVENTION:
+    if protocol.intervention in {MULTIFAMILY_INTERVENTION, QUALIFICATION_INTERVENTION}:
         enabled = arm == "guarded"
         factors = GuardFactors(
             system_policy=enabled, observation_framing=enabled, task_scope_filter=enabled

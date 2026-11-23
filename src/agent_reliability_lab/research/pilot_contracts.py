@@ -32,6 +32,7 @@ class OllamaProfile(Contract):
         "local-ollama-multifamily-1",
         "local-ollama-expanded-1",
         "local-ollama-blocks-1",
+        "local-ollama-qualification-1",
     ] = "local-ollama-1"
     tag: Literal["qwen3.5:4b"] = "qwen3.5:4b"
     endpoint: Literal["http://127.0.0.1:11434"] = "http://127.0.0.1:11434"
@@ -57,11 +58,16 @@ class OllamaProfile(Contract):
             "local-ollama-multifamily-1",
             "local-ollama-expanded-1",
             "local-ollama-blocks-1",
+            "local-ollama-qualification-1",
         }
 
     @property
     def blocks(self) -> bool:
-        return self.version == "local-ollama-blocks-1"
+        return self.version == "local-ollama-blocks-1" or self.qualification
+
+    @property
+    def qualification(self) -> bool:
+        return self.version == "local-ollama-qualification-1"
 
     @property
     def expanded(self) -> bool:
@@ -77,6 +83,8 @@ class OllamaProfile(Contract):
 
     @property
     def trials(self) -> int:
+        if self.qualification:
+            return 2
         if self.expanded:
             return 40
         return 1 if self.smoke else 16 if self.explicit_factors else 4
@@ -182,6 +190,12 @@ class PilotPlan(Artifact):
                 or price.fixed_request_fee
             ):
                 raise ValueError("invalid local development budget")
+            if profile.qualification and (
+                self.limits.calls_per_scenario != self.limits.total_calls
+                or self.limits.total_tokens != self.limits.total_calls * 4352
+                or self.limits.duration_seconds != 300
+            ):
+                raise ValueError("invalid single-pair qualification budget")
         elif self.model.provider == "groq":
             if (
                 self.mode not in {"future_live_requested", "groq_qualification"}

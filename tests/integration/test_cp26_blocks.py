@@ -20,7 +20,7 @@ from agent_reliability_lab.research import local_blocks
 from agent_reliability_lab.research.benchmark import execute_benchmark
 from agent_reliability_lab.research.contracts import Reference
 from agent_reliability_lab.research.multifamily import reviewed_dataset
-from agent_reliability_lab.research.ollama import BLOCK_PROFILE, register
+from agent_reliability_lab.research.ollama import BLOCK_PROFILE, QUALIFICATION_PROFILE, register
 from agent_reliability_lab.research.ollama_model import TAG
 from agent_reliability_lab.research.persistence import ResearchStore, artifacts
 from agent_reliability_lab.research.pilot_contracts import OllamaProfile
@@ -122,6 +122,52 @@ def run(store, ref, block=1, *, probe=ample, transport=None):
 def read(store, ref):
     readonly = ResearchStore(store.engine.execution_options(postgresql_readonly=True), store.scope)
     return local_blocks.reconstruct_blocks(readonly, ref)
+
+
+def test_single_pair_qualification_is_bounded_and_reconstructs(plan):
+    store, original = plan
+    profile = store.get(original).model.local_profile.model_copy(
+        update={"version": QUALIFICATION_PROFILE}
+    )
+    ref = register(store, profile, mock=True)
+    frozen = store.get(ref)
+    protocol = store.get(frozen.protocol)
+    assert protocol.repetitions == protocol.planned_pairs == 1
+    assert protocol.scenarios == ["cp26_cancelled_order"]
+    assert protocol.budgets.max_llm_calls == 7
+    assert frozen.limits.total_calls == frozen.limits.calls_per_scenario == 14
+    assert frozen.limits.duration_seconds == 300
+    assert len(read(store, original)["pairs"]) == 8
+    virgin = read(store, ref)
+    assert len(virgin["pairs"]) == 1
+    assert set(virgin["pairs"][0]["allocation"]["order"]) == {"baseline", "guarded"}
+    with pytest.raises(ValueError, match="outside the frozen allocation"):
+        run(store, ref, 2)
+    with pytest.raises(ValueError, match="2 GiB available RAM"):
+        run(store, ref)
+    assert read(store, ref)["progress"] == []
+
+    def enough():
+        return local_blocks.QUALIFICATION_START_MEMORY
+
+    assert run(store, ref, probe=enough)["status"] == "block_complete"
+    settled = read(store, ref)
+    assert settled["status"] == "complete"
+    (pair,) = settled["pairs"]
+    assert pair["comparison"] == "verified"
+    assert len({arm["trial_id"] for arm in pair["arms"].values()}) == 2
+    for arm in pair["arms"].values():
+        assert 0 < len(arm["attempt_ids"]) <= 7
+        assert arm["capture"]["measurements"]["task_success"]["value"]
+        trial = store.evaluations.trial(arm["trial_id"])
+        assert trial["cleanup"]["status"] == "cleaned"
+        assert len(trial["evidence"]["audits"]) == len(trial["evidence"]["receipts"]) == 1
+
+    async def deny_retry():
+        pytest.fail("a completed qualification must never dispatch again")
+
+    assert run(store, ref, transport=mock_ollama(deny_retry))["status"] == "block_complete"
+    assert read(store, ref) == settled
 
 
 def test_whole_allocation_restart_and_idempotent_block(plan, monkeypatch):

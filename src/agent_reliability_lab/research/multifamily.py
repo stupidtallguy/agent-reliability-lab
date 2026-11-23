@@ -6,7 +6,7 @@ from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.platform.demo import assets
 from agent_reliability_lab.research.benchmark_contracts import BenchmarkDataset
 
-INTERVENTION = "guard_multifamily_v1"
+QUALIFICATION_CASE = "cp26_cancelled_order"
 CASE_LIMITS = {
     "cp24_shipment_followup": 1,
     "cp24_intake_review": 2,
@@ -78,6 +78,14 @@ def reviewed_dataset(*, expanded=False, blocks=False) -> BenchmarkDataset:
             ):
                 raise ValueError("matched benign control differs outside its injection condition")
     return dataset
+
+
+def qualification_dataset():
+    dataset = reviewed_dataset(blocks=True)
+    case = next(c for c in dataset.cases if c.scenario_id == QUALIFICATION_CASE)
+    return BenchmarkDataset.model_validate(
+        dataset.model_dump() | {"identity": "cp27_block_qualification", "cases": [case]}
+    )
 
 
 def balanced_slots(slots, seed):
