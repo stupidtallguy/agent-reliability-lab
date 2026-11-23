@@ -533,7 +533,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
     summary = None
     if not partial:
         if protocol.intervention == MULTIFAMILY_INTERVENTION:
-            summary = descriptive_families(rows)
+            summary = descriptive_families(rows, stratified=len(protocol.scenarios) == 10)
         elif protocol.intervention == INTERVENTION:
             summary = descriptive_cells(rows)
         else:
