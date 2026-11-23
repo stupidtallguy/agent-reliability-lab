@@ -13,10 +13,13 @@ from pathlib import Path
 
 import httpx2
 
+from agent_reliability_lab.adversarial.contracts import HarnessSpec
 from agent_reliability_lab.agent.config import ModelConfig
-from agent_reliability_lab.evaluation.contracts import ModelPrice, PriceBook
+from agent_reliability_lab.evaluation.contracts import ExperimentConfig, ModelPrice, PriceBook
+from agent_reliability_lab.evaluation.runner import provenance, read_case
 from agent_reliability_lab.opsdesk.database import engine_from_env
 from agent_reliability_lab.opsdesk.fixtures import digest
+from agent_reliability_lab.platform.demo import assets
 from agent_reliability_lab.research import live
 from agent_reliability_lab.research.benchmark import (
     _arm_evidence,
@@ -26,7 +29,7 @@ from agent_reliability_lab.research.benchmark import (
     schedule,
     starter_draft,
 )
-from agent_reliability_lab.research.benchmark_contracts import BenchmarkProtocol
+from agent_reliability_lab.research.benchmark_contracts import BenchmarkDataset, BenchmarkProtocol
 from agent_reliability_lab.research.ollama_model import TAG, OllamaModel, client, identity
 from agent_reliability_lab.research.persistence import ResearchStore
 from agent_reliability_lab.research.pilot import (
@@ -40,6 +43,38 @@ from agent_reliability_lab.research.pilot_contracts import PilotLimits, PilotMod
 
 SCENARIO = "multi_step_resolve_task"
 SMOKE_SCENARIO = "benign_create"
+DISCOVERY_SCENARIO = "multi_step_resolve_task_discovery"
+DISCOVERY_PROFILE = "local-ollama-discovery-1"
+DISCOVERY_CASE = "benchmarks/controls/revisions/multi_step_resolve_task-discovery-v2.json"
+
+
+def local_scenario(profile):
+    if profile.version == DISCOVERY_PROFILE:
+        return DISCOVERY_SCENARIO
+    return SMOKE_SCENARIO if profile.smoke else SCENARIO
+
+
+def discovery_dataset(dataset):
+    case, fingerprint, error = read_case(assets() / DISCOVERY_CASE)
+    if error or not case or case.scenario.scenario_id != DISCOVERY_SCENARIO:
+        raise ValueError("discovery case is missing or invalid")
+    original = next(item for item in dataset.cases if item.scenario_id == SCENARIO)
+    revised = original.model_copy(
+        update=dict(
+            case=case,
+            template_id=DISCOVERY_SCENARIO,
+            benchmark_version="1.1.0",
+            harness=HarnessSpec(scenario_hash=fingerprint),
+        )
+    )
+    return BenchmarkDataset(
+        identity="cp22_discovery_development",
+        created_at=dataset.created_at,
+        author=dataset.author,
+        benchmark_version="1.1.0",
+        family_versions=dataset.family_versions | {"tool_use": "1.1.0"},
+        cases=[revised],
+    )
 
 
 def _read_command(command):
@@ -105,18 +140,30 @@ def guard_database(store):
 
 def validate_local_plan(store, plan, protocol_ref):
     protocol = store.get(protocol_ref)
+    profile = plan.model.local_profile if plan.kind == "benchmark_pilot_plan" else None
     if (
-        plan.kind != "benchmark_pilot_plan"
+        profile is None
+        or plan.kind != "benchmark_pilot_plan"
         or plan.protocol != protocol_ref
         or plan.mode not in {"ollama_local", "ollama_mock"}
         or protocol.mode != live.PROVIDER_PROTOCOL
         or protocol.model != ModelConfig(provider="ollama", model_id=TAG)
-        or protocol.scenarios != [SMOKE_SCENARIO if plan.model.local_profile.smoke else SCENARIO]
-        or protocol.budgets.max_llm_calls != 4
+        or protocol.scenarios != [local_scenario(profile)]
+        or protocol.budgets.max_llm_calls != profile.calls_per_trial
         or protocol.budgets.max_output_tokens != 256
         or protocol.budgets.max_retries != 0
     ):
         raise ValueError("incompatible local development plan")
+    if profile.version == DISCOVERY_PROFILE:
+        dataset = store.get(protocol.dataset)
+        control, _, error = read_case(assets() / DISCOVERY_CASE)
+        if (
+            error
+            or len(dataset.cases) != 1
+            or dataset.cases[0].case != control
+            or protocol.source_method != "git_python_lf_v1"
+        ):
+            raise ValueError("discovery plan does not pin the reviewed case and source method")
     return validate_plan(store, plan)
 
 
@@ -124,11 +171,19 @@ def register(store, profile, *, mock=False):
     guard_database(store)
     name = "ollama_" + uuid.uuid4().hex
     dataset, parent = starter_draft(identity=name)
+    updates = {}
+    if profile.version == DISCOVERY_PROFILE:
+        dataset = discovery_dataset(dataset)
+        method = "git_python_lf_v1"
+        source = provenance(ExperimentConfig(experimental_evaluator="1.7.0", source_method=method))
+        updates = {
+            k: source[k] for k in ("source_commit", "source_method", "source_hash", "lock_hash")
+        }
     if not store.list(dataset.kind, dataset.identity):
         store.append(dataset)
     budgets = parent.budgets.model_copy(
         update=dict(
-            max_llm_calls=4,
+            max_llm_calls=profile.calls_per_trial,
             max_retries=0,
             max_tool_calls=8,
             model_timeout_seconds=90.0,
@@ -141,7 +196,10 @@ def register(store, profile, *, mock=False):
             update=dict(
                 mode=live.PROVIDER_PROTOCOL,
                 scripts={},
-                scenarios=[SMOKE_SCENARIO if profile.smoke else SCENARIO],
+                scenarios=[local_scenario(profile)],
+                dataset=store.reference(dataset),
+                benchmark_version=dataset.benchmark_version,
+                **updates,
                 planned_pairs=2,
                 model=ModelConfig(provider="ollama", model_id=TAG),
                 budgets=budgets,
@@ -165,7 +223,7 @@ def register(store, profile, *, mock=False):
             )
         ],
     )
-    calls = 4 if profile.smoke else 16
+    calls = profile.calls_per_trial * (1 if profile.smoke else 4)
     plan = PilotPlan(
         identity=name,
         author=protocol.author,
@@ -206,7 +264,10 @@ async def open_local(store, plan, protocol_ref, transport):
         raise ValueError("mock transport and frozen local mode differ")
     profile = plan.model.local_profile
     async with client(transport) as http:
-        if await identity(http, profile.hardware, smoke=profile.smoke) != profile:
+        observed = await identity(
+            http, profile.hardware, smoke=profile.smoke, profile_version=profile.version
+        )
+        if observed != profile:
             raise ValueError("installed model differs from frozen local profile")
     if profile.smoke:
         arms = [next(a for a in arms if a.slot == "slot_0001" and a.arm == "baseline")]
@@ -219,6 +280,33 @@ async def open_local(store, plan, protocol_ref, transport):
         return OllamaModel(broker, plan, by_arm[(slot, arm)], run_ref, config, transport)
 
     return factory
+
+
+def verify_discovery_arm(store, model, score, trial):
+    """Check the captured arm before allocating another sandbox."""
+    evidence = store.evaluations.trial(trial["trial_id"])["evidence"]
+    if evidence is None or score.reconciliation.get("complete") is not True:
+        raise ValueError("discovery trial evidence failed reconciliation")
+    terminal = evidence["execution"].get("result") or {}
+    if terminal.get("reason") in {
+        "ollama_identity_changed",
+        "ollama_identity_observation_unavailable",
+        "ollama_model_unavailable",
+        "ollama_local_identity_unverified",
+        "ollama_returned_model_mismatch",
+        "ollama_bound_breach",
+        "ollama_discovery_unexpected_patch_schema",
+        "ollama_busy",
+    }:
+        raise ValueError("local identity or exclusive execution failed during the discovery study")
+    if score.unsafe is True or len(evidence["audits"]) > 1:
+        raise ValueError("unsafe or repeated mutation observed during the discovery study")
+    rows = {
+        event["attempt_id"]: event["body"]
+        for event in model.broker.snapshot()
+        if event["body"]["request"]["execution_id"] == evidence["execution_id"]
+    }
+    _verify_request(evidence, rows)
 
 
 def reconstruct(store, receipt):
@@ -297,7 +385,12 @@ async def command(args):
         verify_listener()
         hardware, pressure = machine()
         async with client() as http:
-            profile = await identity(http, hardware, smoke=args.action == "smoke")
+            profile = await identity(
+                http,
+                hardware,
+                smoke=args.action == "smoke",
+                profile_version=DISCOVERY_PROFILE if args.discoverable else "local-ollama-1",
+            )
             loaded = (await http.get("/api/ps")).raise_for_status().json()["models"]
         if args.action == "preflight":
             return dict(
@@ -344,6 +437,8 @@ def main():
     parser.add_argument("action", choices=["preflight", "smoke", "pilot", "verify"])
     parser.add_argument("--pgdata", type=Path, required=True)
     parser.add_argument("--allow-local", action="store_true")
+    parser.add_argument("--discoverable", action="store_true")
+
     parser.add_argument("--digest")
     parser.add_argument("--receipt", type=Path)
     args = parser.parse_args()

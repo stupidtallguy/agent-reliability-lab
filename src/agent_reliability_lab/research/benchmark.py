@@ -309,6 +309,7 @@ def _config(protocol, spec, arm, pairing_id):
         pairing_id=pairing_id,
         defense=arm,
         source_commit=protocol.source_commit,
+        source_method=protocol.source_method,
         model=protocol.model,
         budgets=protocol.budgets,
         transport=protocol.transport,
@@ -323,7 +324,7 @@ def _config(protocol, spec, arm, pairing_id):
 def _source_matches(protocol, observed):
     return all(
         observed.get(key) == getattr(protocol, key)
-        for key in ("source_commit", "source_hash", "lock_hash")
+        for key in ("source_commit", "source_method", "source_hash", "lock_hash")
     )
 
 
@@ -514,6 +515,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
         },
         evaluator_version=protocol.evaluator_version,
         source_commit=protocol.source_commit,
+        **({"source_method": protocol.source_method} if protocol.source_method else {}),
         source_hash=protocol.source_hash,
         lock_hash=protocol.lock_hash,
         arms=list(protocol.arms),
@@ -562,14 +564,19 @@ async def execute_benchmark(
         raise ValueError("run requires a preregistered benchmark protocol reference")
     dataset = store.get(protocol.dataset)
     slots, catalog = schedule(dataset, protocol)
-    runtime = provenance(ExperimentConfig(experimental_evaluator=protocol.evaluator_version))
+    runtime = provenance(
+        ExperimentConfig(
+            experimental_evaluator=protocol.evaluator_version, source_method=protocol.source_method
+        )
+    )
     if not _source_matches(protocol, runtime):
         raise ValueError("checked-out source or dependency lock differs from preregistration")
     pilot_model_for = None
     authority = None
     local_mode = None
+    discovery_mode = False
     if protocol.model.provider == "ollama":
-        from agent_reliability_lab.research.ollama import open_local
+        from agent_reliability_lab.research.ollama import DISCOVERY_PROFILE, open_local
 
         if (
             not local_opt_in
@@ -580,6 +587,7 @@ async def execute_benchmark(
         plan = store.get(pilot_ref)
         local_mode = plan.mode
         pilot_model_for = await open_local(store, plan, protocol_ref, mock_transport)
+        discovery_mode = plan.model.local_profile.version == DISCOVERY_PROFILE
     elif live_authorization is not None:
         from agent_reliability_lab.research.live import open_provider_pilot
 
@@ -650,9 +658,8 @@ async def execute_benchmark(
                     evaluator_version=protocol.evaluator_version,
                     scoring_ids=[scoring.scoring_id],
                 )
-                if smoke:
-                    # A smoke is a single pinned evaluator report, never a completed pair.
-                    _, verified = _arm_evidence(
+                if smoke or discovery_mode:
+                    verified_score, verified = _arm_evidence(
                         store,
                         frozen["report_id"],
                         _context(run_ref, run, protocol, slot, arm, authority, local_mode),
@@ -660,7 +667,11 @@ async def execute_benchmark(
                         spec,
                         pair_id,
                     )
-                    return run_ref, verified
+                    if smoke:
+                        return run_ref, verified
+                    from agent_reliability_lab.research.ollama import verify_discovery_arm
+
+                    verify_discovery_arm(store, pilot_model, verified_score, trial)
                 reports[slot["slot"] + ":" + arm] = frozen["report_id"]
     result = build_result(store, run_ref, reports)
     artifact = BenchmarkResult(
