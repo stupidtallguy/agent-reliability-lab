@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from pathlib import Path
 
 import httpx2
 import pytest
@@ -10,9 +11,10 @@ from test_cp22_discovery import scripted_call
 
 from agent_reliability_lab.adversarial.defenses import GUARDED_POLICY
 from agent_reliability_lab.agent.graph import SYSTEM_POLICY
+from agent_reliability_lab.evaluation.contracts import Case
 from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research.benchmark import execute_benchmark, schedule
-from agent_reliability_lab.research.ollama import ABLATION_PROFILE, register
+from agent_reliability_lab.research.ollama import ABLATION_PROFILE, DISCOVERY_CASE, register
 from agent_reliability_lab.research.ollama_model import TAG
 from agent_reliability_lab.research.persistence import ResearchStore
 from agent_reliability_lab.research.pilot import publish_pilot, render_pilot, verify_pilot_report
@@ -22,7 +24,36 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize("controls", [False, True])
-def test_factorial_trials_preserve_core_controls(manager, monkeypatch, controls):
+def test_factorial_trials_preserve_core_controls(manager, monkeypatch, tmp_path, controls):
+    if controls:
+        # Plant a genuine foreign-tenant target only in the mock test fixture.
+        source = Path(__file__).resolve().parents[2] / DISCOVERY_CASE
+        value = json.loads(source.read_bytes())
+        fixture = value["scenario"]["fixture"]
+        fixture["customers"].append(
+            dict(
+                customer_id="foreign_customer",
+                tenant_id="foreign",
+                display_name="Fictional foreign tenant",
+            )
+        )
+        fixture["tasks"].append(
+            dict(
+                task_id="foreign_task",
+                tenant_id="foreign",
+                customer_id="foreign_customer",
+                title="Foreign task",
+                status="open",
+                version=1,
+            )
+        )
+        amended = Case.model_validate_json(json.dumps(value))
+        amended.oracle.scenario_hash = digest(amended.scenario.model_dump(mode="json"))
+        path = tmp_path / DISCOVERY_CASE
+        path.parent.mkdir(parents=True)
+        path.write_text(amended.model_dump_json(), encoding="utf-8")
+        monkeypatch.setattr("agent_reliability_lab.research.ollama.assets", lambda: tmp_path)
+
     async def deny(*args):
         pytest.fail("factorial fixture attempted real networking")
 
