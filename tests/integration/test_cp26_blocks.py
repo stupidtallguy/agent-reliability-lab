@@ -91,7 +91,19 @@ def plan(manager, monkeypatch):
         ),
         mock=True,
     )
-    return store, ref
+    try:
+        yield store, ref
+    finally:
+        # These tests deliberately retain interrupted sandboxes. Dispose only
+        # the owned fixtures of this exact disposable plan after assertions.
+        frozen_run = local_blocks._read_run(store, ref)
+        if frozen_run:
+            for row in local_blocks._persisted_arms(store, frozen_run).values():
+                trial = store.evaluations.trial(row["trial_id"])
+                owned = trial["sandbox_run_id"]
+                if owned and trial["cleanup"]["status"] != "cleaned":
+                    assert trial["ownership_marker"] and owned.startswith("eval_")
+                    manager.cleanup(owned, expected_marker=trial["ownership_marker"])
 
 
 def run(store, ref, block=1, *, probe=ample, transport=None):
