@@ -9,7 +9,7 @@ from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research.guard_ablation import factorial_orders
 
 
-@pytest.mark.parametrize(("system", "framing", "scope"), product((False, True), repeat=3))
+@pytest.mark.parametrize(("system", "framing", "scope"), tuple(product((False, True), repeat=3)))
 def test_factors_are_independent_and_legacy_defaults_remain(system, framing, scope):
     factors = GuardFactors(
         system_policy=system, observation_framing=framing, task_scope_filter=scope
