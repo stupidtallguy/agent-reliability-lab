@@ -76,7 +76,7 @@ def validate_plan(store, plan):
         for arm in slot["order"]:
             host = trial_agent_config(
                 scenario,
-                _config(protocol, spec, arm, "0" * 32),
+                _config(protocol, spec, arm, "0" * 32, slot),
                 "pilot_plan",
                 protocol.source_commit,
                 protocol.scripts.get(spec.scenario_id),
@@ -89,6 +89,7 @@ def validate_plan(store, plan):
                     tenant=scenario.actor.tenant_id,
                     actor=scenario.actor.actor_id,
                     script_config_hash=digest(host.model.model_dump(mode="json")),
+                    guard_factors=host.defense.factors if host.defense else None,
                     maximum_output_tokens=host.budgets.max_output_tokens,
                 )
             )
@@ -314,8 +315,14 @@ def _document(store, plan_ref, result_ref, event_count=None):
         document.update(
             schema_version="development-ollama-report-1",
             interpretation=plan.mode,
-            methodology="Two counterbalanced development pairs on one template. "
-            "Objective scores pin independent sandbox evidence. Local runtime token "
+            methodology=(
+                "Four distinct development families in two counterbalanced blocks. "
+                if plan.model.local_profile.multifamily
+                else "Two counterbalanced factorial blocks on one development template. "
+                if plan.model.local_profile.factorial
+                else "Two counterbalanced development pairs on one template. "
+            )
+            + "Objective scores pin independent sandbox evidence. Local runtime token "
             "counts and timings exclude electricity costs. Mode: " + plan.mode,
         )
     if run.live_authorization is not None:

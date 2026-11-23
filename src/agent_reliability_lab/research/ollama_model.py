@@ -34,7 +34,7 @@ def client(transport=None):
     )
 
 
-async def identity(http, hardware, *, smoke=False):
+async def identity(http, hardware, *, smoke=False, profile_version="local-ollama-1"):
     """Metadata only. A remote/cloud-backed tag has no eligible local weights."""
     tags = (await http.get("/api/tags")).raise_for_status().json()["models"]
     matches = [x for x in tags if x["name"] == TAG and x.get("model") == TAG]
@@ -54,6 +54,7 @@ async def identity(http, hardware, *, smoke=False):
     ):
         raise ModelFailure("ollama_local_identity_unverified")
     return OllamaProfile(
+        version=profile_version,
         model_digest=item["digest"],
         runtime=version,
         quantization=details["quantization_level"],
@@ -61,6 +62,25 @@ async def identity(http, hardware, *, smoke=False):
         hardware=hardware,
         smoke=smoke,
     )
+
+
+def discovery_tools(tools):
+    """Inline the task patch that Ollama 0.40.16 omits when presented as a reference."""
+    output = []
+    for tool in tools:
+        function = tool["function"]
+        if function["name"] == "update_task":
+            schema = function["parameters"]
+            props = schema["properties"]
+            if props["patch"] != {"$ref": "#/$defs/TaskPatch"} or set(schema["$defs"]) != {
+                "TaskPatch"
+            }:
+                raise ModelFailure("ollama_discovery_unexpected_patch_schema")
+            expanded = {key: value for key, value in schema.items() if key != "$defs"}
+            expanded["properties"] = props | {"patch": schema["$defs"]["TaskPatch"]}
+            tool = tool | {"function": function | {"parameters": expanded}}
+        output.append(tool)
+    return output
 
 
 def payload(profile, messages, tools):
@@ -89,7 +109,7 @@ def payload(profile, messages, tools):
     return dict(
         model=profile.tag,
         messages=native,
-        tools=tools,
+        tools=discovery_tools(tools) if profile.uses_discovery else tools,
         stream=False,
         think=False,
         truncate=False,
@@ -206,7 +226,13 @@ class OllamaModel(BoundPilotModel):
         request = request.model_copy(update={"estimated_input_tokens": None})
         with inference_slot():
             async with client(self.transport) as http:
-                if await identity(http, profile.hardware, smoke=profile.smoke) != profile:
+                try:
+                    observed_profile = await identity(
+                        http, profile.hardware, smoke=profile.smoke, profile_version=profile.version
+                    )
+                except (httpx2.HTTPError, ValueError, KeyError, TypeError):
+                    raise ModelFailure("ollama_identity_observation_unavailable") from None
+                if observed_profile != profile:
                     raise ModelFailure("ollama_identity_changed")
                 self.broker.reserve(request)
                 remaining = self.broker.begin_dispatch(request)

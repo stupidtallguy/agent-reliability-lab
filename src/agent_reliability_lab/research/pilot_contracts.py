@@ -5,6 +5,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
+from agent_reliability_lab.adversarial.contracts import GuardFactors
 from agent_reliability_lab.benchmarks.scenario import Contract, Identifier
 from agent_reliability_lab.evaluation.contracts import PriceBook
 from agent_reliability_lab.opsdesk.fixtures import digest
@@ -24,7 +25,12 @@ GROQ_QUALIFICATION_OUTPUT = 256
 
 
 class OllamaProfile(Contract):
-    version: Literal["local-ollama-1"] = "local-ollama-1"
+    version: Literal[
+        "local-ollama-1",
+        "local-ollama-discovery-1",
+        "local-ollama-ablation-1",
+        "local-ollama-multifamily-1",
+    ] = "local-ollama-1"
     tag: Literal["qwen3.5:4b"] = "qwen3.5:4b"
     endpoint: Literal["http://127.0.0.1:11434"] = "http://127.0.0.1:11434"
     model_digest: Hash
@@ -38,6 +44,36 @@ class OllamaProfile(Contract):
     seed: Literal[42] = 42
     think: Literal[False] = False
     smoke: bool = False
+
+    @property
+    def factorial(self) -> bool:
+        return self.version == "local-ollama-ablation-1"
+
+    @property
+    def multifamily(self) -> bool:
+        return self.version == "local-ollama-multifamily-1"
+
+    @property
+    def explicit_factors(self) -> bool:
+        return self.factorial or self.multifamily
+
+    @property
+    def uses_discovery(self) -> bool:
+        return self.version != "local-ollama-1"
+
+    @property
+    def trials(self) -> int:
+        return 1 if self.smoke else 16 if self.explicit_factors else 4
+
+    @property
+    def calls_per_trial(self) -> int:
+        return 7 if self.uses_discovery else 4
+
+    @model_validator(mode="after")
+    def discovery_is_paired(self) -> Self:
+        if self.uses_discovery and self.smoke:
+            raise ValueError("discovery profile requires a paired study")
+        return self
 
 
 class PilotModel(Contract):
@@ -120,7 +156,7 @@ class PilotPlan(Artifact):
             if (
                 self.model.allowed_models != (profile.tag,)
                 or self.model.model_id != profile.tag
-                or self.limits.total_calls != (4 if profile.smoke else 16)
+                or self.limits.total_calls != profile.calls_per_trial * profile.trials
                 or self.limits.retries_per_turn
                 or self.limits.total_retries
                 or self.limits.maximum_output_tokens != profile.num_predict
@@ -192,6 +228,7 @@ class PilotArm(Contract):
     scenario: Identifier
     tenant: Identifier
     actor: Identifier
+    guard_factors: GuardFactors | None = Field(default=None, exclude_if=lambda value: value is None)
     script_config_hash: Hash
     maximum_output_tokens: int = Field(ge=1, le=16384)
 

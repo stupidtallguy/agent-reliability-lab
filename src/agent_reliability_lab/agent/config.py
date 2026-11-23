@@ -55,6 +55,8 @@ class AgentConfig(Contract):
     @model_validator(mode="after")
     def valid_host(self) -> Self:
         schema_for(self.sandbox_run_id)
+        if self.defense and self.defense.factors and self.model.provider != "ollama":
+            raise ValueError("guard ablation is available only to the local Ollama study")
         if not self.domains or len(self.domains) != len(set(self.domains)):
             raise ValueError("domains must be nonempty and unique")
         if "notifications" in self.domains and (

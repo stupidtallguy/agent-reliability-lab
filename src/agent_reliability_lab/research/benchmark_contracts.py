@@ -7,7 +7,7 @@ from pydantic import Field, model_validator
 from agent_reliability_lab.adversarial.contracts import HarnessSpec, WriteScope
 from agent_reliability_lab.agent.config import Budgets, ModelConfig
 from agent_reliability_lab.benchmarks.scenario import Contract, Identifier, Text
-from agent_reliability_lab.evaluation.contracts import Case
+from agent_reliability_lab.evaluation.contracts import Case, SourceMethod
 from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research.contracts import Artifact, Reference
 
@@ -172,13 +172,14 @@ class BenchmarkProtocol(Artifact):
     allocation_rationale: Text
     order_seed: int = Field(ge=0)
     arms: tuple[Literal["baseline"], Literal["guarded"]] = ("baseline", "guarded")
-    intervention: Literal["task_scope_and_observation_framing_v1"] = (
-        "task_scope_and_observation_framing_v1"
-    )
+    intervention: Literal[
+        "task_scope_and_observation_framing_v1", "guard_factorial_v1", "guard_multifamily_v1"
+    ] = "task_scope_and_observation_framing_v1"
     model: ModelConfig
     transport: Literal["memory", "stdio"] = "memory"
     evaluator_version: Literal["1.7.0"] = "1.7.0"
     source_commit: Annotated[str, Field(pattern=r"^[a-f0-9]{40}$")]
+    source_method: SourceMethod | None = Field(default=None, exclude_if=lambda value: value is None)
     source_hash: Hash
     lock_hash: Hash
     budgets: Budgets
@@ -195,14 +196,19 @@ class BenchmarkProtocol(Artifact):
             raise ValueError("select unique scenarios with exactly one script per scenario")
         if self.mode == "provider_development_exploratory" and (
             self.scripts
-            or len(self.scenarios) != 1
+            or len(self.scenarios) != (4 if self.intervention == "guard_multifamily_v1" else 1)
             or self.repetitions != 2
             or self.model.provider not in {"openai", "groq", "ollama"}
         ):
             raise ValueError("provider feasibility requires two counterbalanced development pairs")
         if any(not script or len(script) > 100 for script in self.scripts.values()):
             raise ValueError("each scripted scenario requires a bounded nonempty plan")
-        if self.planned_pairs != len(self.scenarios) * self.repetitions:
+        factorial = self.intervention == "guard_factorial_v1"
+        if (factorial or self.intervention == "guard_multifamily_v1") and (
+            self.model.provider != "ollama" or self.mode != "provider_development_exploratory"
+        ):
+            raise ValueError("guard ablation is available only to local development")
+        if self.planned_pairs != len(self.scenarios) * self.repetitions * (4 if factorial else 1):
             raise ValueError("planned pair count differs from the allocation")
         if self.secondary_outcomes != list(OUTCOMES[1:]):
             raise ValueError("unsupported secondary outcome contract")

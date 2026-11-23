@@ -65,6 +65,12 @@ class AgentExecution:
 
             if type(model) is not OllamaModel:
                 raise ModelFailure("ollama_requires_local_development_opt_in")
+            factors = config.defense.factors if config.defense else None
+            if (
+                model.arm.guard_factors != factors
+                or bool(factors) != model.plan.model.local_profile.explicit_factors
+            ):
+                raise ModelFailure("ollama_guard_factors_do_not_match_allocation")
         if config.model.provider == "groq":
             from agent_reliability_lab.research.groq_model import GroqHTTPModel
 
@@ -113,7 +119,7 @@ class AgentExecution:
                         "content": SYSTEM_POLICY
                         + (
                             GUARDED_POLICY
-                            if config.defense and config.defense.configuration == "guarded"
+                            if config.defense and config.defense.adds_system_policy
                             else ""
                         ),
                     },

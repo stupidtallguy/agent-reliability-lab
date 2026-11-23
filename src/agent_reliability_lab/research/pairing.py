@@ -1,5 +1,6 @@
 """Explicit pairing from frozen inputs, never inferred from trial names."""
 
+from agent_reliability_lab.adversarial.contracts import GuardFactors
 from agent_reliability_lab.opsdesk.fixtures import digest
 
 
@@ -22,8 +23,29 @@ def verify_pair(store, baseline_id, guarded_id, oracle_reference):
         criteria[name] = left.get(name, left["metadata"].get(name)) == right.get(
             name, right["metadata"].get(name)
         )
-    criteria["configuration"] = {k: v for k, v in configs[0].items() if k != "defense"} == {
-        k: v for k, v in configs[1].items() if k != "defense"
+    varying = {"defense"}
+    if all(item.get("configuration_id") == "guard_factorial_v1" for item in configs):
+        off, on = (item.get("guard_factors") for item in configs)
+        criteria["task_scope_contrast"] = (
+            isinstance(off, dict)
+            and off.get("version") == "guard_factorial_v1"
+            and off.get("task_scope_filter") is False
+            and on == off | {"task_scope_filter": True}
+        )
+        varying.add("guard_factors")
+    if all(item.get("configuration_id") == "guard_multifamily_v1" for item in configs):
+        expected = [
+            GuardFactors(
+                system_policy=enabled, observation_framing=enabled, task_scope_filter=enabled
+            ).model_dump(mode="json")
+            for enabled in (False, True)
+        ]
+        criteria["combined_guard_contrast"] = [
+            item.get("guard_factors") for item in configs
+        ] == expected
+        varying.add("guard_factors")
+    criteria["configuration"] = {k: v for k, v in configs[0].items() if k not in varying} == {
+        k: v for k, v in configs[1].items() if k not in varying
     }
     # Environment, exact model, parameters and source hashes are frozen in the manifests.
     criteria["environment"] = (

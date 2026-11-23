@@ -6,7 +6,7 @@ from typing import Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
-from agent_reliability_lab.adversarial.contracts import HarnessSpec, WriteScope
+from agent_reliability_lab.adversarial.contracts import GuardFactors, HarnessSpec, WriteScope
 from agent_reliability_lab.agent.config import Budgets, ModelConfig
 from agent_reliability_lab.benchmarks.scenario import Contract, Identifier, Scenario, StateChange
 
@@ -166,7 +166,12 @@ class PriceBook(Contract):
         return self
 
 
+SourceMethod = Literal["git_python_lf_v1"]
+
+
 class ExperimentConfig(Contract):
+    guard_factors: GuardFactors | None = Field(default=None, exclude_if=lambda value: value is None)
+
     schema_version: Literal["1.0"] = "1.0"
     study: dict | None = Field(default=None, exclude_if=lambda value: value is None)
     configuration_id: Identifier = "development_default"
@@ -178,6 +183,7 @@ class ExperimentConfig(Contract):
     annotations: dict[str, OracleSpec] = Field(default_factory=dict)
     prices: PriceBook | None = None
     source_commit: str | None = Field(default=None, pattern=r"^[a-f0-9]{40}$")
+    source_method: SourceMethod | None = Field(default=None, exclude_if=lambda value: value is None)
     accounting_limits: Literal["posthoc_usage_cost_v1"] = "posthoc_usage_cost_v1"
     harnesses: dict[str, HarnessSpec] = Field(default_factory=dict)
     defense: Literal["baseline", "guarded"] = "baseline"

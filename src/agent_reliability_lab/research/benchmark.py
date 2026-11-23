@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from agent_reliability_lab.adversarial.contracts import HarnessSpec, WriteScope
+from agent_reliability_lab.adversarial.contracts import GuardFactors, HarnessSpec, WriteScope
 from agent_reliability_lab.evaluation.contracts import Case, EvaluationResult, ExperimentConfig
 from agent_reliability_lab.evaluation.demo import development_script
 from agent_reliability_lab.evaluation.evidence import config_projection
@@ -34,7 +34,16 @@ from agent_reliability_lab.research.benchmark_measurements import (
     trial_measurements,
 )
 from agent_reliability_lab.research.contracts import Reference, parse_artifact
+from agent_reliability_lab.research.guard_ablation import (
+    INTERVENTION,
+    descriptive_cells,
+    factorial_orders,
+)
 from agent_reliability_lab.research.identity import require_compatible
+from agent_reliability_lab.research.multifamily import (
+    INTERVENTION as MULTIFAMILY_INTERVENTION,
+)
+from agent_reliability_lab.research.multifamily import balanced_slots, descriptive_families
 from agent_reliability_lab.research.pairing import verify_pair
 from agent_reliability_lab.research.units import validate_units
 from agent_reliability_lab.research.views import trial_matches_score
@@ -158,8 +167,15 @@ def schedule(dataset, protocol):
         if spec is None or spec.partition != "development":
             raise ValueError("CP12 execution requires a frozen development scenario")
         flip = int(digest([protocol.order_seed, scenario_id])[-1], 16) % 2
-        for index in range(protocol.repetitions):
-            arms = protocol.arms if (index + flip) % 2 == 0 else protocol.arms[::-1]
+        orders = (
+            factorial_orders(protocol.order_seed)
+            if protocol.intervention == INTERVENTION
+            else [
+                (index + 1, protocol.arms if (index + flip) % 2 == 0 else protocol.arms[::-1], None)
+                for index in range(protocol.repetitions)
+            ]
+        )
+        for repetition, arms, factors in orders:
             slots.append(
                 dict(
                     slot=f"slot_{len(slots) + 1:04d}",
@@ -172,11 +188,14 @@ def schedule(dataset, protocol):
                     family_version=dataset.family_versions[spec.family],
                     attack_family=spec.attack_family,
                     partition=spec.partition,
-                    repetition=index + 1,
+                    repetition=repetition,
                     fixture_seed=spec.case.scenario.fixture.seed,
                     order=list(arms),
+                    **({"factors": factors} if factors is not None else {}),
                 )
             )
+    if protocol.intervention == MULTIFAMILY_INTERVENTION:
+        slots = balanced_slots(slots, protocol.order_seed)
     return slots, catalog
 
 
@@ -302,13 +321,23 @@ def _context(run_ref, run, protocol, slot, arm, authority=None, local_mode=None)
     return context
 
 
-def _config(protocol, spec, arm, pairing_id):
+def _config(protocol, spec, arm, pairing_id, slot=None):
     name = spec.scenario_id
+    factors = None
+    if protocol.intervention == INTERVENTION:
+        factors = GuardFactors.model_validate(slot["factors"][arm])
+    if protocol.intervention == MULTIFAMILY_INTERVENTION:
+        enabled = arm == "guarded"
+        factors = GuardFactors(
+            system_policy=enabled, observation_framing=enabled, task_scope_filter=enabled
+        )
     return ExperimentConfig(
         configuration_id=protocol.intervention,
+        guard_factors=factors,
         pairing_id=pairing_id,
         defense=arm,
         source_commit=protocol.source_commit,
+        source_method=protocol.source_method,
         model=protocol.model,
         budgets=protocol.budgets,
         transport=protocol.transport,
@@ -323,14 +352,14 @@ def _config(protocol, spec, arm, pairing_id):
 def _source_matches(protocol, observed):
     return all(
         observed.get(key) == getattr(protocol, key)
-        for key in ("source_commit", "source_hash", "lock_hash")
+        for key in ("source_commit", "source_method", "source_hash", "lock_hash")
     )
 
 
 def _arm_evidence(store, report_id, expected, protocol, spec, pairing_id):
     document = reproduce(store.evaluations, report_id)
     manifest = document["manifest"]
-    config = _config(protocol, spec, expected["arm"], pairing_id)
+    config = _config(protocol, spec, expected["arm"], pairing_id, expected["slot"])
     if (
         manifest.get("benchmark") != expected
         or manifest.get("config") != config.model_dump(mode="json")
@@ -501,6 +530,14 @@ def build_result(store, run_ref, report_ids, *, partial=False):
     ]
     if len(sandbox_ids) != len(set(sandbox_ids)):
         raise ValueError("benchmark sandbox identity reused")
+    summary = None
+    if not partial:
+        if protocol.intervention == MULTIFAMILY_INTERVENTION:
+            summary = descriptive_families(rows)
+        elif protocol.intervention == INTERVENTION:
+            summary = descriptive_cells(rows)
+        else:
+            summary = summarize_pairs(rows, protocol.statistics)
     return dict(
         schema_version="1.0",
         interpretation=authority.mode if authority else local_mode or "synthetic_exploratory",
@@ -514,6 +551,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
         },
         evaluator_version=protocol.evaluator_version,
         source_commit=protocol.source_commit,
+        **({"source_method": protocol.source_method} if protocol.source_method else {}),
         source_hash=protocol.source_hash,
         lock_hash=protocol.lock_hash,
         arms=list(protocol.arms),
@@ -528,7 +566,7 @@ def build_result(store, run_ref, report_ids, *, partial=False):
         order_seed=protocol.order_seed,
         budgets=protocol.budgets.model_dump(mode="json"),
         pairs=rows,
-        summary=None if partial else summarize_pairs(rows, protocol.statistics),
+        summary=summary,
     )
 
 
@@ -562,12 +600,17 @@ async def execute_benchmark(
         raise ValueError("run requires a preregistered benchmark protocol reference")
     dataset = store.get(protocol.dataset)
     slots, catalog = schedule(dataset, protocol)
-    runtime = provenance(ExperimentConfig(experimental_evaluator=protocol.evaluator_version))
+    runtime = provenance(
+        ExperimentConfig(
+            experimental_evaluator=protocol.evaluator_version, source_method=protocol.source_method
+        )
+    )
     if not _source_matches(protocol, runtime):
         raise ValueError("checked-out source or dependency lock differs from preregistration")
     pilot_model_for = None
     authority = None
     local_mode = None
+    discovery_mode = False
     if protocol.model.provider == "ollama":
         from agent_reliability_lab.research.ollama import open_local
 
@@ -580,6 +623,7 @@ async def execute_benchmark(
         plan = store.get(pilot_ref)
         local_mode = plan.mode
         pilot_model_for = await open_local(store, plan, protocol_ref, mock_transport)
+        discovery_mode = plan.model.local_profile.uses_discovery
     elif live_authorization is not None:
         from agent_reliability_lab.research.live import open_provider_pilot
 
@@ -636,7 +680,7 @@ async def execute_benchmark(
                     pilot_model = pilot_model_for(run_ref, slot["slot"], arm, script_config)
                 identifier = await runner.run(
                     [path],
-                    _config(protocol, spec, arm, pair_id),
+                    _config(protocol, spec, arm, pair_id, slot),
                     benchmark_context=_context(
                         run_ref, run, protocol, slot, arm, authority, local_mode
                     ),
@@ -650,9 +694,8 @@ async def execute_benchmark(
                     evaluator_version=protocol.evaluator_version,
                     scoring_ids=[scoring.scoring_id],
                 )
-                if smoke:
-                    # A smoke is a single pinned evaluator report, never a completed pair.
-                    _, verified = _arm_evidence(
+                if smoke or discovery_mode:
+                    verified_score, verified = _arm_evidence(
                         store,
                         frozen["report_id"],
                         _context(run_ref, run, protocol, slot, arm, authority, local_mode),
@@ -660,7 +703,11 @@ async def execute_benchmark(
                         spec,
                         pair_id,
                     )
-                    return run_ref, verified
+                    if smoke:
+                        return run_ref, verified
+                    from agent_reliability_lab.research.ollama import verify_discovery_arm
+
+                    verify_discovery_arm(store, pilot_model, verified_score, trial)
                 reports[slot["slot"] + ":" + arm] = frozen["report_id"]
     result = build_result(store, run_ref, reports)
     artifact = BenchmarkResult(
