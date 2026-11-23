@@ -13,6 +13,7 @@ import pytest
 import sqlalchemy as sa
 from test_cp25_expanded import control, native_reply, scripted_control
 
+from agent_reliability_lab.agent.errors import BudgetExceeded
 from agent_reliability_lab.evaluation import tables as evaluation
 from agent_reliability_lab.opsdesk.database import engine_from_env
 from agent_reliability_lab.opsdesk.fixtures import digest
@@ -20,9 +21,15 @@ from agent_reliability_lab.research import local_blocks
 from agent_reliability_lab.research.benchmark import execute_benchmark
 from agent_reliability_lab.research.contracts import Reference
 from agent_reliability_lab.research.multifamily import reviewed_dataset
-from agent_reliability_lab.research.ollama import BLOCK_PROFILE, QUALIFICATION_PROFILE, register
-from agent_reliability_lab.research.ollama_model import TAG
+from agent_reliability_lab.research.ollama import (
+    BLOCK_PROFILE,
+    MULTIBLOCK_PROFILE,
+    QUALIFICATION_PROFILE,
+    register,
+)
+from agent_reliability_lab.research.ollama_model import TAG, inference_slot
 from agent_reliability_lab.research.persistence import ResearchStore, artifacts
+from agent_reliability_lab.research.pilot_budget import PilotBudgetBroker, ledgers
 from agent_reliability_lab.research.pilot_contracts import OllamaProfile
 
 pytestmark = pytest.mark.integration
@@ -122,6 +129,100 @@ def run(store, ref, block=1, *, probe=ample, transport=None):
 def read(store, ref):
     readonly = ResearchStore(store.engine.execution_options(postgresql_readonly=True), store.scope)
     return local_blocks.reconstruct_blocks(readonly, ref)
+
+
+def multiblock(store, original):
+    profile = store.get(original).model.local_profile.model_copy(
+        update={"version": MULTIBLOCK_PROFILE}
+    )
+    return register(store, profile, mock=True)
+
+
+def block_command(store, ref, number):
+    return [sys.executable, __file__, "block", store.scope, ref.model_dump_json(), str(number)]
+
+
+def test_multiblock_uses_one_frozen_deadline_across_processes(plan, monkeypatch):
+    store, original = plan
+    ref = multiblock(store, original)
+    frozen = store.get(ref)
+    assert frozen.limits.total_calls == frozen.limits.calls_per_scenario == 28
+    with pytest.raises(ValueError, match="prior blocks"):
+        run(store, ref, 2)
+    assert run(store, ref, probe=lambda: 4 * FLOOR)["status"] == "block_complete"
+    first = read(store, ref)
+    assert first["pairs"][0]["comparison"] == "verified"
+    assert first["pairs"][1]["comparison"] == "incomplete"
+
+    def deadline():
+        with store.engine.connect() as conn:
+            return conn.scalar(
+                sa.select(ledgers.c.deadline).where(ledgers.c.ledger_id == frozen.ledger_id)
+            )
+
+    assert deadline() == frozen.run_deadline
+    monkeypatch.setenv(
+        "OPSDESK_DATABASE_URL", store.engine.url.render_as_string(hide_password=False)
+    )
+    next_block = subprocess.run(
+        block_command(store, ref, 2), check=True, capture_output=True, text=True, timeout=120
+    )
+    assert json.loads(next_block.stdout)["status"] == "block_complete"
+    settled = read(store, ref)
+    assert settled["status"] == "complete" and settled["run"] == first["run"]
+    a, b = settled["pairs"]
+    assert a["allocation"]["order"] == b["allocation"]["order"][::-1]
+    assert a == first["pairs"][0] and b["comparison"] == "verified"
+    assert len({t["trial_id"] for p in settled["pairs"] for t in p["arms"].values()}) == 4
+    assert all(
+        event["available_bytes"] >= 4 * FLOOR
+        for event in settled["progress"]
+        if event["action"] == "claim"
+    )
+    assert deadline() == frozen.run_deadline
+
+    expired = multiblock(store, original)
+    now = store.get(expired).run_deadline
+    monkeypatch.setattr(PilotBudgetBroker, "_now", staticmethod(lambda _conn: now))
+    with pytest.raises(BudgetExceeded, match="pilot_experiment_deadline"):
+        run(store, expired, probe=lambda: 4 * FLOOR)
+    assert read(store, expired)["progress"] == []
+
+    scarce = multiblock(store, original)
+    assert run(store, scarce, probe=lambda: 4 * FLOOR - 1)["status"] == "stopped"
+    assert run(store, scarce, probe=lambda: 4 * FLOOR)["status"] == "stopped"
+    assert read(store, scarce)["broker_events"] == []
+
+
+def test_concurrent_mock_workers_are_isolated_from_the_real_lock(plan, monkeypatch):
+    store, original = plan
+    refs = [multiblock(store, original), multiblock(store, original)]
+    monkeypatch.setenv(
+        "OPSDESK_DATABASE_URL", store.engine.url.render_as_string(hide_password=False)
+    )
+    lock_probe = (
+        "from agent_reliability_lab.research.ollama_model import inference_slot\n"
+        "with inference_slot():\n print('admitted')"
+    )
+    with inference_slot():
+        busy = subprocess.run(
+            [sys.executable, "-c", lock_probe], capture_output=True, text=True, timeout=30
+        )
+        assert busy.returncode != 0 and "ollama_busy" in busy.stderr
+        with (
+            subprocess.Popen(block_command(store, refs[0], 1), stdout=subprocess.PIPE) as first,
+            subprocess.Popen(block_command(store, refs[1], 1), stdout=subprocess.PIPE) as second,
+        ):
+            for worker in (first, second):
+                out, _ = worker.communicate(timeout=120)
+                assert worker.returncode == 0 and json.loads(out)["status"] == "block_complete"
+    with inference_slot():
+        pass
+    a, b = (read(store, ref) for ref in refs)
+    assert a["pairs"][0]["comparison"] == b["pairs"][0]["comparison"] == "verified"
+    assert {x["attempt_id"] for x in a["broker_events"]}.isdisjoint(
+        {x["attempt_id"] for x in b["broker_events"]}
+    )
 
 
 def test_single_pair_qualification_is_bounded_and_reconstructs(plan):
@@ -320,7 +421,12 @@ def child(action, scope, json_ref, block=None):
             run(store, ref, transport=mock_ollama(terminate))
             raise AssertionError("mock dispatch never reached the hard crash")
         if action == "block":
-            print(json.dumps(run(store, ref, int(block)), sort_keys=True))
+            probe = (
+                (lambda: local_blocks.QUALIFICATION_START_MEMORY)
+                if store.get(ref).model.local_profile.multiblock
+                else ample
+            )
+            print(json.dumps(run(store, ref, int(block), probe=probe), sort_keys=True))
         else:
             assert action == "inspect"
             print(json.dumps(read(store, ref), sort_keys=True))

@@ -19,6 +19,7 @@ Partition = Literal["training", "development", "held_out"]
 FAMILIES = ("tool_use", "policy_resilience", "external_recovery")
 MULTIFAMILY_INTERVENTION = "guard_multifamily_v1"
 QUALIFICATION_INTERVENTION = "guard_single_pair_qualification_v1"
+MULTIBLOCK_INTERVENTION = "guard_multiblock_qualification_v1"
 OUTCOMES = (
     "task_success",
     "attack_success",
@@ -179,6 +180,7 @@ class BenchmarkProtocol(Artifact):
         "guard_factorial_v1",
         "guard_multifamily_v1",
         "guard_single_pair_qualification_v1",
+        "guard_multiblock_qualification_v1",
     ] = "task_scope_and_observation_framing_v1"
     model: ModelConfig
     transport: Literal["memory", "stdio"] = "memory"
@@ -213,9 +215,11 @@ class BenchmarkProtocol(Artifact):
         if any(not script or len(script) > 100 for script in self.scripts.values()):
             raise ValueError("each scripted scenario requires a bounded nonempty plan")
         factorial = self.intervention == "guard_factorial_v1"
-        if (factorial or qualification or self.intervention == MULTIFAMILY_INTERVENTION) and (
-            self.model.provider != "ollama" or self.mode != "provider_development_exploratory"
-        ):
+        if (
+            factorial
+            or qualification
+            or self.intervention in {MULTIFAMILY_INTERVENTION, MULTIBLOCK_INTERVENTION}
+        ) and (self.model.provider != "ollama" or self.mode != "provider_development_exploratory"):
             raise ValueError("guard ablation is available only to local development")
         if self.planned_pairs != len(self.scenarios) * self.repetitions * (4 if factorial else 1):
             raise ValueError("planned pair count differs from the allocation")

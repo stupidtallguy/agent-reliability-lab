@@ -7,7 +7,7 @@ import os
 import platform
 import subprocess
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -30,6 +30,7 @@ from agent_reliability_lab.research.benchmark import (
     starter_draft,
 )
 from agent_reliability_lab.research.benchmark_contracts import (
+    MULTIBLOCK_INTERVENTION,
     MULTIFAMILY_INTERVENTION,
     QUALIFICATION_INTERVENTION,
     BenchmarkDataset,
@@ -52,7 +53,12 @@ from agent_reliability_lab.research.pilot import (
     verify_pilot_report,
 )
 from agent_reliability_lab.research.pilot_budget import PilotBudgetBroker
-from agent_reliability_lab.research.pilot_contracts import PilotLimits, PilotModel, PilotPlan
+from agent_reliability_lab.research.pilot_contracts import (
+    MULTIBLOCK_SECONDS,
+    PilotLimits,
+    PilotModel,
+    PilotPlan,
+)
 
 SCENARIO = "multi_step_resolve_task"
 SMOKE_SCENARIO = "benign_create"
@@ -63,6 +69,7 @@ MULTIFAMILY_PROFILE = "local-ollama-multifamily-1"
 EXPANDED_PROFILE = "local-ollama-expanded-1"
 BLOCK_PROFILE = "local-ollama-blocks-1"
 QUALIFICATION_PROFILE = "local-ollama-qualification-1"
+MULTIBLOCK_PROFILE = "local-ollama-multiblock-1"
 DISCOVERY_CASE = "benchmarks/controls/revisions/multi_step_resolve_task-discovery-v2.json"
 
 
@@ -180,7 +187,9 @@ def validate_local_plan(store, plan, protocol_ref):
         or protocol.budgets.max_output_tokens != 256
         or protocol.budgets.max_retries != 0
         or profile.factorial != (protocol.intervention == "guard_factorial_v1")
-        or profile.qualification != (protocol.intervention == QUALIFICATION_INTERVENTION)
+        or profile.multiblock != (protocol.intervention == MULTIBLOCK_INTERVENTION)
+        or (profile.qualification and not profile.multiblock)
+        != (protocol.intervention == QUALIFICATION_INTERVENTION)
         or (profile.multifamily and not profile.qualification)
         != (protocol.intervention == MULTIFAMILY_INTERVENTION)
     ):
@@ -250,10 +259,12 @@ def register(store, profile, *, mock=False):
                 dataset=store.reference(dataset),
                 benchmark_version=dataset.benchmark_version,
                 **updates,
-                repetitions=1 if profile.qualification else parent.repetitions,
+                repetitions=1 if profile.qualification and not profile.multiblock else 2,
                 planned_pairs=profile.trials // 2 if not profile.smoke else 2,
                 intervention=(
-                    QUALIFICATION_INTERVENTION
+                    MULTIBLOCK_INTERVENTION
+                    if profile.multiblock
+                    else QUALIFICATION_INTERVENTION
                     if profile.qualification
                     else MULTIFAMILY_INTERVENTION
                     if profile.multifamily
@@ -264,7 +275,9 @@ def register(store, profile, *, mock=False):
                 model=ModelConfig(provider="ollama", model_id=TAG),
                 budgets=budgets,
                 hypothesis=(
-                    "Qualify genuine block execution and evidence reconstruction on one pair."
+                    "Measure process-level resource stability across two genuine blocks."
+                    if profile.multiblock
+                    else "Qualify genuine block execution and evidence reconstruction on one pair."
                     if profile.qualification
                     else "Validate conservative one-pair blocks and evidence recovery."
                     if profile.blocks
@@ -274,7 +287,9 @@ def register(store, profile, *, mock=False):
                     else "A local tool-calling model can attempt the existing development task."
                 ),
                 allocation_rationale=(
-                    "One pair with seed-selected arm order. No cross-pair counterbalancing."
+                    "Two independent workers, one pair per worker, with opposite arm orders."
+                    if profile.multiblock
+                    else "One pair with seed-selected arm order. No cross-pair counterbalancing."
                     if profile.qualification
                     else "One counterbalanced pair per process block with a fixed "
                     "512 MiB RAM floor."
@@ -324,6 +339,11 @@ def register(store, profile, *, mock=False):
         ),
         pricing=price,
         pricing_hash=digest(price.model_dump(mode="json")),
+        run_deadline=(
+            protocol.created_at + timedelta(seconds=MULTIBLOCK_SECONDS)
+            if profile.multiblock
+            else None
+        ),
         limits=PilotLimits(
             total_calls=calls,
             calls_per_scenario=(
@@ -337,7 +357,9 @@ def register(store, profile, *, mock=False):
             total_tokens=calls * 4352,
             maximum_usd=Decimal(0),
             duration_seconds=(
-                300
+                MULTIBLOCK_SECONDS
+                if profile.multiblock
+                else 300
                 if profile.qualification
                 else 3600
                 if profile.blocks
@@ -514,7 +536,9 @@ async def command(args):
                 hardware,
                 smoke=args.action == "smoke",
                 profile_version=(
-                    QUALIFICATION_PROFILE
+                    MULTIBLOCK_PROFILE
+                    if args.qualify_two_blocks
+                    else QUALIFICATION_PROFILE
                     if args.qualify_single_pair
                     else BLOCK_PROFILE
                     if args.action == "freeze-blocks"
@@ -585,6 +609,7 @@ def main():
     profiles.add_argument("--multifamily", action="store_true")
     profiles.add_argument("--expanded", action="store_true")
     profiles.add_argument("--qualify-single-pair", action="store_true")
+    profiles.add_argument("--qualify-two-blocks", action="store_true")
 
     parser.add_argument("--digest")
     parser.add_argument("--receipt", type=Path)
@@ -592,8 +617,8 @@ def main():
     args = parser.parse_args()
     if (args.action == "block") != (args.block is not None):
         parser.error("--block is required only for the block action")
-    if args.qualify_single_pair and args.action != "freeze-blocks":
-        parser.error("--qualify-single-pair requires freeze-blocks")
+    if (args.qualify_single_pair or args.qualify_two_blocks) and args.action != "freeze-blocks":
+        parser.error("qualification profiles require freeze-blocks")
     if args.action in {"freeze-blocks", "block"} and any(
         (args.expanded, args.multifamily, args.ablation, args.discoverable)
     ):
