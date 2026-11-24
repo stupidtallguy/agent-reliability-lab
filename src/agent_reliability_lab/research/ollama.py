@@ -30,6 +30,7 @@ from agent_reliability_lab.research.benchmark import (
     starter_draft,
 )
 from agent_reliability_lab.research.benchmark_contracts import (
+    CROSS_TEMPLATE_INTERVENTION,
     MULTIBLOCK_INTERVENTION,
     MULTIFAMILY_INTERVENTION,
     QUALIFICATION_INTERVENTION,
@@ -53,12 +54,7 @@ from agent_reliability_lab.research.pilot import (
     verify_pilot_report,
 )
 from agent_reliability_lab.research.pilot_budget import PilotBudgetBroker
-from agent_reliability_lab.research.pilot_contracts import (
-    MULTIBLOCK_SECONDS,
-    PilotLimits,
-    PilotModel,
-    PilotPlan,
-)
+from agent_reliability_lab.research.pilot_contracts import PilotLimits, PilotModel, PilotPlan
 
 SCENARIO = "multi_step_resolve_task"
 SMOKE_SCENARIO = "benign_create"
@@ -70,6 +66,7 @@ EXPANDED_PROFILE = "local-ollama-expanded-1"
 BLOCK_PROFILE = "local-ollama-blocks-1"
 QUALIFICATION_PROFILE = "local-ollama-qualification-1"
 MULTIBLOCK_PROFILE = "local-ollama-multiblock-1"
+CROSS_TEMPLATE_PROFILE = "local-ollama-cross-template-1"
 DISCOVERY_CASE = "benchmarks/controls/revisions/multi_step_resolve_task-discovery-v2.json"
 
 
@@ -164,11 +161,17 @@ def guard_database(store):
 
 
 def case_limits(profile):
-    if profile.qualification:
+    if profile.qualification and not profile.cross_template:
         return {QUALIFICATION_CASE: BLOCK_CASE_LIMITS[QUALIFICATION_CASE]}
     if profile.blocks:
         return BLOCK_CASE_LIMITS
     return EXPANDED_CASE_LIMITS if profile.expanded else CASE_LIMITS
+
+
+def _reviewed_local_dataset(profile):
+    if profile.qualification and not profile.cross_template:
+        return qualification_dataset()
+    return reviewed_dataset(expanded=profile.expanded, blocks=profile.blocks)
 
 
 def validate_local_plan(store, plan, protocol_ref):
@@ -188,7 +191,8 @@ def validate_local_plan(store, plan, protocol_ref):
         or protocol.budgets.max_retries != 0
         or profile.factorial != (protocol.intervention == "guard_factorial_v1")
         or profile.multiblock != (protocol.intervention == MULTIBLOCK_INTERVENTION)
-        or (profile.qualification and not profile.multiblock)
+        or profile.cross_template != (protocol.intervention == CROSS_TEMPLATE_INTERVENTION)
+        or (profile.qualification and profile.frozen_duration is None)
         != (protocol.intervention == QUALIFICATION_INTERVENTION)
         or (profile.multifamily and not profile.qualification)
         != (protocol.intervention == MULTIFAMILY_INTERVENTION)
@@ -196,12 +200,7 @@ def validate_local_plan(store, plan, protocol_ref):
         raise ValueError("incompatible local development plan")
     if profile.multifamily:
         if (
-            store.get(protocol.dataset)
-            != (
-                qualification_dataset()
-                if profile.qualification
-                else reviewed_dataset(expanded=profile.expanded, blocks=profile.blocks)
-            )
+            store.get(protocol.dataset) != _reviewed_local_dataset(profile)
             or protocol.source_method != "git_python_lf_v1"
         ):
             raise ValueError("multifamily plan does not pin the reviewed cases and source method")
@@ -225,11 +224,7 @@ def register(store, profile, *, mock=False):
     updates = {}
     if profile.uses_discovery:
         dataset = (
-            qualification_dataset()
-            if profile.qualification
-            else reviewed_dataset(expanded=profile.expanded, blocks=profile.blocks)
-            if profile.multifamily
-            else discovery_dataset(dataset)
+            _reviewed_local_dataset(profile) if profile.multifamily else discovery_dataset(dataset)
         )
         method = "git_python_lf_v1"
         source = provenance(ExperimentConfig(experimental_evaluator="1.7.0", source_method=method))
@@ -248,6 +243,7 @@ def register(store, profile, *, mock=False):
             max_output_tokens=256,
         )
     )
+    frozen_duration = profile.frozen_duration
     protocol = BenchmarkProtocol.model_validate_json(
         parent.model_copy(
             update=dict(
@@ -262,7 +258,9 @@ def register(store, profile, *, mock=False):
                 repetitions=1 if profile.qualification and not profile.multiblock else 2,
                 planned_pairs=profile.trials // 2 if not profile.smoke else 2,
                 intervention=(
-                    MULTIBLOCK_INTERVENTION
+                    CROSS_TEMPLATE_INTERVENTION
+                    if profile.cross_template
+                    else MULTIBLOCK_INTERVENTION
                     if profile.multiblock
                     else QUALIFICATION_INTERVENTION
                     if profile.qualification
@@ -275,7 +273,9 @@ def register(store, profile, *, mock=False):
                 model=ModelConfig(provider="ollama", model_id=TAG),
                 budgets=budgets,
                 hypothesis=(
-                    "Measure process-level resource stability across two genuine blocks."
+                    "Verify process isolation and evidence across four reviewed conditions."
+                    if profile.cross_template
+                    else "Measure process-level resource stability across two genuine blocks."
                     if profile.multiblock
                     else "Qualify genuine block execution and evidence reconstruction on one pair."
                     if profile.qualification
@@ -287,7 +287,9 @@ def register(store, profile, *, mock=False):
                     else "A local tool-calling model can attempt the existing development task."
                 ),
                 allocation_rationale=(
-                    "Two independent workers, one pair per worker, with opposite arm orders."
+                    "Four independent workers in reviewed case order with alternating arm order."
+                    if profile.cross_template
+                    else "Two independent workers, one pair per worker, with opposite arm orders."
                     if profile.multiblock
                     else "One pair with seed-selected arm order. No cross-pair counterbalancing."
                     if profile.qualification
@@ -340,14 +342,16 @@ def register(store, profile, *, mock=False):
         pricing=price,
         pricing_hash=digest(price.model_dump(mode="json")),
         run_deadline=(
-            protocol.created_at + timedelta(seconds=MULTIBLOCK_SECONDS)
-            if profile.multiblock
+            protocol.created_at + timedelta(seconds=frozen_duration)
+            if frozen_duration is not None
             else None
         ),
         limits=PilotLimits(
             total_calls=calls,
             calls_per_scenario=(
-                4 * profile.calls_per_trial
+                2 * profile.calls_per_trial
+                if profile.cross_template
+                else 4 * profile.calls_per_trial
                 if profile.multifamily and not profile.qualification
                 else calls
             ),
@@ -357,8 +361,8 @@ def register(store, profile, *, mock=False):
             total_tokens=calls * 4352,
             maximum_usd=Decimal(0),
             duration_seconds=(
-                MULTIBLOCK_SECONDS
-                if profile.multiblock
+                frozen_duration
+                if frozen_duration is not None
                 else 300
                 if profile.qualification
                 else 3600
@@ -417,6 +421,12 @@ def verify_discovery_arm(store, model, score, trial):
     }:
         raise ValueError("local identity or exclusive execution failed during the discovery study")
     profile = model.plan.model.local_profile
+    if profile.cross_template and (
+        terminal.get("status") == "budget_exhausted"
+        or terminal.get("reason")
+        in {"ollama_context_overflow", "ollama_context_or_output_exceeded", "model_timeout"}
+    ):
+        raise ValueError("cross-template execution stopped at a frozen context or budget bound")
     cap = case_limits(profile)[model.arm.scenario] if profile.multifamily else 1
     if score.unsafe is True or len(evidence["audits"]) > cap:
         raise ValueError("unsafe or repeated mutation observed during the discovery study")
@@ -426,6 +436,8 @@ def verify_discovery_arm(store, model, score, trial):
         if event["body"]["request"]["execution_id"] == evidence["execution_id"]
     }
     _verify_request(evidence, rows)
+    if profile.cross_template and any(row["state"] != "settled" for row in rows.values()):
+        raise ValueError("cross-template execution has an unsettled physical request")
 
 
 def reconstruct(store, receipt):
@@ -536,7 +548,9 @@ async def command(args):
                 hardware,
                 smoke=args.action == "smoke",
                 profile_version=(
-                    MULTIBLOCK_PROFILE
+                    CROSS_TEMPLATE_PROFILE
+                    if args.qualify_cross_template
+                    else MULTIBLOCK_PROFILE
                     if args.qualify_two_blocks
                     else QUALIFICATION_PROFILE
                     if args.qualify_single_pair
@@ -610,6 +624,7 @@ def main():
     profiles.add_argument("--expanded", action="store_true")
     profiles.add_argument("--qualify-single-pair", action="store_true")
     profiles.add_argument("--qualify-two-blocks", action="store_true")
+    profiles.add_argument("--qualify-cross-template", action="store_true")
 
     parser.add_argument("--digest")
     parser.add_argument("--receipt", type=Path)
@@ -617,7 +632,9 @@ def main():
     args = parser.parse_args()
     if (args.action == "block") != (args.block is not None):
         parser.error("--block is required only for the block action")
-    if (args.qualify_single_pair or args.qualify_two_blocks) and args.action != "freeze-blocks":
+    if (
+        args.qualify_single_pair or args.qualify_two_blocks or args.qualify_cross_template
+    ) and args.action != "freeze-blocks":
         parser.error("qualification profiles require freeze-blocks")
     if args.action in {"freeze-blocks", "block"} and any(
         (args.expanded, args.multifamily, args.ablation, args.discoverable)

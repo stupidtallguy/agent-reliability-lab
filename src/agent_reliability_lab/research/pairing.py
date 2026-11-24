@@ -3,6 +3,7 @@
 from agent_reliability_lab.adversarial.contracts import GuardFactors
 from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.research.benchmark_contracts import (
+    CROSS_TEMPLATE_INTERVENTION,
     MULTIBLOCK_INTERVENTION,
     MULTIFAMILY_INTERVENTION,
     QUALIFICATION_INTERVENTION,
@@ -43,6 +44,7 @@ def verify_pair(store, baseline_id, guarded_id, oracle_reference):
         MULTIFAMILY_INTERVENTION,
         QUALIFICATION_INTERVENTION,
         MULTIBLOCK_INTERVENTION,
+        CROSS_TEMPLATE_INTERVENTION,
     } and left_configuration == configs[1].get("configuration_id"):
         expected = [
             GuardFactors(

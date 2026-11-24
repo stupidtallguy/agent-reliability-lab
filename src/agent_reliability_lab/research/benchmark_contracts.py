@@ -20,6 +20,7 @@ FAMILIES = ("tool_use", "policy_resilience", "external_recovery")
 MULTIFAMILY_INTERVENTION = "guard_multifamily_v1"
 QUALIFICATION_INTERVENTION = "guard_single_pair_qualification_v1"
 MULTIBLOCK_INTERVENTION = "guard_multiblock_qualification_v1"
+CROSS_TEMPLATE_INTERVENTION = "guard_cross_template_qualification_v1"
 OUTCOMES = (
     "task_success",
     "attack_success",
@@ -181,6 +182,7 @@ class BenchmarkProtocol(Artifact):
         "guard_multifamily_v1",
         "guard_single_pair_qualification_v1",
         "guard_multiblock_qualification_v1",
+        "guard_cross_template_qualification_v1",
     ] = "task_scope_and_observation_framing_v1"
     model: ModelConfig
     transport: Literal["memory", "stdio"] = "memory"
@@ -198,15 +200,20 @@ class BenchmarkProtocol(Artifact):
     @model_validator(mode="after")
     def valid_plan(self) -> Self:
         qualification = self.intervention == QUALIFICATION_INTERVENTION
+        cross_template = self.intervention == CROSS_TEMPLATE_INTERVENTION
+        scenario_counts = (
+            (4, 10)
+            if self.intervention == MULTIFAMILY_INTERVENTION
+            else (4 if cross_template else 1,)
+        )
         if len(set(self.scenarios)) != len(self.scenarios):
             raise ValueError("select unique development scenarios")
         if self.mode == "synthetic_exploratory" and set(self.scripts) != set(self.scenarios):
             raise ValueError("select unique scenarios with exactly one script per scenario")
         if self.mode == "provider_development_exploratory" and (
             self.scripts
-            or len(self.scenarios)
-            not in ((4, 10) if self.intervention == MULTIFAMILY_INTERVENTION else (1,))
-            or self.repetitions != (1 if qualification else 2)
+            or len(self.scenarios) not in scenario_counts
+            or self.repetitions != (1 if qualification or cross_template else 2)
             or self.model.provider not in {"openai", "groq", "ollama"}
         ):
             raise ValueError(
@@ -218,6 +225,7 @@ class BenchmarkProtocol(Artifact):
         if (
             factorial
             or qualification
+            or cross_template
             or self.intervention in {MULTIFAMILY_INTERVENTION, MULTIBLOCK_INTERVENTION}
         ) and (self.model.provider != "ollama" or self.mode != "provider_development_exploratory"):
             raise ValueError("guard ablation is available only to local development")
