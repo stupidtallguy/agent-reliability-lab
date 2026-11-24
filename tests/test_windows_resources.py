@@ -1,4 +1,6 @@
+import asyncio
 import json
+from threading import Event
 
 from agent_reliability_lab.research import windows_resources
 from agent_reliability_lab.research.windows_resources import ProcessTracker
@@ -62,3 +64,13 @@ def test_inaccessible_windows_metrics_normalize_to_unknown(monkeypatch):
     (row,) = windows_resources.process_inventory()
     assert row["working_set_bytes"] is None
     assert row["private_bytes"] == 0
+
+
+def test_observer_samples_before_the_async_load_completes():
+    reached = Event()
+
+    async def load():
+        assert await asyncio.to_thread(reached.wait, 2)
+        return "loaded"
+
+    assert asyncio.run(windows_resources.observe_during(load(), reached.set)) == "loaded"

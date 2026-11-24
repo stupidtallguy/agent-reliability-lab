@@ -74,7 +74,7 @@ def _safe(sample, floor=MEMORY_FLOOR):
 
 
 def _admission_floor(plan):
-    return QUALIFICATION_START_MEMORY if plan.model.local_profile.multiblock else MEMORY_FLOOR
+    return QUALIFICATION_START_MEMORY if plan.run_deadline is not None else MEMORY_FLOOR
 
 
 def _run_identity(plan_ref):
@@ -266,7 +266,7 @@ async def execute_block(store, plan_ref, block, *, local_opt_in=False, transport
         raise ValueError("prior blocks must complete before this block")
     if (
         plan.model.local_profile.qualification
-        and not plan.model.local_profile.multiblock
+        and plan.run_deadline is None
         and ((headroom := _sample(probe)) is None or headroom < QUALIFICATION_START_MEMORY)
     ):
         raise ValueError("qualification requires at least 2 GiB available RAM before starting")

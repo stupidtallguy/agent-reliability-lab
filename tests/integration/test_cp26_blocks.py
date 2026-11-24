@@ -24,6 +24,7 @@ from agent_reliability_lab.research.contracts import Reference
 from agent_reliability_lab.research.multifamily import reviewed_dataset
 from agent_reliability_lab.research.ollama import (
     BLOCK_PROFILE,
+    CROSS_TEMPLATE_PROFILE,
     MULTIBLOCK_PROFILE,
     QUALIFICATION_PROFILE,
     register,
@@ -141,6 +142,83 @@ def multiblock(store, original):
 
 def block_command(store, ref, number):
     return [sys.executable, __file__, "block", store.scope, ref.model_dump_json(), str(number)]
+
+
+def test_cross_template_uses_reviewed_cases_and_complete_evidence(plan):
+    store, original = plan
+    profile = store.get(original).model.local_profile.model_copy(
+        update={"version": CROSS_TEMPLATE_PROFILE}
+    )
+    ref = register(store, profile, mock=True)
+    frozen = store.get(ref)
+    protocol = store.get(frozen.protocol)
+    assert store.get(protocol.dataset) == reviewed_dataset(blocks=True)
+    assert protocol.repetitions == 1
+    assert frozen.limits.total_calls == 56 and frozen.limits.calls_per_scenario == 14
+    assert frozen.limits.duration_seconds == 1200
+    with pytest.raises(ValueError, match="prior blocks"):
+        run(store, ref, 2)
+    for number in range(1, 5):
+        assert run(store, ref, number, probe=lambda: 4 * FLOOR)["status"] == "block_complete"
+    report = read(store, ref)
+    assert report["status"] == "complete"
+    assert [p["allocation"]["scenario_id"] for p in report["pairs"]] == protocol.scenarios
+    assert [p["allocation"]["order"] for p in report["pairs"]] == [
+        ["guarded", "baseline"],
+        ["baseline", "guarded"],
+        ["guarded", "baseline"],
+        ["baseline", "guarded"],
+    ]
+    assert all(p["comparison"] == "verified" for p in report["pairs"])
+    assert all(
+        a["capture"]["measurements"]["task_success"]["value"] is True
+        for p in report["pairs"]
+        for a in p["arms"].values()
+    )
+    assert len({a["trial_id"] for p in report["pairs"] for a in p["arms"].values()}) == 8
+    for arm in report["pairs"][1]["arms"].values():
+        score = store.evaluations.scores(arm["trial_id"])[0]
+        assert score.experimental["verified_attack_exposure"] is True
+    for arm in report["pairs"][2]["arms"].values():
+        measurement = arm["capture"]["measurements"]["attack_success"]
+        assert measurement["status"] == "not_applicable"
+    for arm in report["pairs"][3]["arms"].values():
+        assert arm["recovery_diagnostic"]["information_recovered"] is True
+        assert arm["recovery_diagnostic"]["model_corrective_write"] is True
+    with store.engine.connect() as conn:
+        deadline = conn.scalar(
+            sa.select(ledgers.c.deadline).where(ledgers.c.ledger_id == frozen.ledger_id)
+        )
+    assert deadline == frozen.run_deadline
+
+
+def test_cross_template_context_stop_precludes_replay(plan):
+    store, original = plan
+    profile = store.get(original).model.local_profile.model_copy(
+        update={"version": CROSS_TEMPLATE_PROFILE}
+    )
+    ref = register(store, profile, mock=True)
+    control = mock_ollama()
+
+    async def exceed_context(request):
+        if request.url.path == "/api/chat":
+            return httpx2.Response(400, json={"error": "context window exceeded"})
+        return await control.handle_async_request(request)
+
+    with pytest.raises(ValueError, match="frozen context or budget"):
+        run(
+            store,
+            ref,
+            probe=lambda: 4 * FLOOR,
+            transport=httpx2.MockTransport(exceed_context),
+        )
+    partial = read(store, ref)
+    assert partial["status"] == "interrupted_or_active"
+    assert len(partial["progress"]) == 1
+    first = partial["pairs"][0]["arms"]["guarded"]
+    assert "uncheckpointed_capture" in first
+    assert run(store, ref, probe=lambda: 4 * FLOOR)["status"] == "stopped"
+    assert read(store, ref) == partial
 
 
 def test_multiblock_uses_one_frozen_deadline_across_processes(plan, monkeypatch):

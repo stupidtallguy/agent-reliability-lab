@@ -1,5 +1,6 @@
 """Read-only Windows process and memory observations for local qualifications."""
 
+import asyncio
 import ctypes
 import json
 import subprocess
@@ -218,3 +219,17 @@ def sample(tracker, phase):
         "gpu_devices": gpu_memory(),
         "finished_at": datetime.now(UTC).isoformat(),
     }
+
+
+async def observe_during(operation, observe):
+    """Collect snapshots during an asynchronous load without blocking its transport."""
+    task = asyncio.create_task(operation)
+    try:
+        while not task.done():
+            await asyncio.to_thread(observe)
+            await asyncio.wait({task}, timeout=0.25)
+        return task.result()
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

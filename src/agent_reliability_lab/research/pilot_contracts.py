@@ -24,6 +24,7 @@ GROQ_CONTEXT = 131_072
 GROQ_QUALIFICATION_INPUT = 256
 GROQ_QUALIFICATION_OUTPUT = 256
 MULTIBLOCK_SECONDS = 600
+CROSS_TEMPLATE_SECONDS = 1200
 
 
 class OllamaProfile(Contract):
@@ -36,6 +37,7 @@ class OllamaProfile(Contract):
         "local-ollama-blocks-1",
         "local-ollama-qualification-1",
         "local-ollama-multiblock-1",
+        "local-ollama-cross-template-1",
     ] = "local-ollama-1"
     tag: Literal["qwen3.5:4b"] = "qwen3.5:4b"
     endpoint: Literal["http://127.0.0.1:11434"] = "http://127.0.0.1:11434"
@@ -69,11 +71,21 @@ class OllamaProfile(Contract):
 
     @property
     def qualification(self) -> bool:
-        return self.version == "local-ollama-qualification-1" or self.multiblock
+        return self.version == "local-ollama-qualification-1" or self.frozen_duration is not None
 
     @property
     def multiblock(self) -> bool:
         return self.version == "local-ollama-multiblock-1"
+
+    @property
+    def cross_template(self) -> bool:
+        return self.version == "local-ollama-cross-template-1"
+
+    @property
+    def frozen_duration(self) -> int | None:
+        if self.cross_template:
+            return CROSS_TEMPLATE_SECONDS
+        return MULTIBLOCK_SECONDS if self.multiblock else None
 
     @property
     def expanded(self) -> bool:
@@ -89,6 +101,8 @@ class OllamaProfile(Contract):
 
     @property
     def trials(self) -> int:
+        if self.cross_template:
+            return 8
         if self.multiblock:
             return 4
         if self.qualification:
@@ -182,8 +196,9 @@ class PilotPlan(Artifact):
             raise ValueError("pricing and model configuration differ")
         rates = (price.input_rate, price.cached_input_rate or Decimal(0), price.output_rate)
         local = self.mode in {"ollama_local", "ollama_mock"}
-        multiblock = bool(self.model.local_profile and self.model.local_profile.multiblock)
-        if (self.run_deadline is not None) != multiblock:
+        profile = self.model.local_profile
+        frozen_duration = profile.frozen_duration if profile else None
+        if (self.run_deadline is not None) != (frozen_duration is not None):
             raise ValueError("only multiblock plans require a frozen run deadline")
         if local != (self.model.provider == "ollama"):
             raise ValueError("local plan and model must agree")
@@ -203,11 +218,16 @@ class PilotPlan(Artifact):
             ):
                 raise ValueError("invalid local development budget")
             if profile.qualification and (
-                self.limits.calls_per_scenario != self.limits.total_calls
+                self.limits.calls_per_scenario
+                != (
+                    2 * profile.calls_per_trial
+                    if profile.cross_template
+                    else self.limits.total_calls
+                )
                 or self.limits.total_tokens != self.limits.total_calls * 4352
-                or self.limits.duration_seconds != (MULTIBLOCK_SECONDS if multiblock else 300)
-                or multiblock
-                and self.run_deadline != self.created_at + timedelta(seconds=MULTIBLOCK_SECONDS)
+                or self.limits.duration_seconds != (frozen_duration or 300)
+                or frozen_duration is not None
+                and self.run_deadline != self.created_at + timedelta(seconds=frozen_duration)
             ):
                 raise ValueError("invalid local qualification budget")
         elif self.model.provider == "groq":

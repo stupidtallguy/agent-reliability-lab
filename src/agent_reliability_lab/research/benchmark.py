@@ -21,6 +21,7 @@ from agent_reliability_lab.evaluation.runner import (
 from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.platform.demo import assets, case_path
 from agent_reliability_lab.research.benchmark_contracts import (
+    CROSS_TEMPLATE_INTERVENTION,
     FAMILIES,
     MULTIBLOCK_INTERVENTION,
     MULTIFAMILY_INTERVENTION,
@@ -162,11 +163,15 @@ def schedule(dataset, protocol):
     if dataset.benchmark_version != protocol.benchmark_version:
         raise ValueError("dataset and protocol benchmark versions differ")
     slots = []
-    for scenario_id in protocol.scenarios:
+    for slot_index, scenario_id in enumerate(protocol.scenarios):
         spec = catalog.get(scenario_id)
         if spec is None or spec.partition != "development":
             raise ValueError("CP12 execution requires a frozen development scenario")
-        flip = int(digest([protocol.order_seed, scenario_id])[-1], 16) % 2
+        flip = (
+            (slot_index + 1) % 2
+            if protocol.intervention == CROSS_TEMPLATE_INTERVENTION
+            else int(digest([protocol.order_seed, scenario_id])[-1], 16) % 2
+        )
         orders = (
             factorial_orders(protocol.order_seed)
             if protocol.intervention == INTERVENTION
@@ -334,6 +339,7 @@ def _config(protocol, spec, arm, pairing_id, slot=None):
         MULTIFAMILY_INTERVENTION,
         QUALIFICATION_INTERVENTION,
         MULTIBLOCK_INTERVENTION,
+        CROSS_TEMPLATE_INTERVENTION,
     }:
         enabled = arm == "guarded"
         factors = GuardFactors(
