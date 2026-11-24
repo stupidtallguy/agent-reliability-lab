@@ -92,6 +92,7 @@ def _pacing_wait(history, request, pacing, now):
 class PilotBudgetBroker:
     def __init__(self, engine, scope, plan, *, authorization=None, local_opt_in=False):
         self.local_opt_in = local_opt_in
+        self.run_deadline = plan.run_deadline
         self.engine, self.scope = engine, scope
         self.ledger_id = plan.ledger_id
         self.plan_hash = digest(plan.model_dump(mode="json"))
@@ -172,7 +173,9 @@ class PilotBudgetBroker:
             authority = self._authorize(connection, plan.mode)
             now = self._now(connection)
             price = plan.pricing.prices[0]
-            deadline = now + timedelta(seconds=plan.limits.duration_seconds)
+            deadline = plan.run_deadline or now + timedelta(seconds=plan.limits.duration_seconds)
+            if deadline <= now:
+                raise BudgetExceeded("pilot_experiment_deadline")
             if authority is not None:
                 deadline = min(deadline, authority.deadline)
             if now < price.effective_from or (
@@ -216,6 +219,8 @@ class PilotBudgetBroker:
             raise ValueError("unknown or conflicting pilot ledger identity")
         if digest(row["plan"]) != self.plan_hash:
             raise ValueError("pilot ledger plan integrity mismatch")
+        if self.run_deadline is not None and row["deadline"] != self.run_deadline:
+            raise ValueError("pilot ledger deadline differs from the frozen plan")
         return row
 
     def _admit(self, connection, ledger):

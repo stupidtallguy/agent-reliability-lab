@@ -1,9 +1,10 @@
 """CP15 contracts for a development-only provider pilot and budget ledger."""
 
+from datetime import timedelta
 from decimal import Decimal
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 
 from agent_reliability_lab.adversarial.contracts import GuardFactors
 from agent_reliability_lab.benchmarks.scenario import Contract, Identifier
@@ -22,6 +23,7 @@ GROQ_PILOT_CALLS = 16
 GROQ_CONTEXT = 131_072
 GROQ_QUALIFICATION_INPUT = 256
 GROQ_QUALIFICATION_OUTPUT = 256
+MULTIBLOCK_SECONDS = 600
 
 
 class OllamaProfile(Contract):
@@ -33,6 +35,7 @@ class OllamaProfile(Contract):
         "local-ollama-expanded-1",
         "local-ollama-blocks-1",
         "local-ollama-qualification-1",
+        "local-ollama-multiblock-1",
     ] = "local-ollama-1"
     tag: Literal["qwen3.5:4b"] = "qwen3.5:4b"
     endpoint: Literal["http://127.0.0.1:11434"] = "http://127.0.0.1:11434"
@@ -54,11 +57,10 @@ class OllamaProfile(Contract):
 
     @property
     def multifamily(self) -> bool:
-        return self.version in {
+        return self.qualification or self.version in {
             "local-ollama-multifamily-1",
             "local-ollama-expanded-1",
             "local-ollama-blocks-1",
-            "local-ollama-qualification-1",
         }
 
     @property
@@ -67,7 +69,11 @@ class OllamaProfile(Contract):
 
     @property
     def qualification(self) -> bool:
-        return self.version == "local-ollama-qualification-1"
+        return self.version == "local-ollama-qualification-1" or self.multiblock
+
+    @property
+    def multiblock(self) -> bool:
+        return self.version == "local-ollama-multiblock-1"
 
     @property
     def expanded(self) -> bool:
@@ -83,6 +89,8 @@ class OllamaProfile(Contract):
 
     @property
     def trials(self) -> int:
+        if self.multiblock:
+            return 4
         if self.qualification:
             return 2
         if self.expanded:
@@ -158,6 +166,7 @@ class PilotPlan(Artifact):
     pricing: PriceBook
     pricing_hash: Hash
     limits: PilotLimits
+    run_deadline: AwareDatetime | None = Field(default=None, exclude_if=lambda value: value is None)
     fixture_fault: Literal["none", "first_dispatch_timeout", "first_usage_missing"] = "none"
 
     @model_validator(mode="after")
@@ -173,6 +182,9 @@ class PilotPlan(Artifact):
             raise ValueError("pricing and model configuration differ")
         rates = (price.input_rate, price.cached_input_rate or Decimal(0), price.output_rate)
         local = self.mode in {"ollama_local", "ollama_mock"}
+        multiblock = bool(self.model.local_profile and self.model.local_profile.multiblock)
+        if (self.run_deadline is not None) != multiblock:
+            raise ValueError("only multiblock plans require a frozen run deadline")
         if local != (self.model.provider == "ollama"):
             raise ValueError("local plan and model must agree")
         if local:
@@ -193,9 +205,11 @@ class PilotPlan(Artifact):
             if profile.qualification and (
                 self.limits.calls_per_scenario != self.limits.total_calls
                 or self.limits.total_tokens != self.limits.total_calls * 4352
-                or self.limits.duration_seconds != 300
+                or self.limits.duration_seconds != (MULTIBLOCK_SECONDS if multiblock else 300)
+                or multiblock
+                and self.run_deadline != self.created_at + timedelta(seconds=MULTIBLOCK_SECONDS)
             ):
-                raise ValueError("invalid single-pair qualification budget")
+                raise ValueError("invalid local qualification budget")
         elif self.model.provider == "groq":
             if (
                 self.mode not in {"future_live_requested", "groq_qualification"}

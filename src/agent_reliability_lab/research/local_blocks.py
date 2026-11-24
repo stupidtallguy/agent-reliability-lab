@@ -69,8 +69,12 @@ def _sample(probe):
     return value if type(value) is int and value >= 0 else None
 
 
-def _safe(sample):
-    return sample is not None and sample >= MEMORY_FLOOR
+def _safe(sample, floor=MEMORY_FLOOR):
+    return sample is not None and sample >= floor
+
+
+def _admission_floor(plan):
+    return QUALIFICATION_START_MEMORY if plan.model.local_profile.multiblock else MEMORY_FLOOR
 
 
 def _run_identity(plan_ref):
@@ -112,7 +116,7 @@ def _layout(slots):
     return [(slot["slot"], arm) for slot in slots for arm in slot["order"]]
 
 
-def _state(events, slots, run_ref):
+def _state(events, slots, run_ref, admission_floor=MEMORY_FLOOR):
     layout = _layout(slots)
     captured = {}
     claim = None
@@ -127,14 +131,20 @@ def _state(events, slots, run_ref):
             or key != layout[len(captured)]
         ):
             raise ValueError("block progress differs from the frozen allocation")
-        if event.action == "claim" and claim is None and _safe(event.available_bytes):
+        if (
+            event.action == "claim"
+            and claim is None
+            and _safe(event.available_bytes, admission_floor)
+        ):
             claim = event
         elif event.action == "capture" and claim is not None:
             if event.available_bytes is not None or event.report_id in captured.values():
                 raise ValueError("block capture must pin one distinct evaluator report")
             captured[key] = event.report_id
             claim = None
-        elif event.action == "memory_stop" and not _safe(event.available_bytes):
+        elif event.action == "memory_stop" and not _safe(
+            event.available_bytes, MEMORY_FLOOR if claim else admission_floor
+        ):
             stop = event
         else:
             raise ValueError("invalid block progress transition")
@@ -156,11 +166,11 @@ def _verified_arm(store, run, protocol, slot, name, case, report_id):
 
 def validate_event(store, event):
     run = store.get(event.run)
-    _plan(store, run.pilot)
+    plan = _plan(store, run.pilot)
     if run.identity != _run_identity(run.pilot):
         raise ValueError("block run must have its unique plan-derived identity")
     protocol, _, slots, catalog = run_inputs(store, run)
-    _state([*_events(store, run), event], slots, event.run)
+    _state([*_events(store, run), event], slots, event.run, _admission_floor(plan))
     if event.action == "capture":
         slot = next(s for s in slots if s["slot"] == event.slot)
         _verified_arm(
@@ -245,7 +255,8 @@ async def execute_block(store, plan_ref, block, *, local_opt_in=False, transport
         store.append(run)
     ref = store.reference(run)
     events = _events(store, run)
-    captured, active, stopped = _state(events, slots, ref)
+    floor = _admission_floor(plan)
+    captured, active, stopped = _state(events, slots, ref, floor)
     slot = slots[block - 1]
     if all((slot["slot"], name) in captured for name in slot["order"]):
         return {"status": "block_complete", "block": block, "run": ref.model_dump(mode="json")}
@@ -253,8 +264,10 @@ async def execute_block(store, plan_ref, block, *, local_opt_in=False, transport
         return {"status": "stopped", "block": block, "run": ref.model_dump(mode="json")}
     if len(captured) != (block - 1) * 2:
         raise ValueError("prior blocks must complete before this block")
-    if plan.model.local_profile.qualification and (
-        (headroom := _sample(probe)) is None or headroom < QUALIFICATION_START_MEMORY
+    if (
+        plan.model.local_profile.qualification
+        and not plan.model.local_profile.multiblock
+        and ((headroom := _sample(probe)) is None or headroom < QUALIFICATION_START_MEMORY)
     ):
         raise ValueError("qualification requires at least 2 GiB available RAM before starting")
     factory = None
@@ -266,13 +279,13 @@ async def execute_block(store, plan_ref, block, *, local_opt_in=False, transport
         path.write_text(case.case.model_dump_json(), encoding="utf-8")
         for arm in slot["order"]:
             memory = _sample(probe)
-            if not _safe(memory):
+            if not _safe(memory, floor):
                 _record(store, run, number, slot, arm, "memory_stop", memory=memory)
                 return {"status": "stopped", "block": block, "run": ref.model_dump(mode="json")}
             if factory is None:
                 factory = await open_local(store, plan, plan.protocol, transport)
                 memory = _sample(probe)
-                if not _safe(memory):
+                if not _safe(memory, floor):
                     _record(store, run, number, slot, arm, "memory_stop", memory=memory)
                     return {"status": "stopped", "block": block, "run": ref.model_dump(mode="json")}
             _record(store, run, number, slot, arm, "claim", memory=memory)
@@ -339,7 +352,7 @@ def reconstruct_blocks(store, plan_ref):
     if run is not None:
         ref = store.reference(run)
         progress = _events(store, run)
-        captured, pending, stop = _state(progress, slots, ref)
+        captured, pending, stop = _state(progress, slots, ref, _admission_floor(plan))
         records = _persisted_arms(store, run)
         with store.engine.connect() as conn:
             if sa.inspect(conn).has_table(ledgers.name, schema=ledgers.schema):

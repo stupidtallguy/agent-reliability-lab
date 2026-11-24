@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 
 import pytest
 from pydantic import ValidationError
@@ -39,7 +40,8 @@ def test_endpoint_is_exact(url):
         profile(endpoint=url)
 
 
-def test_exclusive_slot():
+def test_exclusive_slot(monkeypatch, tmp_path):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     with inference_slot(), pytest.raises(ModelFailure, match="busy"), inference_slot():
         pytest.fail("second caller acquired an active inference slot")
 

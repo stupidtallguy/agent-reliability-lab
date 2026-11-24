@@ -5,7 +5,7 @@ import json
 import re
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import httpx2
@@ -224,7 +224,8 @@ class OllamaModel(BoundPilotModel):
         )
         # Reserve the full native context. UTF-8 wire bytes are not tokenizer observations.
         request = request.model_copy(update={"estimated_input_tokens": None})
-        with inference_slot():
+        # Only the exact in-memory transport bypasses the real endpoint's machine lock.
+        with nullcontext() if self.is_mock else inference_slot():
             async with client(self.transport) as http:
                 try:
                     observed_profile = await identity(

@@ -22,6 +22,7 @@ from agent_reliability_lab.opsdesk.fixtures import digest
 from agent_reliability_lab.platform.demo import assets, case_path
 from agent_reliability_lab.research.benchmark_contracts import (
     FAMILIES,
+    MULTIBLOCK_INTERVENTION,
     MULTIFAMILY_INTERVENTION,
     QUALIFICATION_INTERVENTION,
     BenchmarkCase,
@@ -329,7 +330,11 @@ def _config(protocol, spec, arm, pairing_id, slot=None):
     factors = None
     if protocol.intervention == INTERVENTION:
         factors = GuardFactors.model_validate(slot["factors"][arm])
-    if protocol.intervention in {MULTIFAMILY_INTERVENTION, QUALIFICATION_INTERVENTION}:
+    if protocol.intervention in {
+        MULTIFAMILY_INTERVENTION,
+        QUALIFICATION_INTERVENTION,
+        MULTIBLOCK_INTERVENTION,
+    }:
         enabled = arm == "guarded"
         factors = GuardFactors(
             system_policy=enabled, observation_framing=enabled, task_scope_filter=enabled
